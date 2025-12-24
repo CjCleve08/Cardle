@@ -62,6 +62,37 @@ function getAllCards() {
 
 const ALL_CARDS = getAllCards();
 
+// Deck Management
+const DECK_STORAGE_KEY = 'cardle_player_deck';
+const DECK_SIZE = 7;
+
+function getPlayerDeck() {
+    const stored = localStorage.getItem(DECK_STORAGE_KEY);
+    if (stored) {
+        try {
+            const deck = JSON.parse(stored);
+            // Validate deck - ensure all cards still exist
+            const allCardIds = getAllCards().map(c => c.id);
+            return deck.filter(cardId => allCardIds.includes(cardId));
+        } catch (e) {
+            console.error('Error loading deck:', e);
+        }
+    }
+    // Default deck: first 7 cards (or all if less than 7)
+    const defaultDeck = getAllCards().slice(0, Math.min(DECK_SIZE, getAllCards().length));
+    return defaultDeck.map(c => c.id);
+}
+
+function savePlayerDeck(deck) {
+    localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(deck));
+}
+
+function getDeckCards() {
+    const deckIds = getPlayerDeck();
+    const allCards = getAllCards();
+    return deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
+}
+
 // DOM Elements
 const screens = {
     lobby: document.getElementById('lobby'),
@@ -132,8 +163,8 @@ socket.on('cardSelected', (data) => {
         } else {
             // Final card in chain - hide selection and show board
             cardChainActive = false; // Clear flag
-            hideCardSelection();
-            showGameBoard();
+        hideCardSelection();
+        showGameBoard();
         }
     }
 });
@@ -226,8 +257,8 @@ socket.on('guessSubmitted', (data) => {
             console.log('Your guess was hidden by Gambler\'s Card!');
         } else {
             // Normal display
-            displayGuess(data.guess, data.feedback, data.row);
-            updateKeyboard({ guess: data.guess, feedback: data.feedback });
+        displayGuess(data.guess, data.feedback, data.row);
+        updateKeyboard({ guess: data.guess, feedback: data.feedback });
         }
     } else {
         // This is opponent's guess
@@ -248,8 +279,8 @@ socket.on('guessSubmitted', (data) => {
             // Only update keyboard if it's not all absent (hidden feedback)
             if (!data.feedback.every(f => f === 'absent')) {
             updateKeyboard({ guess: data.guess, feedback: data.feedback });
-            }
         }
+    }
     }
     // Don't increment currentRow here - it's managed by the server via data.row
 });
@@ -263,6 +294,94 @@ socket.on('letterRevealed', (data) => {
     );
     console.log('Letter revealed:', data.letter, 'at position', data.position + 1);
 });
+
+socket.on('requestHand', (data) => {
+    // Opponent is requesting to see our hand (Hand Reveal card)
+    // Ensure we have cards in hand - generate them if needed
+    if (!window.playerCardHand || window.playerCardHand.length < 3) {
+        // Initialize deck pool if needed
+        if (!window.deckPool || window.deckPool.length === 0) {
+            initializeDeckPool();
+        }
+        
+        // Draw cards to fill hand
+        if (!window.playerCardHand) {
+            window.playerCardHand = [];
+        }
+        while (window.playerCardHand.length < 3) {
+            const newCard = drawCardFromDeck();
+            window.playerCardHand.push(newCard);
+        }
+    }
+    
+    // Send current hand to server (up to 3 cards)
+    const handToSend = window.playerCardHand.slice(0, 3).map(card => ({
+        id: card.id,
+        title: card.title,
+        description: card.description
+    }));
+    
+    socket.emit('sendHand', {
+        gameId: data.gameId,
+        requesterId: data.requesterId,
+        cards: handToSend
+    });
+});
+
+socket.on('opponentHandRevealed', (data) => {
+    // Display opponent's hand that was revealed
+    displayOpponentHand(data.cards, data.opponentName);
+});
+
+function displayOpponentHand(cards, opponentName) {
+    const overlay = document.getElementById('handRevealOverlay');
+    const cardsContainer = document.getElementById('handRevealCards');
+    const button = document.getElementById('handRevealButton');
+    
+    if (!overlay || !cardsContainer || !button) {
+        console.error('Hand reveal elements not found');
+        return;
+    }
+    
+    // Clear previous cards
+    cardsContainer.innerHTML = '';
+    
+    // Display each card
+    if (cards && cards.length > 0) {
+        cards.forEach((card, index) => {
+            const cardElement = document.createElement('div');
+            cardElement.className = 'hand-reveal-card';
+            cardElement.style.animationDelay = `${index * 0.1}s`;
+            cardElement.innerHTML = `
+                <div class="hand-reveal-card-title">${card.title}</div>
+                <div class="hand-reveal-card-description">${card.description}</div>
+            `;
+            cardsContainer.appendChild(cardElement);
+        });
+    } else {
+        // No cards in hand
+        const noCardsMsg = document.createElement('div');
+        noCardsMsg.style.cssText = 'color: #d7dadc; font-size: 1.1rem; padding: 20px;';
+        noCardsMsg.textContent = 'Opponent has no cards in hand';
+        cardsContainer.appendChild(noCardsMsg);
+    }
+    
+    // Show overlay
+    overlay.classList.remove('show', 'hiding');
+    void overlay.offsetWidth; // Force reflow
+    overlay.classList.add('show');
+    
+    // Close handler
+    const closeHandReveal = () => {
+        overlay.classList.add('hiding');
+        setTimeout(() => {
+            overlay.classList.remove('show', 'hiding');
+        }, 300);
+        button.removeEventListener('click', closeHandReveal);
+    };
+    
+    button.addEventListener('click', closeHandReveal);
+}
 
 socket.on('gameOver', (data) => {
     showScreen('gameOver');
@@ -317,8 +436,9 @@ function updatePlayersList(players) {
 
 function initializeGame(data) {
     currentRow = 0;
-    // Reset card hand for new game
+    // Reset card hand and initialize deck pool for new game
     window.playerCardHand = [];
+    initializeDeckPool();
     createBoard();
     createKeyboard();
     updateTurnIndicator();
@@ -480,8 +600,34 @@ function showCardSelection() {
     const cardSelection = document.getElementById('cardSelection');
     if (cardSelection) {
         cardSelection.style.display = 'flex';
-    generateCards();
         console.log('Card selection shown');
+        
+        // Check if player is card locked
+        if (isCardLocked()) {
+            // Show a message that cards are locked
+            const cardsContainer = document.getElementById('cardsContainer');
+            if (cardsContainer) {
+                const lockMessage = document.createElement('div');
+                lockMessage.id = 'cardLockMessage';
+                lockMessage.style.cssText = 'text-align: center; padding: 20px; color: #ff6b6b; font-weight: bold; font-size: 18px;';
+                lockMessage.textContent = '🔒 Card Locked - You cannot use a card this turn!';
+                cardsContainer.innerHTML = '';
+                cardsContainer.appendChild(lockMessage);
+            }
+            
+            // Automatically hide card selection after 2.5 seconds so player can make a guess
+            setTimeout(() => {
+                hideCardSelection();
+                // Ensure game board and input are visible and enabled
+                showGameBoard();
+                const wordInput = document.getElementById('wordInput');
+                if (wordInput) {
+                    wordInput.disabled = false;
+                }
+            }, 2500);
+        } else {
+            generateCards();
+        }
     } else {
         console.error('cardSelection element not found!');
     }
@@ -499,20 +645,49 @@ function showGameBoard() {
     document.getElementById('gameBoard').style.display = 'block';
 }
 
+// Deck cycling system (like Clash Royale)
+function initializeDeckPool() {
+    const deckCards = getDeckCards();
+    // Create a shuffled pool of deck cards
+    window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
+    window.playerCardHand = [];
+}
+
+function drawCardFromDeck() {
+    // If deck pool is empty, reshuffle
+    if (!window.deckPool || window.deckPool.length === 0) {
+        const deckCards = getDeckCards();
+        window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
+    }
+    
+    // Draw a card from the pool
+    if (window.deckPool.length > 0) {
+        return window.deckPool.shift();
+    }
+    
+    // Fallback (shouldn't happen)
+    const deckCards = getDeckCards();
+    return deckCards[0];
+}
+
 function generateCards() {
     const container = document.getElementById('cardsContainer');
     container.innerHTML = '';
+    
+    // Initialize deck pool if not exists
+    if (!window.deckPool || window.deckPool.length === 0) {
+        initializeDeckPool();
+    }
     
     // Get or initialize player's card hand
     if (!window.playerCardHand) {
         window.playerCardHand = [];
     }
     
-    // If hand is empty or has less than 3 cards, refill from deck
-    if (window.playerCardHand.length < 3) {
-        // Shuffle all cards and add to hand
-        const shuffled = [...getAllCards()].sort(() => Math.random() - 0.5);
-        window.playerCardHand = shuffled.slice(0, 3);
+    // If hand is empty or has less than 3 cards, draw from deck
+    while (window.playerCardHand.length < 3) {
+        const newCard = drawCardFromDeck();
+        window.playerCardHand.push(newCard);
     }
     
     // If we're in a card chain, filter out modifier cards that are already in the chain
@@ -529,18 +704,13 @@ function generateCards() {
         availableCards = availableCards.filter(c => 
             !isModifierCard(c.id) || !cardsInChain.includes(c.id)
         );
-        
-        // If we filtered out cards and have less than 3, add replacements
-        if (availableCards.length < 3) {
-            const allNonChainCards = getAllCards().filter(c => 
-                !cardsInChain.includes(c.id) && 
-                !window.playerCardHand.some(handCard => handCard.id === c.id)
-            );
-            while (availableCards.length < 3 && allNonChainCards.length > 0) {
-                const replacementCard = allNonChainCards.splice(
-                    Math.floor(Math.random() * allNonChainCards.length), 
-                    1
-                )[0];
+    
+        // If we filtered out cards and have less than 3, add replacements from deck
+        while (availableCards.length < 3) {
+            const replacementCard = drawCardFromDeck();
+            // Make sure it's not already in hand and not in chain
+            if (!window.playerCardHand.some(handCard => handCard.id === replacementCard.id) &&
+                (!isModifierCard(replacementCard.id) || !cardsInChain.includes(replacementCard.id))) {
                 availableCards.push(replacementCard);
             }
         }
@@ -562,6 +732,12 @@ function generateCards() {
 }
 
 function selectCard(card, cardElement) {
+    // Check if player is card locked
+    if (isCardLocked()) {
+        showGameMessage('Card Locked', 'You cannot use a card this turn!', '🔒');
+        return;
+    }
+    
     selectedCard = card;
     document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
     cardElement.classList.add('selected');
@@ -581,45 +757,50 @@ function selectCard(card, cardElement) {
         hidden: isInChain // Mark as hidden if we're in a chain
     });
     
-    // Remove the selected card from hand and add a new random card
+    // Remove the selected card from hand and draw a new card from deck
     // (Do this for both hideCard and the second card)
     if (window.playerCardHand) {
         const cardIndex = window.playerCardHand.findIndex(c => c.id === card.id);
         if (cardIndex !== -1) {
             window.playerCardHand.splice(cardIndex, 1);
             
-            // Get a random card that's not already in hand
-            // If we're in a card chain, exclude modifier cards already in chain
-            let availableCards = getAllCards().filter(c => 
-                !window.playerCardHand.some(handCard => handCard.id === c.id)
-            );
+            // Draw a new card from the deck pool
+            // If we're in a card chain, make sure we don't draw a modifier card that's already in chain
+            let newCard = null;
+            let attempts = 0;
+            const maxAttempts = 20; // Prevent infinite loop
             
-            // If in a chain, don't allow modifier cards that are already in the chain
-            if (cardChainActive && selectedCard) {
-                const cardsInChain = [];
-                if (isModifierCard(selectedCard.id)) {
-                    cardsInChain.push(selectedCard.id);
+            while (!newCard && attempts < maxAttempts) {
+                const drawnCard = drawCardFromDeck();
+                
+                // Check if card is already in hand
+                if (window.playerCardHand.some(handCard => handCard.id === drawnCard.id)) {
+                    attempts++;
+                    continue;
                 }
-                availableCards = availableCards.filter(c => 
-                    !isModifierCard(c.id) || !cardsInChain.includes(c.id)
-                );
-            }
-            
-            if (availableCards.length > 0) {
-                const newCard = availableCards[Math.floor(Math.random() * availableCards.length)];
-                window.playerCardHand.push(newCard);
-            } else {
-                // Fallback: pick from all cards (excluding modifier cards in chain if active)
-                let fallbackCards = getAllCards();
+                
+                // If in a chain, check modifier card restrictions
                 if (cardChainActive && selectedCard) {
+                    const cardsInChain = [];
                     if (isModifierCard(selectedCard.id)) {
-                        fallbackCards = fallbackCards.filter(c => c.id !== selectedCard.id);
+                        cardsInChain.push(selectedCard.id);
+                    }
+                    if (isModifierCard(drawnCard.id) && cardsInChain.includes(drawnCard.id)) {
+                        attempts++;
+                        continue;
                     }
                 }
-                if (fallbackCards.length > 0) {
-                    const newCard = fallbackCards[Math.floor(Math.random() * fallbackCards.length)];
-                    window.playerCardHand.push(newCard);
-                }
+                
+                newCard = drawnCard;
+            }
+            
+            // Fallback: if we couldn't find a suitable card, just draw any card
+            if (!newCard) {
+                newCard = drawCardFromDeck();
+            }
+            
+            if (newCard) {
+                window.playerCardHand.push(newCard);
             }
         }
     }
@@ -627,7 +808,7 @@ function selectCard(card, cardElement) {
     // Show splash based on config (show if not silent and not in chain, or if hideCard)
     const splashBehavior = getSplashBehavior(card.id);
     if ((splashBehavior === 'show' && !isInChain) || (card.id === 'hideCard' && !isInChain)) {
-        showCardSplash(card, 'You');
+    showCardSplash(card, 'You');
     }
     
     // If a modifier card was selected, wait for server to allow another card selection
@@ -638,20 +819,32 @@ function selectCard(card, cardElement) {
     } else {
         // Final card in chain - clear flag and proceed
         cardChainActive = false;
-        setTimeout(() => {
+    setTimeout(() => {
             hideCardSelection();
             showGameBoard();
             document.getElementById('wordInput').disabled = false;
-            document.getElementById('wordInput').focus();
-        }, 100);
+        document.getElementById('wordInput').focus();
+    }, 100);
     }
+}
+
+function isCardLocked() {
+    if (!gameState || !gameState.activeEffects || !currentPlayer) return false;
+    return gameState.activeEffects.some(e => 
+        e.type === 'cardLock' && e.target === currentPlayer && !e.used
+    );
 }
 
 function updateTurnIndicator() {
     const indicator = document.getElementById('turnIndicator');
     if (gameState.currentTurn === currentPlayer) {
-        indicator.textContent = 'Your Turn - Choose a card, then guess!';
-        indicator.classList.add('active-turn');
+        if (isCardLocked()) {
+            indicator.textContent = 'Your Turn - Card Locked! You cannot use a card this turn.';
+            indicator.classList.add('active-turn');
+        } else {
+            indicator.textContent = 'Your Turn - Choose a card, then guess!';
+            indicator.classList.add('active-turn');
+        }
     } else {
         indicator.textContent = "Opponent's Turn - Waiting...";
         indicator.classList.remove('active-turn');
@@ -897,9 +1090,309 @@ function showCardSplash(card, playerName) {
 }
 
 // Event Listeners
+// Deck Builder Functions with Drag and Drop
+let currentDeckSelection = []; // Array of card IDs in deck slots (index = slot number)
+let draggedCard = null;
+let draggedSlotIndex = null;
+
+function createDeckSlots() {
+    const deckSlots = document.getElementById('deckSlots');
+    deckSlots.innerHTML = '';
+    
+    for (let i = 0; i < DECK_SIZE; i++) {
+        const slot = document.createElement('div');
+        slot.className = 'deck-slot';
+        slot.dataset.slotIndex = i;
+        
+        const slotNumber = document.createElement('div');
+        slotNumber.className = 'deck-slot-number';
+        slotNumber.textContent = i + 1;
+        slot.appendChild(slotNumber);
+        
+        // Add drag and drop event listeners
+        slot.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            slot.classList.add('drag-over');
+        });
+        
+        slot.addEventListener('dragleave', () => {
+            slot.classList.remove('drag-over');
+        });
+        
+        slot.addEventListener('drop', (e) => {
+            e.preventDefault();
+            slot.classList.remove('drag-over');
+            handleDropOnSlot(i);
+        });
+        
+        deckSlots.appendChild(slot);
+    }
+    
+    updateDeckSlots();
+}
+
+function updateDeckSlots() {
+    const slots = document.querySelectorAll('.deck-slot');
+    slots.forEach((slot, index) => {
+        const cardId = currentDeckSelection[index];
+        
+        // Clear existing card
+        const existingCard = slot.querySelector('.deck-slot-card');
+        if (existingCard) {
+            existingCard.remove();
+        }
+        
+        slot.classList.remove('filled');
+        
+        if (cardId) {
+            const allCards = getAllCards();
+            const card = allCards.find(c => c.id === cardId);
+            if (card) {
+                slot.classList.add('filled');
+                const cardElement = createDeckSlotCard(card, index);
+                slot.appendChild(cardElement);
+            }
+        }
+    });
+    
+    updateAvailableCards();
+    updateSaveButton();
+}
+
+function createDeckSlotCard(card, slotIndex) {
+    const cardElement = document.createElement('div');
+    cardElement.className = 'deck-slot-card';
+    cardElement.draggable = true;
+    cardElement.dataset.cardId = card.id;
+    cardElement.dataset.slotIndex = slotIndex;
+    
+    cardElement.innerHTML = `
+        <div class="deck-slot-card-title">${card.title}</div>
+    `;
+    
+    cardElement.addEventListener('dragstart', (e) => {
+        draggedCard = card.id;
+        draggedSlotIndex = slotIndex;
+        cardElement.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+    });
+    
+    cardElement.addEventListener('dragend', () => {
+        cardElement.classList.remove('dragging');
+        draggedCard = null;
+        draggedSlotIndex = null;
+    });
+    
+    cardElement.addEventListener('click', () => {
+        // Remove card from slot on click
+        removeCardFromSlot(slotIndex);
+    });
+    
+    return cardElement;
+}
+
+function renderDeckBuilder() {
+    const allCards = getAllCards();
+    const currentDeck = getPlayerDeck();
+    
+    // Initialize deck selection (pad with nulls if needed)
+    currentDeckSelection = [...currentDeck];
+    while (currentDeckSelection.length < DECK_SIZE) {
+        currentDeckSelection.push(null);
+    }
+    
+    createDeckSlots();
+    renderAvailableCards();
+}
+
+function renderAvailableCards() {
+    const deckCardsGrid = document.getElementById('deckCardsGrid');
+    const allCards = getAllCards();
+    
+    // Filter out cards that are in the deck
+    const availableCards = allCards.filter(card => !currentDeckSelection.includes(card.id));
+    
+    deckCardsGrid.innerHTML = '';
+    
+    availableCards.forEach(card => {
+        const cardElement = document.createElement('div');
+        cardElement.className = 'deck-card-item';
+        cardElement.dataset.cardId = card.id;
+        
+        cardElement.innerHTML = `
+            <div class="deck-card-title">${card.title}</div>
+            <div class="deck-card-description">${card.description}</div>
+        `;
+        
+        // Set draggable after innerHTML to ensure it sticks
+        cardElement.setAttribute('draggable', 'true');
+        
+        // Set up drag events
+        cardElement.addEventListener('dragstart', (e) => {
+            draggedCard = card.id;
+            draggedSlotIndex = null;
+            cardElement.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('text/plain', card.id);
+        });
+        
+        cardElement.addEventListener('dragend', (e) => {
+            cardElement.classList.remove('dragging');
+            draggedCard = null;
+            draggedSlotIndex = null;
+        });
+        
+        deckCardsGrid.appendChild(cardElement);
+    });
+}
+
+function updateAvailableCards() {
+    // Re-render available cards to reflect current deck state
+    renderAvailableCards();
+}
+
+function handleDropOnSlot(slotIndex) {
+    if (!draggedCard) return;
+    
+    const allCards = getAllCards();
+    const card = allCards.find(c => c.id === draggedCard);
+    if (!card) return;
+    
+    // If dragging from another slot, remove it from that slot first
+    if (draggedSlotIndex !== null && draggedSlotIndex !== slotIndex) {
+        const oldCardId = currentDeckSelection[slotIndex];
+        currentDeckSelection[draggedSlotIndex] = oldCardId;
+    } else if (draggedSlotIndex === null) {
+        // Dragging from available cards - check if card is already in deck
+        const existingSlotIndex = currentDeckSelection.indexOf(draggedCard);
+        if (existingSlotIndex !== -1) {
+            // Card already in deck, swap positions
+            const oldCardId = currentDeckSelection[slotIndex];
+            currentDeckSelection[existingSlotIndex] = oldCardId;
+        }
+    }
+    
+    // Place card in new slot
+    currentDeckSelection[slotIndex] = draggedCard;
+    
+    updateDeckSlots();
+}
+
+function removeCardFromSlot(slotIndex) {
+    currentDeckSelection[slotIndex] = null;
+    updateDeckSlots();
+}
+
+function updateSaveButton() {
+    const saveBtn = document.getElementById('saveDeckBtn');
+    if (saveBtn) {
+        const filledSlots = currentDeckSelection.filter(id => id !== null).length;
+        saveBtn.disabled = filledSlots !== DECK_SIZE;
+    }
+}
+
+function saveDeck() {
+    const filledSlots = currentDeckSelection.filter(id => id !== null);
+    if (filledSlots.length === DECK_SIZE) {
+        savePlayerDeck(filledSlots);
+        showGameMessage('Deck Saved', 'Your deck has been saved successfully!', '💾');
+        closeDeckBuilder();
+    } else {
+        alert(`Please fill all ${DECK_SIZE} deck slots.`);
+    }
+}
+
+function clearDeck() {
+    if (confirm('Are you sure you want to clear your deck?')) {
+        currentDeckSelection = new Array(DECK_SIZE).fill(null);
+        updateDeckSlots();
+    }
+}
+
+function openDeckBuilder() {
+    const deckBuilder = document.getElementById('deckBuilderOverlay');
+    const deckCardsGrid = document.getElementById('deckCardsGrid');
+    
+    renderDeckBuilder();
+    
+    // Set up drop handling on the grid (only once)
+    if (!deckCardsGrid.dataset.dropHandlersAdded) {
+        deckCardsGrid.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (draggedSlotIndex !== null) {
+                // Card is being dragged from a deck slot
+                deckCardsGrid.style.borderColor = '#6aaa64';
+                deckCardsGrid.style.backgroundColor = '#1a2a1b';
+            }
+        });
+        
+        deckCardsGrid.addEventListener('dragleave', (e) => {
+            if (!deckCardsGrid.contains(e.relatedTarget)) {
+                deckCardsGrid.style.borderColor = '#3a3a3c';
+                deckCardsGrid.style.backgroundColor = '#121213';
+            }
+        });
+        
+        deckCardsGrid.addEventListener('drop', (e) => {
+            e.preventDefault();
+            deckCardsGrid.style.borderColor = '#3a3a3c';
+            deckCardsGrid.style.backgroundColor = '#121213';
+            
+            // If card was dragged from a deck slot, remove it from deck
+            if (draggedSlotIndex !== null && draggedCard) {
+                removeCardFromSlot(draggedSlotIndex);
+            }
+        });
+        
+        deckCardsGrid.dataset.dropHandlersAdded = 'true';
+    }
+    
+    deckBuilder.style.display = 'flex';
+    document.body.style.overflow = 'hidden'; // Prevent background scrolling
+}
+
+function closeDeckBuilder() {
+    const deckBuilder = document.getElementById('deckBuilderOverlay');
+    deckBuilder.style.display = 'none';
+    document.body.style.overflow = ''; // Restore scrolling
+    // Reset to saved deck
+    const savedDeck = getPlayerDeck();
+    currentDeckSelection = [...savedDeck];
+    while (currentDeckSelection.length < DECK_SIZE) {
+        currentDeckSelection.push(null);
+    }
+}
+
+// Initialize deck builder on page load
+document.addEventListener('DOMContentLoaded', () => {
+    // Wait a bit for CARD_CONFIG to be injected by server
+    setTimeout(() => {
+        // Ensure a valid deck exists
+        const allCards = getAllCards();
+        if (allCards.length === 0) {
+            console.warn('No cards available yet, deck will be initialized when cards load');
+            return;
+        }
+        
+        const deck = getPlayerDeck();
+        // Validate deck - remove any cards that no longer exist
+        const validDeck = deck.filter(cardId => allCards.some(c => c.id === cardId));
+        
+        if (validDeck.length === 0 || validDeck.length > DECK_SIZE) {
+            // Create default deck
+            const defaultDeck = allCards.slice(0, Math.min(DECK_SIZE, allCards.length));
+            savePlayerDeck(defaultDeck.map(c => c.id));
+        } else if (validDeck.length !== deck.length) {
+            // Some cards were removed, save the valid deck
+            savePlayerDeck(validDeck);
+        }
+    }, 100);
+});
+
 document.getElementById('createGameBtn').addEventListener('click', () => {
     const name = document.getElementById('playerName').value.trim();
     if (name) {
+        closeDeckBuilder(); // Close deck builder if open
         socket.emit('createGame', { playerName: name });
     } else {
         alert('Please enter your name');
@@ -910,10 +1403,34 @@ document.getElementById('joinGameBtn').addEventListener('click', () => {
     document.getElementById('joinGroup').style.display = 'block';
 });
 
+document.getElementById('deckBuilderBtn').addEventListener('click', () => {
+    openDeckBuilder();
+});
+
+document.getElementById('saveDeckBtn').addEventListener('click', () => {
+    saveDeck();
+});
+
+document.getElementById('clearDeckBtn').addEventListener('click', () => {
+    clearDeck();
+});
+
+document.getElementById('closeDeckBuilderBtn').addEventListener('click', () => {
+    closeDeckBuilder();
+});
+
+// Close deck builder when clicking outside the modal
+document.getElementById('deckBuilderOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'deckBuilderOverlay') {
+        closeDeckBuilder();
+    }
+});
+
 document.getElementById('joinWithIdBtn').addEventListener('click', () => {
     const name = document.getElementById('playerName').value.trim();
     const gameId = document.getElementById('gameIdInput').value.trim();
     if (name && gameId) {
+        closeDeckBuilder(); // Close deck builder if open
         socket.emit('joinGame', { playerName: name, gameId: gameId });
     } else {
         alert('Please enter your name and game ID');
@@ -955,7 +1472,9 @@ function submitGuess() {
         return;
     }
     
-    if (!selectedCard) {
+    // Allow submitting without a card if player is card locked
+    const locked = isCardLocked();
+    if (!selectedCard && !locked) {
         alert('Please select a card first!');
         return;
     }

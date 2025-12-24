@@ -192,6 +192,52 @@ const CARD_CONFIG = {
                 }
             }
         }
+    },
+    'cardLock': {
+        metadata: {
+            id: 'cardLock',
+            title: 'Card Lock',
+            description: 'Prevents your opponent from using a card on their next turn',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                // Find the opponent
+                const opponent = game.players.find(p => p.id !== playerId);
+                if (opponent) {
+                    // Add card lock effect targeting the opponent
+                    game.activeEffects.push({
+                        type: 'cardLock',
+                        target: opponent.id,
+                        description: 'You cannot use a card on your next turn',
+                        used: false
+                    });
+                }
+            }
+        }
+    },
+    'handReveal': {
+        metadata: {
+            id: 'handReveal',
+            title: 'Hand Reveal',
+            description: 'Reveal your opponent\'s current hand of cards',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            // Hand reveal is handled in selectCard, not onGuess
+        }
     }
 };
 
@@ -309,7 +355,7 @@ function calculateFeedback(guess, target) {
             // Look for this letter in target that hasn't been used
             for (let j = 0; j < 5; j++) {
                 if (targetLetters[j] === letter && !used[j]) {
-                    feedback[i] = 'present';
+                feedback[i] = 'present';
                     used[j] = true; // Mark this position in target as used
                     foundMatch = true;
                     break; // Only use one instance of the letter
@@ -435,6 +481,15 @@ io.on('connection', (socket) => {
         const game = games.get(data.gameId);
         if (!game || game.currentTurn !== socket.id) return;
         
+        // Check if player is card locked
+        const isCardLocked = game.activeEffects.some(e => 
+            e.type === 'cardLock' && e.target === socket.id && !e.used
+        );
+        if (isCardLocked) {
+            socket.emit('error', { message: 'You cannot use a card this turn - Card Lock is active!' });
+            return;
+        }
+        
         const player = game.players.find(p => p.id === socket.id);
         
         // Initialize card chain tracking if needed
@@ -481,12 +536,26 @@ io.on('connection', (socket) => {
         const realCard = data.card; // The last card is always the real card
         const { cardToShowOpponent, shouldHideFromOpponent } = processCardChain(cardChain, realCard);
         
+        // Find opponent
+        const opponent = game.players.find(p => p.id !== socket.id);
+        
         // Store the real card for when guess is submitted (if needed by config)
         if (cardChain.some(c => needsRealCardStorage(c.id))) {
             if (!game.phonyCardRealCards) {
                 game.phonyCardRealCards = new Map();
             }
             game.phonyCardRealCards.set(socket.id, realCard);
+        }
+        
+        // Check if this is a hand reveal card - trigger it immediately
+        if (realCard.id === 'handReveal' && opponent) {
+            const opponentSocket = io.sockets.sockets.get(opponent.id);
+            if (opponentSocket) {
+                opponentSocket.emit('requestHand', {
+                    gameId: data.gameId,
+                    requesterId: socket.id
+                });
+            }
         }
         
         // Notify the player with the real card
@@ -498,20 +567,33 @@ io.on('connection', (socket) => {
         });
         
         // Show card to opponent (fake if phonyCard was used, hidden if hideCard was used)
-        const opponent = game.players.find(p => p.id !== socket.id);
         if (opponent && !shouldHideFromOpponent) {
             const opponentSocket = io.sockets.sockets.get(opponent.id);
             if (opponentSocket) {
                 opponentSocket.emit('cardPlayed', {
                     card: cardToShowOpponent,
-                    playerName: player ? player.name : 'Player',
-                    playerId: socket.id
-                });
+            playerName: player ? player.name : 'Player',
+            playerId: socket.id
+        });
             }
         }
         
         // Clear the card chain
         game.cardChains.delete(socket.id);
+    });
+    
+    socket.on('sendHand', (data) => {
+        // Opponent is sending their hand in response to a reveal request
+        const game = games.get(data.gameId);
+        if (!game) return;
+        
+        const requesterSocket = io.sockets.sockets.get(data.requesterId);
+        if (requesterSocket) {
+            requesterSocket.emit('opponentHandRevealed', {
+                cards: data.cards,
+                opponentName: game.players.find(p => p.id === socket.id)?.name || 'Opponent'
+            });
+        }
     });
     
     socket.on('submitGuess', (data) => {
@@ -621,13 +703,13 @@ io.on('connection', (socket) => {
             });
         } else {
             // Normal display for guesser
-            socket.emit('guessSubmitted', {
-                playerId: socket.id,
-                guess: guess,
-                feedback: realFeedback, // Real feedback for the guesser
+        socket.emit('guessSubmitted', {
+            playerId: socket.id,
+            guess: guess,
+            feedback: realFeedback, // Real feedback for the guesser
                 row: boardRow,
-                hidden: false
-            });
+            hidden: false
+        });
         }
         
         // Send letter reveal if gambler was lucky
@@ -675,6 +757,12 @@ io.on('connection', (socket) => {
             // Switch turns normally
         game.currentTurn = opponent.id;
             console.log(`Turn switched: ${socket.id} -> ${opponent.id}. Current turn is now: ${game.currentTurn}`);
+            
+            // Clear card lock effect when the locked player's turn ends
+            // (when turn switches away from them)
+            game.activeEffects = game.activeEffects.filter(e => 
+                !(e.type === 'cardLock' && e.target === socket.id)
+            );
         } else {
             // Extra guess: don't count toward limit, don't switch turns
             // Player gets another turn immediately

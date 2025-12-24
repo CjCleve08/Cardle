@@ -34,6 +34,10 @@
                             <span class="btn-icon">🔗</span>
                             <span>Join Game</span>
                         </button>
+                        <button id="deckBuilderBtn" class="btn btn-secondary">
+                            <span class="btn-icon">🃏</span>
+                            <span>Build Deck</span>
+                        </button>
                 </div>
                     <div class="join-section" id="joinGroup" style="display: none;">
                         <div class="input-group">
@@ -49,6 +53,41 @@
                         <div class="game-id-label">Share this Game ID:</div>
                         <div class="game-id" id="gameId"></div>
                         <div class="game-id-hint">Share this code with your friend to play together</div>
+                    </div>
+                </div>
+                
+                <!-- Deck Builder Overlay -->
+                <div id="deckBuilderOverlay" class="deck-builder-overlay" style="display: none;">
+                    <div class="deck-builder-modal">
+                        <div class="deck-builder-header">
+                            <h2>Build Your Deck</h2>
+                            <button id="closeDeckBuilderBtn" class="close-btn">✕</button>
+                        </div>
+                        
+                        <div class="deck-slots-container">
+                            <div class="deck-slots-label">Your Deck (7 cards)</div>
+                            <div class="deck-slots" id="deckSlots">
+                                <!-- 7 empty slots will be created here -->
+                            </div>
+                        </div>
+                        
+                        <div class="deck-builder-content">
+                            <div class="available-cards-label">Available Cards</div>
+                            <div class="deck-cards-grid" id="deckCardsGrid">
+                                <!-- All available cards will be displayed here -->
+                            </div>
+                        </div>
+                        
+                        <div class="deck-builder-actions">
+                            <button id="saveDeckBtn" class="btn btn-primary" disabled>
+                                <span class="btn-icon">💾</span>
+                                <span>Save Deck</span>
+                            </button>
+                            <button id="clearDeckBtn" class="btn btn-secondary">
+                                <span class="btn-icon">🗑️</span>
+                                <span>Clear Deck</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -135,6 +174,20 @@
                         <div class="game-message-title" id="gameMessageTitle"></div>
                         <div class="game-message-text" id="gameMessageText"></div>
                         <button class="game-message-button" id="gameMessageButton">Got it!</button>
+                    </div>
+                </div>
+
+                <!-- Hand Reveal Overlay -->
+                <div id="handRevealOverlay" class="hand-reveal-overlay">
+                    <div class="hand-reveal-content">
+                        <div class="hand-reveal-header">
+                            <div class="hand-reveal-icon">👁️</div>
+                            <div class="hand-reveal-title">Opponent's Hand Revealed</div>
+                        </div>
+                        <div class="hand-reveal-cards" id="handRevealCards">
+                            <!-- Opponent's cards will be displayed here -->
+                        </div>
+                        <button class="hand-reveal-button" id="handRevealButton">Got it!</button>
                     </div>
                 </div>
             </div>
