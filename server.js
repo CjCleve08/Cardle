@@ -2,11 +2,260 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 
+// Card Configuration System
+// This defines all card behaviors in one place for easy extensibility
+const CARD_CONFIG = {
+    'falseFeedback': {
+        metadata: {
+            id: 'falseFeedback',
+            title: 'False Feedback',
+            description: 'Next word your opponent guesses will show incorrect feedback',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                game.activeEffects.push({
+                    type: 'falseFeedback',
+                    target: playerId,
+                    description: 'This guess will show false feedback to opponent',
+                    used: false
+                });
+            },
+            onFeedback: (feedback, isOpponent) => {
+                if (!isOpponent) return feedback;
+                const modifiedFeedback = [...feedback];
+                for (let i = 0; i < feedback.length; i++) {
+                    if (Math.random() < 0.25) {
+                        const options = ['correct', 'present', 'absent'];
+                        modifiedFeedback[i] = options[Math.floor(Math.random() * options.length)];
+                    }
+                }
+                return modifiedFeedback;
+            }
+        }
+    },
+    'hiddenFeedback': {
+        metadata: {
+            id: 'hiddenFeedback',
+            title: 'Hidden Feedback',
+            description: 'Next word you guess will only show feedback to you',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                game.activeEffects.push({
+                    type: 'hiddenFeedback',
+                    target: playerId,
+                    description: 'Your feedback is hidden from opponent',
+                    used: false
+                });
+            }
+        }
+    },
+    'hiddenGuess': {
+        metadata: {
+            id: 'hiddenGuess',
+            title: 'Hidden Guess',
+            description: 'Your next guess will be hidden from your opponent',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                game.activeEffects.push({
+                    type: 'hiddenGuess',
+                    target: playerId,
+                    description: 'Your guess is hidden from opponent',
+                    used: false
+                });
+            }
+        }
+    },
+    'extraGuess': {
+        metadata: {
+            id: 'extraGuess',
+            title: 'Extra Turn',
+            description: 'Get an additional turn immediately after this one',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                game.activeEffects.push({
+                    type: 'extraGuess',
+                    target: playerId,
+                    description: 'You get an additional turn immediately after this one',
+                    used: false
+                });
+            }
+        }
+    },
+    'hideCard': {
+        metadata: {
+            id: 'hideCard',
+            title: 'Hide Card',
+            description: 'Play another card secretly - your opponent won\'t know which one',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: true,
+            splashBehavior: 'show',
+            chainBehavior: 'hide',
+            needsRealCardStorage: false
+        },
+        effects: {}
+    },
+    'phonyCard': {
+        metadata: {
+            id: 'phonyCard',
+            title: 'Phony Card',
+            description: 'Play a card that shows a fake card to your opponent',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: true,
+            splashBehavior: 'silent',
+            chainBehavior: 'fake',
+            needsRealCardStorage: true
+        },
+        effects: {}
+    },
+    'gamblersCard': {
+        metadata: {
+            id: 'gamblersCard',
+            title: 'Gambler\'s Card',
+            description: '50% chance to reveal a letter, 50% chance to hide your next guess from yourself',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                // 50/50 chance
+                const isLucky = Math.random() < 0.5;
+                
+                if (isLucky) {
+                    // Reveal a random letter position
+                    const word = game.word;
+                    const randomPosition = Math.floor(Math.random() * 5);
+                    const revealedLetter = word[randomPosition];
+                    
+                    // Store the reveal info to send when guess is submitted
+                    game.activeEffects.push({
+                        type: 'gamblerReveal',
+                        target: playerId,
+                        letter: revealedLetter,
+                        position: randomPosition,
+                        description: `Revealed letter: ${revealedLetter} at position ${randomPosition + 1}`,
+                        used: false
+                    });
+                } else {
+                    // Hide next guess from player
+                    game.activeEffects.push({
+                        type: 'gamblerHide',
+                        target: playerId,
+                        description: 'Your next guess will be hidden from you',
+                        used: false
+                    });
+                }
+            }
+        }
+    }
+};
+
+// Helper functions for card configuration
+function isModifierCard(cardId) {
+    return CARD_CONFIG[cardId]?.modifier?.isModifier === true;
+}
+
+function getSplashBehavior(cardId) {
+    return CARD_CONFIG[cardId]?.modifier?.splashBehavior || 'show';
+}
+
+function getChainBehavior(cardId) {
+    return CARD_CONFIG[cardId]?.modifier?.chainBehavior || 'none';
+}
+
+function needsRealCardStorage(cardId) {
+    return CARD_CONFIG[cardId]?.modifier?.needsRealCardStorage === true;
+}
+
+function getModifierCards() {
+    return Object.keys(CARD_CONFIG).filter(id => isModifierCard(id));
+}
+
+function getAllCardsMetadata() {
+    return Object.values(CARD_CONFIG).map(config => config.metadata);
+}
+
+function processCardChain(cardChain, realCard) {
+    let cardToShowOpponent = realCard;
+    let shouldHideFromOpponent = false;
+    
+    // Check chain behaviors in reverse order (last modifier takes precedence)
+    // hideCard takes precedence over phonyCard
+    const hasHideCard = cardChain.some(c => getChainBehavior(c.id) === 'hide');
+    const hasPhonyCard = cardChain.some(c => getChainBehavior(c.id) === 'fake');
+    
+    if (hasHideCard) {
+        shouldHideFromOpponent = true;
+    } else if (hasPhonyCard) {
+        // Generate a fake card from all available cards
+        const allCards = getAllCardsMetadata();
+        const fakeCardOptions = allCards.filter(c => c.id !== realCard.id);
+        if (fakeCardOptions.length > 0) {
+            cardToShowOpponent = fakeCardOptions[Math.floor(Math.random() * fakeCardOptions.length)];
+        }
+    }
+    
+    return { cardToShowOpponent, shouldHideFromOpponent };
+}
+
+// Inject card config into HTML (must be before static middleware)
+app.get('/', (req, res) => {
+    const htmlPath = path.join(__dirname, 'index.html');
+    let html = fs.readFileSync(htmlPath, 'utf8');
+    
+    // Inject card config as a script tag before client.js
+    const configScript = `<script>window.CARD_CONFIG = ${JSON.stringify(CARD_CONFIG)};</script>`;
+    html = html.replace('<script src="client.js"></script>', configScript + '\n    <script src="client.js"></script>');
+    
+    res.send(html);
+});
+
+// Serve static files (after route handlers)
 app.use(express.static(__dirname));
 
 // Game state storage
@@ -41,24 +290,33 @@ function calculateFeedback(guess, target) {
     const guessLetters = guess.split('');
     const used = new Array(5).fill(false);
     
-    // First pass: mark correct positions
+    // First pass: mark correct positions (green)
     for (let i = 0; i < 5; i++) {
         if (guessLetters[i] === targetLetters[i]) {
             feedback[i] = 'correct';
-            used[i] = true;
+            used[i] = true; // Mark this position in target as used
         }
     }
     
-    // Second pass: mark present letters
+    // Second pass: mark present letters (yellow)
+    // Only mark as present if the letter appears in target AND hasn't been used yet
     for (let i = 0; i < 5; i++) {
         if (feedback[i] !== 'correct') {
-            const letterIndex = targetLetters.findIndex((letter, idx) => 
-                letter === guessLetters[i] && !used[idx]
-            );
-            if (letterIndex !== -1) {
-                feedback[i] = 'present';
-                used[letterIndex] = true;
-            } else {
+            // Count how many times this letter appears in target (not yet used)
+            const letter = guessLetters[i];
+            let foundMatch = false;
+            
+            // Look for this letter in target that hasn't been used
+            for (let j = 0; j < 5; j++) {
+                if (targetLetters[j] === letter && !used[j]) {
+                    feedback[i] = 'present';
+                    used[j] = true; // Mark this position in target as used
+                    foundMatch = true;
+                    break; // Only use one instance of the letter
+                }
+            }
+            
+            if (!foundMatch) {
                 feedback[i] = 'absent';
             }
         }
@@ -68,26 +326,11 @@ function calculateFeedback(guess, target) {
 }
 
 function applyCardEffect(feedback, card, isOpponent) {
-    if (!card) return feedback;
+    if (!card || !CARD_CONFIG[card.id]) return feedback;
     
-    if (card.id === 'falseFeedback' && isOpponent) {
-        console.log('Applying false feedback. Original:', feedback);
-        // 50% chance per letter to be changed to a random feedback state
-        const modifiedFeedback = [...feedback]; // Create a copy
-        
-        for (let i = 0; i < feedback.length; i++) {
-            // 25% chance to change this letter
-            if (Math.random() < 0.25) {
-                // Randomly change to any feedback state (correct, present, or absent)
-                // It can be the same or different - completely random
-                const options = ['correct', 'present', 'absent'];
-                modifiedFeedback[i] = options[Math.floor(Math.random() * options.length)];
-            }
-            // If not changed (75% chance), keep the original feedback
-        }
-        
-        console.log('False feedback result. Modified:', modifiedFeedback);
-        return modifiedFeedback;
+    const config = CARD_CONFIG[card.id];
+    if (config.effects?.onFeedback) {
+        return config.effects.onFeedback(feedback, isOpponent);
     }
     
     return feedback;
@@ -194,59 +437,81 @@ io.on('connection', (socket) => {
         
         const player = game.players.find(p => p.id === socket.id);
         
-        // Check if this is a hidden card selection (after hideCard was used)
-        const isHiddenSelection = data.hidden === true;
+        // Initialize card chain tracking if needed
+        if (!game.cardChains) {
+            game.cardChains = new Map();
+        }
         
-        // If hideCard is selected, show splash to everyone and allow second card selection
-        if (data.card.id === 'hideCard' && !isHiddenSelection) {
-            // Show hideCard splash to everyone
-            io.to(data.gameId).emit('cardPlayed', {
-                card: data.card,
-                playerName: player ? player.name : 'Player',
-                playerId: socket.id
-            });
+        // Get or initialize the card chain for this player
+        let cardChain = game.cardChains.get(socket.id) || [];
+        
+        // Check if this card is a modifier card using config
+        const cardIsModifier = isModifierCard(data.card.id);
+        
+        // If it's a modifier card, add it to the chain and allow another selection
+        if (cardIsModifier) {
+            cardChain.push(data.card);
+            game.cardChains.set(socket.id, cardChain);
+            
+            // Show splash based on config
+            const splashBehavior = getSplashBehavior(data.card.id);
+            if (splashBehavior === 'show') {
+                io.to(data.gameId).emit('cardPlayed', {
+                    card: data.card,
+                    playerName: player ? player.name : 'Player',
+                    playerId: socket.id
+                });
+            }
+            // 'silent' or 'custom' behaviors don't emit splash here
             
             // Notify the player they can select another card
             socket.emit('cardSelected', {
                 playerId: socket.id,
                 card: data.card,
-                allowSecondCard: true // Signal to show card selection again
+                allowSecondCard: true
             });
-            
-            // Store that hideCard was used (so next card selection is hidden)
-            if (!game.hiddenCardSelections) {
-                game.hiddenCardSelections = new Map();
+            return;
+        }
+        
+        // This is a regular card (final card in the chain)
+        // Add it to the chain
+        cardChain.push(data.card);
+        
+        // Process the card chain using config
+        const realCard = data.card; // The last card is always the real card
+        const { cardToShowOpponent, shouldHideFromOpponent } = processCardChain(cardChain, realCard);
+        
+        // Store the real card for when guess is submitted (if needed by config)
+        if (cardChain.some(c => needsRealCardStorage(c.id))) {
+            if (!game.phonyCardRealCards) {
+                game.phonyCardRealCards = new Map();
             }
-            game.hiddenCardSelections.set(socket.id, true);
-            return;
+            game.phonyCardRealCards.set(socket.id, realCard);
         }
         
-        // If this is a hidden selection (second card after hideCard), don't show to opponent
-        if (isHiddenSelection && game.hiddenCardSelections && game.hiddenCardSelections.get(socket.id)) {
-            // Only notify the player who selected (no splash to opponent)
-            socket.emit('cardSelected', {
-                playerId: socket.id,
-                card: data.card,
-                hidden: true
-            });
-            
-            // Clear the hidden card flag
-            game.hiddenCardSelections.delete(socket.id);
-            return;
-        }
-        
-        // Normal card selection - notify everyone
+        // Notify the player with the real card
         socket.emit('cardSelected', {
             playerId: socket.id,
-            card: data.card
+            card: realCard,
+            hidden: shouldHideFromOpponent,
+            isRealCard: true
         });
         
-        // Notify all players in the game about the card being played
-        io.to(data.gameId).emit('cardPlayed', {
-            card: data.card,
-            playerName: player ? player.name : 'Player',
-            playerId: socket.id
-        });
+        // Show card to opponent (fake if phonyCard was used, hidden if hideCard was used)
+        const opponent = game.players.find(p => p.id !== socket.id);
+        if (opponent && !shouldHideFromOpponent) {
+            const opponentSocket = io.sockets.sockets.get(opponent.id);
+            if (opponentSocket) {
+                opponentSocket.emit('cardPlayed', {
+                    card: cardToShowOpponent,
+                    playerName: player ? player.name : 'Player',
+                    playerId: socket.id
+                });
+            }
+        }
+        
+        // Clear the card chain
+        game.cardChains.delete(socket.id);
     });
     
     socket.on('submitGuess', (data) => {
@@ -285,43 +550,20 @@ io.on('connection', (socket) => {
         });
         game.totalGuesses++; // Increment shared counter
         
-        // Apply card effects to game state
-        if (data.card) {
-            if (data.card.id === 'falseFeedback') {
-                // This affects THIS guess - opponent will see false feedback for this guess
-                game.activeEffects.push({
-                    type: 'falseFeedback',
-                    target: socket.id, // Target the current player's guess
-                    description: 'This guess will show false feedback to opponent',
-                    used: false
-                });
-            } else if (data.card.id === 'hiddenFeedback') {
-                // This affects THIS guess - hide feedback from opponent
-                game.activeEffects.push({
-                    type: 'hiddenFeedback',
-                    target: socket.id,
-                    description: 'Your feedback is hidden from opponent',
-                    used: false
-                });
-            } else if (data.card.id === 'hiddenGuess') {
-                // This affects THIS guess - hide guess from opponent
-                game.activeEffects.push({
-                    type: 'hiddenGuess',
-                    target: socket.id,
-                    description: 'Your guess is hidden from opponent',
-                    used: false
-                });
-            } else if (data.card.id === 'extraGuess') {
-                // Extra turn allows back-to-back guesses (player gets another turn)
-                game.activeEffects.push({
-                    type: 'extraGuess',
-                    target: socket.id,
-                    description: 'You get an additional turn immediately after this one',
-                    used: false
-                });
-            } else if (data.card.id === 'hideCard') {
-                // Hide card doesn't need to be stored as an effect
-                // It's handled in the selectCard event handler
+        // Check if phonyCard was used - if so, use the real card instead
+        let actualCard = data.card;
+        if (game.phonyCardRealCards && game.phonyCardRealCards.has(socket.id)) {
+            actualCard = game.phonyCardRealCards.get(socket.id);
+            game.phonyCardRealCards.delete(socket.id);
+            console.log('Phony card used - real card is:', actualCard, 'but opponent saw fake card');
+        }
+        
+        // Apply card effects to game state using config (use actual card, not the fake one)
+        if (actualCard && CARD_CONFIG[actualCard.id]) {
+            const config = CARD_CONFIG[actualCard.id];
+            // Only apply effects if it's not a modifier card (modifiers are handled in selectCard)
+            if (!isModifierCard(actualCard.id) && config.effects?.onGuess) {
+                config.effects.onGuess(game, socket.id);
             }
         }
         
@@ -344,6 +586,16 @@ io.on('connection', (socket) => {
             e.type === 'hiddenFeedback' && e.target === socket.id && !e.used
         );
         
+        // Check if gamblerHide is active (hides guess from player themselves)
+        const shouldHideFromSelf = game.activeEffects.some(e => 
+            e.type === 'gamblerHide' && e.target === socket.id && !e.used
+        );
+        
+        // Check if gamblerReveal is active (reveals a letter)
+        const gamblerReveal = game.activeEffects.find(e => 
+            e.type === 'gamblerReveal' && e.target === socket.id && !e.used
+        );
+        
         // Check if falseFeedback was applied to THIS guess (by the current player using the card)
         const falseFeedbackActive = game.activeEffects.some(e => 
             e.type === 'falseFeedback' && e.target === socket.id && !e.used
@@ -357,14 +609,35 @@ io.on('connection', (socket) => {
             console.log('False feedback calculated. Real:', realFeedback, 'False:', falseFeedback);
         }
         
-        // Send to guesser (always show real feedback to the guesser)
-        socket.emit('guessSubmitted', {
-            playerId: socket.id,
-            guess: guess,
-            feedback: realFeedback, // Real feedback for the guesser
-            row: boardRow,
-            hidden: false
-        });
+        // Send to guesser (hide if gamblerHide is active, otherwise show normally)
+        if (shouldHideFromSelf) {
+            // Hide guess from player themselves (gambler's card bad luck)
+            socket.emit('guessSubmitted', {
+                playerId: socket.id,
+                guess: null, // Hide the guess
+                feedback: null, // Hide the feedback
+                row: boardRow,
+                hidden: true
+            });
+        } else {
+            // Normal display for guesser
+            socket.emit('guessSubmitted', {
+                playerId: socket.id,
+                guess: guess,
+                feedback: realFeedback, // Real feedback for the guesser
+                row: boardRow,
+                hidden: false
+            });
+        }
+        
+        // Send letter reveal if gambler was lucky
+        if (gamblerReveal) {
+            socket.emit('letterRevealed', {
+                letter: gamblerReveal.letter,
+                position: gamblerReveal.position,
+                message: `Letter revealed: ${gamblerReveal.letter} at position ${gamblerReveal.position + 1}`
+            });
+        }
         
         // Send to opponent
         const opponentSocket = io.sockets.sockets.get(opponent.id);
@@ -400,7 +673,7 @@ io.on('connection', (socket) => {
         if (!isExtraGuess) {
             player.row++; // Track individual player's guess count
             // Switch turns normally
-            game.currentTurn = opponent.id;
+        game.currentTurn = opponent.id;
             console.log(`Turn switched: ${socket.id} -> ${opponent.id}. Current turn is now: ${game.currentTurn}`);
         } else {
             // Extra guess: don't count toward limit, don't switch turns
@@ -416,8 +689,14 @@ io.on('connection', (socket) => {
         
         // Remove used effects (mark as used and remove)
         game.activeEffects = game.activeEffects.filter(e => {
-            // Remove hiddenGuess, hiddenFeedback, and falseFeedback after they've been used on this guess
-            if (e.target === socket.id && (e.type === 'hiddenGuess' || e.type === 'hiddenFeedback' || e.type === 'falseFeedback')) {
+            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, and gamblerReveal after they've been used on this guess
+            if (e.target === socket.id && (
+                e.type === 'hiddenGuess' || 
+                e.type === 'hiddenFeedback' || 
+                e.type === 'falseFeedback' ||
+                e.type === 'gamblerHide' ||
+                e.type === 'gamblerReveal'
+            )) {
                 if (e.type === 'falseFeedback') {
                     console.log('Removing falseFeedback effect after it was applied to player:', socket.id);
                 }
