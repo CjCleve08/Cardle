@@ -230,15 +230,30 @@ socket.on('turnChanged', (data) => {
     if (myTurn) {
         // It's my turn - show card selection and enable input
         console.log('✓ Showing card selection for my turn');
-        showCardSelection();
-        document.getElementById('wordInput').disabled = false;
-        document.getElementById('wordInput').value = '';
-        selectedCard = null; // Reset selected card for new turn
-        cardChainActive = false; // Reset card chain flag
-        // Focus input after a short delay to ensure card selection is visible
-        setTimeout(() => {
-            document.getElementById('wordInput').focus();
-        }, 100);
+        
+        // Helper function to show card selection
+        const showCardSelectionNow = () => {
+            showCardSelection();
+            document.getElementById('wordInput').disabled = false;
+            document.getElementById('wordInput').value = '';
+            selectedCard = null; // Reset selected card for new turn
+            cardChainActive = false; // Reset card chain flag
+            // Focus input after a short delay to ensure card selection is visible
+            setTimeout(() => {
+                document.getElementById('wordInput').focus();
+            }, 100);
+        };
+        
+        // Check if it's the first turn (no guesses made yet)
+        const isFirstTurn = !gameState || !gameState.totalGuesses || gameState.totalGuesses === 0;
+        
+        if (isFirstTurn) {
+            // First turn - show immediately
+            showCardSelectionNow();
+        } else {
+            // Not first turn - wait 3 seconds before showing card selection
+            setTimeout(showCardSelectionNow, 3000);
+        }
     } else {
         // It's opponent's turn - hide card selection, disable input
         console.log('✗ Hiding card selection - opponent\'s turn');
@@ -446,8 +461,9 @@ function initializeGame(data) {
     
     if (data.currentTurn === currentPlayer) {
         // It's my turn - show card selection and enable input
-        showCardSelection();
         showGameBoard();
+        // First turn - show immediately (no guesses made yet)
+        showCardSelection();
         document.getElementById('wordInput').disabled = false;
         selectedCard = null;
     } else {
@@ -626,7 +642,7 @@ function showCardSelection() {
                 }
             }, 2500);
         } else {
-            generateCards();
+    generateCards();
         }
     } else {
         console.error('cardSelection element not found!');
@@ -842,8 +858,8 @@ function updateTurnIndicator() {
             indicator.textContent = 'Your Turn - Card Locked! You cannot use a card this turn.';
             indicator.classList.add('active-turn');
         } else {
-            indicator.textContent = 'Your Turn - Choose a card, then guess!';
-            indicator.classList.add('active-turn');
+        indicator.textContent = 'Your Turn - Choose a card, then guess!';
+        indicator.classList.add('active-turn');
         }
     } else {
         indicator.textContent = "Opponent's Turn - Waiting...";
@@ -1458,9 +1474,25 @@ document.getElementById('playAgainBtn').addEventListener('click', () => {
 document.addEventListener('keydown', (e) => {
     if (screens.game.classList.contains('active')) {
         const input = document.getElementById('wordInput');
+        
+        // Handle Enter key to submit (works whether input is focused or not)
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            submitGuess();
+            return;
+        }
+        
+        // Only handle if input is focused (to avoid double letters)
+        // When input is focused, browser handles it naturally and input event normalizes it
+        if (document.activeElement === input) {
+            return; // Let browser handle it naturally
+        }
+        // If input is not focused, handle it manually
         if (e.key === 'Backspace') {
+            e.preventDefault();
             handleKeyPress('BACKSPACE');
         } else if (e.key.length === 1 && /[A-Za-z]/.test(e.key)) {
+            e.preventDefault();
             handleKeyPress(e.key.toUpperCase());
         }
     }
