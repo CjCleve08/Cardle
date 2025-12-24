@@ -55,10 +55,18 @@ socket.on('turnChanged', (data) => {
     updateTurnIndicator();
     updatePlayerStatus();
     if (data.currentTurn === currentPlayer) {
+        // It's my turn - show card selection and enable input
         showCardSelection();
+        showGameBoard();
+        document.getElementById('wordInput').disabled = false;
+        document.getElementById('wordInput').value = '';
+        selectedCard = null; // Reset selected card for new turn
     } else {
+        // It's opponent's turn - hide card selection, disable input
         hideCardSelection();
         showGameBoard();
+        document.getElementById('wordInput').disabled = true;
+        document.getElementById('wordInput').value = '';
     }
 });
 
@@ -81,7 +89,7 @@ socket.on('guessSubmitted', (data) => {
             updateKeyboard({ guess: data.guess, feedback: data.feedback });
         }
     }
-    currentRow++;
+    // Don't increment currentRow here - it's managed by the server via data.row
 });
 
 socket.on('gameOver', (data) => {
@@ -130,10 +138,16 @@ function initializeGame(data) {
     updatePlayerStatus();
     
     if (data.currentTurn === currentPlayer) {
+        // It's my turn - show card selection and enable input
         showCardSelection();
+        showGameBoard();
+        document.getElementById('wordInput').disabled = false;
+        selectedCard = null;
     } else {
+        // It's opponent's turn - hide card selection, disable input
         hideCardSelection();
         showGameBoard();
+        document.getElementById('wordInput').disabled = true;
     }
 }
 
@@ -255,6 +269,7 @@ function selectCard(card, cardElement) {
     
     // Enable input after card selection
     setTimeout(() => {
+        document.getElementById('wordInput').disabled = false;
         document.getElementById('wordInput').focus();
     }, 100);
 }

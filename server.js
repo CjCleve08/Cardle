@@ -101,7 +101,8 @@ io.on('connection', (socket) => {
             }],
             currentTurn: socket.id,
             activeEffects: [],
-            status: 'waiting'
+            status: 'waiting',
+            totalGuesses: 0  // Shared counter for board rows
         };
         
         games.set(gameId, game);
@@ -191,24 +192,26 @@ io.on('connection', (socket) => {
         const opponent = game.players.find(p => p.id !== socket.id);
         if (!opponent) return;
         
-        // Store guess with real feedback
+        // Store guess with real feedback - use shared row counter for board display
+        const boardRow = game.totalGuesses;
         player.guesses.push({
             guess: guess,
             feedback: realFeedback,
-            row: player.row
+            row: boardRow
         });
+        game.totalGuesses++; // Increment shared counter
         
-        // Apply card effects to game state for NEXT turn
+        // Apply card effects to game state
         if (data.card) {
             if (data.card.id === 'falseFeedback') {
-                // This will affect opponent's NEXT guess
+                // This will affect opponent's NEXT guess (after turn switches)
                 game.activeEffects.push({
                     type: 'falseFeedback',
                     target: opponent.id,
                     description: 'Next opponent guess will show false feedback'
                 });
             } else if (data.card.id === 'hiddenFeedback') {
-                // This affects THIS guess
+                // This affects THIS guess - hide feedback from opponent
                 game.activeEffects.push({
                     type: 'hiddenFeedback',
                     target: socket.id,
@@ -216,7 +219,7 @@ io.on('connection', (socket) => {
                     used: false
                 });
             } else if (data.card.id === 'hiddenGuess') {
-                // This affects THIS guess
+                // This affects THIS guess - hide guess from opponent
                 game.activeEffects.push({
                     type: 'hiddenGuess',
                     target: socket.id,
@@ -236,7 +239,7 @@ io.on('connection', (socket) => {
             return;
         }
         
-        // Check for active effects on THIS guess
+        // Check for active effects on THIS guess (for the current player making the guess)
         const shouldHideGuess = game.activeEffects.some(e => 
             e.type === 'hiddenGuess' && e.target === socket.id && !e.used
         );
@@ -245,7 +248,7 @@ io.on('connection', (socket) => {
             e.type === 'hiddenFeedback' && e.target === socket.id && !e.used
         );
         
-        // Check if opponent used falseFeedback on this player
+        // Check if falseFeedback was applied to this player (by opponent in previous turn)
         const falseFeedbackActive = game.activeEffects.some(e => 
             e.type === 'falseFeedback' && e.target === socket.id
         );
@@ -262,7 +265,7 @@ io.on('connection', (socket) => {
             playerId: socket.id,
             guess: guess,
             feedback: realFeedback, // Real feedback for the guesser
-            row: player.row,
+            row: boardRow,
             hidden: false
         });
         
@@ -273,21 +276,23 @@ io.on('connection', (socket) => {
                 playerId: socket.id,
                 guess: shouldHideGuess ? null : guess,
                 feedback: shouldHideFeedback ? null : (falseFeedbackActive ? displayFeedback : realFeedback),
-                row: player.row,
+                row: boardRow,
                 hidden: shouldHideGuess || shouldHideFeedback
             });
         }
         
-        player.row++;
+        player.row++; // Track individual player's guess count
         
         // Switch turns
         game.currentTurn = opponent.id;
         
         // Remove used effects (mark as used and remove)
         game.activeEffects = game.activeEffects.filter(e => {
+            // Remove hiddenGuess and hiddenFeedback after they've been used on this guess
             if (e.target === socket.id && (e.type === 'hiddenGuess' || e.type === 'hiddenFeedback')) {
                 return false; // Remove used effects
             }
+            // Remove falseFeedback after it's been applied to this player's guess
             if (e.type === 'falseFeedback' && e.target === socket.id) {
                 return false; // Remove falseFeedback after it's been applied
             }
@@ -296,13 +301,25 @@ io.on('connection', (socket) => {
         
         io.to(data.gameId).emit('turnChanged', game);
         
-        // Check if game should end (max guesses reached)
+        // Check if game should end (max guesses reached for this player)
         if (player.row >= 6) {
             game.status = 'finished';
             io.to(data.gameId).emit('gameOver', {
-                winner: isOpponent.id,
+                winner: opponent.id,
                 word: game.word
             });
+            return;
+        }
+        
+        // Check if total guesses reached (both players combined)
+        if (game.totalGuesses >= 12) {
+            game.status = 'finished';
+            // If no one won, it's a tie - but since we check for win above, this shouldn't happen
+            io.to(data.gameId).emit('gameOver', {
+                winner: null,
+                word: game.word
+            });
+            return;
         }
     });
     
