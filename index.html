@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cardle - Multiplayer Wordle with Power Cards</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Cardle</h1>
+        </header>
+
+        <!-- Lobby Screen -->
+        <div id="lobby" class="screen active">
+            <div class="lobby-content">
+                <h2>Join or Create Game</h2>
+                <div class="input-group">
+                    <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+                </div>
+                <div class="button-group">
+                    <button id="createGameBtn" class="btn btn-primary">Create Game</button>
+                    <button id="joinGameBtn" class="btn btn-secondary">Join Game</button>
+                </div>
+                <div class="input-group" id="joinGroup" style="display: none;">
+                    <input type="text" id="gameIdInput" placeholder="Enter Game ID">
+                    <button id="joinWithIdBtn" class="btn btn-primary">Join</button>
+                </div>
+                <div id="gameIdDisplay" class="game-id-display" style="display: none;">
+                    <p>Share this Game ID:</p>
+                    <p class="game-id" id="gameId"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Waiting Screen -->
+        <div id="waiting" class="screen">
+            <div class="waiting-content">
+                <h2>Waiting for Players...</h2>
+                <div id="gameIdDisplayWaiting" class="game-id-display" style="display: none;">
+                    <p>Share this Game ID:</p>
+                    <p class="game-id" id="gameIdWaiting"></p>
+                </div>
+                <div class="players-list">
+                    <div class="player-item" id="player1">
+                        <span class="player-name">Player 1: <span id="p1Name">-</span></span>
+                    </div>
+                    <div class="player-item" id="player2">
+                        <span class="player-name">Player 2: <span id="p2Name">-</span></span>
+                    </div>
+                </div>
+                <p id="waitingMessage">Waiting for another player to join...</p>
+            </div>
+        </div>
+
+        <!-- Game Screen -->
+        <div id="game" class="screen">
+            <div class="game-content">
+                <!-- Card Selection Phase -->
+                <div id="cardSelection" class="card-selection-phase">
+                    <h3>Choose a Card</h3>
+                    <div class="cards-container" id="cardsContainer">
+                        <!-- Cards will be dynamically generated -->
+                    </div>
+                </div>
+
+                <!-- Game Board -->
+                <div id="gameBoard" class="game-board">
+                    <div class="turn-indicator" id="turnIndicator">
+                        <span id="turnMessage"></span>
+                    </div>
+                    
+                    <div class="board-container" id="boardContainer">
+                        <!-- Game board rows will be generated here -->
+                    </div>
+
+                    <div class="input-section">
+                        <input type="text" id="wordInput" placeholder="Guess" maxlength="5" autocomplete="off">
+                        <button id="submitBtn" class="btn btn-primary">Submit</button>
+                    </div>
+
+                    <div class="keyboard" id="keyboard">
+                        <!-- Keyboard will be generated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Card Splash Overlay -->
+                <div id="cardSplash" class="card-splash-overlay">
+                    <div class="card-splash-content">
+                        <div class="splash-card" id="splashCard">
+                            <div class="splash-card-title" id="splashCardTitle"></div>
+                            <div class="splash-card-description" id="splashCardDescription"></div>
+                        </div>
+                        <div class="splash-player" id="splashPlayer"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="gameOver" class="screen">
+            <div class="game-over-content">
+                <h2 id="gameOverTitle">Game Over</h2>
+                <p id="gameOverMessage"></p>
+                <button id="playAgainBtn" class="btn btn-primary">Play Again</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="client.js"></script>
+</body>
+</html>
+
