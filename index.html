@@ -15,21 +15,41 @@
         <!-- Lobby Screen -->
         <div id="lobby" class="screen active">
             <div class="lobby-content">
-                <h2>Join or Create Game</h2>
-                <div class="input-group">
-                    <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+                <div class="lobby-header">
+                    <div class="lobby-icon">🎮</div>
+                    <h2 class="lobby-title">Join or Create Game</h2>
+                    <p class="lobby-subtitle">Enter your name to get started</p>
                 </div>
-                <div class="button-group">
-                    <button id="createGameBtn" class="btn btn-primary">Create Game</button>
-                    <button id="joinGameBtn" class="btn btn-secondary">Join Game</button>
-                </div>
-                <div class="input-group" id="joinGroup" style="display: none;">
-                    <input type="text" id="gameIdInput" placeholder="Enter Game ID">
-                    <button id="joinWithIdBtn" class="btn btn-primary">Join</button>
-                </div>
-                <div id="gameIdDisplay" class="game-id-display" style="display: none;">
-                    <p>Share this Game ID:</p>
-                    <p class="game-id" id="gameId"></p>
+                <div class="lobby-form">
+                    <div class="input-group">
+                        <label for="playerName" class="input-label">Your Name</label>
+                        <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+                    </div>
+                    <div class="button-group">
+                        <button id="createGameBtn" class="btn btn-primary">
+                            <span class="btn-icon">✨</span>
+                            <span>Create Game</span>
+                        </button>
+                        <button id="joinGameBtn" class="btn btn-secondary">
+                            <span class="btn-icon">🔗</span>
+                            <span>Join Game</span>
+                        </button>
+                    </div>
+                    <div class="join-section" id="joinGroup" style="display: none;">
+                        <div class="input-group">
+                            <label for="gameIdInput" class="input-label">Game ID</label>
+                            <input type="text" id="gameIdInput" placeholder="Enter Game ID">
+                        </div>
+                        <button id="joinWithIdBtn" class="btn btn-primary btn-full">
+                            <span class="btn-icon">🚀</span>
+                            <span>Join Game</span>
+                        </button>
+                    </div>
+                    <div id="gameIdDisplay" class="game-id-display" style="display: none;">
+                        <div class="game-id-label">Share this Game ID:</div>
+                        <div class="game-id" id="gameId"></div>
+                        <div class="game-id-hint">Share this code with your friend to play together</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -71,8 +91,20 @@
                         <span id="turnMessage"></span>
                     </div>
                     
-                    <div class="board-container" id="boardContainer">
-                        <!-- Game board rows will be generated here -->
+                    <div class="board-scroll-wrapper">
+                        <button class="scroll-arrow scroll-arrow-up" id="scrollUpBtn" aria-label="Scroll up">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="18 15 12 9 6 15"></polyline>
+                            </svg>
+                        </button>
+                        <div class="board-container" id="boardContainer">
+                            <!-- Game board rows will be generated here -->
+                        </div>
+                        <button class="scroll-arrow scroll-arrow-down" id="scrollDownBtn" aria-label="Scroll down">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
                     </div>
 
                     <div class="input-section">
@@ -101,9 +133,11 @@
         <!-- Game Over Screen -->
         <div id="gameOver" class="screen">
             <div class="game-over-content">
-                <h2 id="gameOverTitle">Game Over</h2>
-                <p id="gameOverMessage"></p>
-                <button id="playAgainBtn" class="btn btn-primary">Play Again</button>
+                <div class="game-over-icon" id="gameOverIcon">🎉</div>
+                <h2 id="gameOverTitle" class="game-over-title">Game Over</h2>
+                <p id="gameOverMessage" class="game-over-message"></p>
+                <div class="game-over-word" id="gameOverWord"></div>
+                <button id="playAgainBtn" class="btn btn-primary game-over-button">Play Again</button>
             </div>
         </div>
     </div>
