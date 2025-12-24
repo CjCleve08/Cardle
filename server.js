@@ -820,6 +820,27 @@ io.on('connection', (socket) => {
         // Removed the 6 guess limit check
     });
     
+    socket.on('chatMessage', (data) => {
+        const game = games.get(data.gameId);
+        if (!game) return;
+        
+        // Verify player is in the game
+        const player = game.players.find(p => p.id === socket.id);
+        if (!player) return;
+        
+        // Validate message
+        const message = (data.message || '').trim();
+        if (!message || message.length > 200) return;
+        
+        // Broadcast message to all players in the game
+        io.to(data.gameId).emit('chatMessage', {
+            playerId: socket.id,
+            playerName: player.name,
+            message: message,
+            timestamp: Date.now()
+        });
+    });
+    
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         const playerData = players.get(socket.id);

@@ -124,8 +124,10 @@
                     </div>
                 </div>
 
-                <!-- Game Board -->
-                <div id="gameBoard" class="game-board">
+                <!-- Game Layout Container -->
+                <div class="game-layout">
+                    <!-- Game Board -->
+                    <div id="gameBoard" class="game-board">
                     <div class="turn-indicator" id="turnIndicator">
                         <span id="turnMessage"></span>
                     </div>
@@ -154,6 +156,33 @@
                     <div class="keyboard" id="keyboard">
                         <!-- Keyboard will be generated dynamically -->
                     </div>
+                    </div>
+
+                    <!-- Chat Section -->
+                    <div class="chat-container" id="chatContainer">
+                        <div class="chat-header">
+                            <h3>Chat</h3>
+                            <button id="chatToggleBtn" class="chat-toggle-btn" title="Toggle Chat">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="9 18 15 12 9 6"></polyline>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="chat-messages" id="chatMessages">
+                            <!-- Messages will be displayed here -->
+                        </div>
+                        <div class="chat-input-container">
+                            <input type="text" id="chatInput" placeholder="Type a message..." maxlength="200" autocomplete="off">
+                            <button id="chatSendBtn" class="btn btn-primary">Send</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Chat Toggle Button (shown when chat is hidden) -->
+                    <button id="chatShowBtn" class="chat-show-btn" title="Show Chat" style="display: none;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="15 18 9 12 15 6"></polyline>
+                        </svg>
+                    </button>
                 </div>
 
                 <!-- Card Splash Overlay -->

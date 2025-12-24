@@ -434,6 +434,31 @@ socket.on('cardPlayed', (data) => {
     }
 });
 
+socket.on('chatMessage', (data) => {
+    // Receive and display chat message
+    displayChatMessage(data.playerName, data.message, data.timestamp, data.playerId === currentPlayer);
+    
+    // Flash the show chat button if chat is hidden and it's not your own message
+    const chatContainer = document.getElementById('chatContainer');
+    const chatShowBtn = document.getElementById('chatShowBtn');
+    
+    if (chatContainer && chatShowBtn && chatContainer.classList.contains('hidden') && data.playerId !== currentPlayer) {
+        // Remove any existing flash class
+        chatShowBtn.classList.remove('flash');
+        
+        // Force reflow to restart animation
+        void chatShowBtn.offsetWidth;
+        
+        // Add flash class
+        chatShowBtn.classList.add('flash');
+        
+        // Remove flash class after animation completes (3 flashes * 0.6s = 1.8s)
+        setTimeout(() => {
+            chatShowBtn.classList.remove('flash');
+        }, 1800);
+    }
+});
+
 // UI Functions
 function showScreen(screenName) {
     Object.values(screens).forEach(screen => screen.classList.remove('active'));
@@ -458,6 +483,12 @@ function initializeGame(data) {
     createKeyboard();
     updateTurnIndicator();
     updatePlayerStatus();
+    
+    // Clear chat messages for new game
+    const chatMessages = document.getElementById('chatMessages');
+    if (chatMessages) {
+        chatMessages.innerHTML = '';
+    }
     
     if (data.currentTurn === currentPlayer) {
         // It's my turn - show card selection and enable input
@@ -1470,10 +1501,100 @@ document.getElementById('playAgainBtn').addEventListener('click', () => {
     location.reload();
 });
 
+// Chat Functions
+function displayChatMessage(playerName, message, timestamp, isOwnMessage) {
+    const chatMessages = document.getElementById('chatMessages');
+    if (!chatMessages) return;
+    
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'chat-message' + (isOwnMessage ? ' own-message' : '');
+    
+    const time = new Date(timestamp);
+    const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    messageDiv.innerHTML = `
+        <div class="chat-message-header">
+            <span class="chat-message-name">${escapeHtml(playerName)}</span>
+            <span class="chat-message-time">${timeStr}</span>
+        </div>
+        <div class="chat-message-text">${escapeHtml(message)}</div>
+    `;
+    
+    chatMessages.appendChild(messageDiv);
+    
+    // Auto-scroll to bottom
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function sendChatMessage() {
+    if (!gameState || !gameState.gameId) return;
+    
+    const chatInput = document.getElementById('chatInput');
+    const message = chatInput.value.trim();
+    
+    if (!message) return;
+    
+    socket.emit('chatMessage', {
+        gameId: gameState.gameId,
+        playerId: currentPlayer,
+        message: message
+    });
+    
+    chatInput.value = '';
+}
+
+// Chat toggle functionality
+function toggleChat() {
+    const chatContainer = document.getElementById('chatContainer');
+    const chatShowBtn = document.getElementById('chatShowBtn');
+    const chatToggleBtn = document.getElementById('chatToggleBtn');
+    
+    if (chatContainer && chatShowBtn) {
+        const isHidden = chatContainer.classList.contains('hidden');
+        
+        if (isHidden) {
+            // Show chat
+            chatContainer.classList.remove('hidden');
+            chatShowBtn.style.display = 'none';
+            // Remove flash animation when opening chat
+            chatShowBtn.classList.remove('flash');
+        } else {
+            // Hide chat
+            chatContainer.classList.add('hidden');
+            chatShowBtn.style.display = 'flex';
+        }
+    }
+}
+
+// Chat event listeners
+document.getElementById('chatSendBtn').addEventListener('click', sendChatMessage);
+
+document.getElementById('chatInput').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        sendChatMessage();
+    }
+});
+
+// Chat toggle buttons
+document.getElementById('chatToggleBtn').addEventListener('click', toggleChat);
+document.getElementById('chatShowBtn').addEventListener('click', toggleChat);
+
 // Keyboard input handling
 document.addEventListener('keydown', (e) => {
     if (screens.game.classList.contains('active')) {
         const input = document.getElementById('wordInput');
+        const chatInput = document.getElementById('chatInput');
+        
+        // If chat input is focused, don't handle game keyboard input at all
+        if (document.activeElement === chatInput) {
+            return; // Let browser handle chat input naturally
+        }
         
         // Handle Enter key to submit (works whether input is focused or not)
         if (e.key === 'Enter') {
