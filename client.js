@@ -64,7 +64,7 @@ const ALL_CARDS = getAllCards();
 
 // Deck Management
 const DECK_STORAGE_KEY = 'cardle_player_deck';
-const DECK_SIZE = 7;
+const DECK_SIZE = 6;
 
 function getPlayerDeck() {
     const stored = localStorage.getItem(DECK_STORAGE_KEY);
@@ -78,7 +78,7 @@ function getPlayerDeck() {
             console.error('Error loading deck:', e);
         }
     }
-    // Default deck: first 7 cards (or all if less than 7)
+    // Default deck: first 6 cards (or all if less than 6)
     const defaultDeck = getAllCards().slice(0, Math.min(DECK_SIZE, getAllCards().length));
     return defaultDeck.map(c => c.id);
 }
@@ -353,20 +353,105 @@ socket.on('requestHand', (data) => {
     });
 });
 
+socket.on('requestHandForSteal', (data) => {
+    // Opponent is requesting to see our hand for card stealing
+    // Ensure we have cards in hand - generate them if needed
+    if (!window.playerCardHand || window.playerCardHand.length < 3) {
+        // Initialize deck pool if needed
+        if (!window.deckPool || window.deckPool.length === 0) {
+            initializeDeckPool();
+        }
+        
+        // Draw cards to fill hand
+        if (!window.playerCardHand) {
+            window.playerCardHand = [];
+        }
+        while (window.playerCardHand.length < 3) {
+            const newCard = drawCardFromDeck();
+            window.playerCardHand.push(newCard);
+        }
+    }
+    
+    // Send current hand to server (up to 3 cards)
+    const handToSend = window.playerCardHand.slice(0, 3).map(card => ({
+        id: card.id,
+        title: card.title,
+        description: card.description
+    }));
+    
+    socket.emit('sendHandForSteal', {
+        gameId: data.gameId,
+        requesterId: data.requesterId,
+        cards: handToSend
+    });
+});
+
+socket.on('requestHandForBlock', (data) => {
+    // Opponent is requesting to see our hand for card blocking
+    // Ensure we have cards in hand - generate them if needed
+    if (!window.playerCardHand || window.playerCardHand.length < 3) {
+        // Initialize deck pool if needed
+        if (!window.deckPool || window.deckPool.length === 0) {
+            initializeDeckPool();
+        }
+        
+        // Draw cards to fill hand
+        if (!window.playerCardHand) {
+            window.playerCardHand = [];
+        }
+        while (window.playerCardHand.length < 3) {
+            const newCard = drawCardFromDeck();
+            window.playerCardHand.push(newCard);
+        }
+    }
+    
+    // Send current hand to server (up to 3 cards)
+    const handToSend = window.playerCardHand.slice(0, 3).map(card => ({
+        id: card.id,
+        title: card.title,
+        description: card.description
+    }));
+    
+    socket.emit('sendHandForBlock', {
+        gameId: data.gameId,
+        requesterId: data.requesterId,
+        cards: handToSend
+    });
+});
+
+socket.on('cardBlocked', (data) => {
+    // A card in our hand has been blocked
+    window.blockedCardId = data.blockedCardId;
+    // Update hand panel to show blocked card (no message shown to keep it secret)
+    updateHandPanel();
+});
+
 socket.on('opponentHandRevealed', (data) => {
     // Display opponent's hand that was revealed
     displayOpponentHand(data.cards, data.opponentName);
+});
+
+socket.on('opponentHandForSteal', (data) => {
+    // Display opponent's hand for card stealing - make cards selectable
+    displayOpponentHandForSteal(data.cards, data.opponentName, data.gameId);
 });
 
 function displayOpponentHand(cards, opponentName) {
     const overlay = document.getElementById('handRevealOverlay');
     const cardsContainer = document.getElementById('handRevealCards');
     const button = document.getElementById('handRevealButton');
+    const title = document.querySelector('.hand-reveal-title');
     
     if (!overlay || !cardsContainer || !button) {
         console.error('Hand reveal elements not found');
         return;
     }
+    
+    // Reset title to default
+    if (title) {
+        title.textContent = 'Opponent\'s Hand Revealed';
+    }
+    button.textContent = 'Got it!';
     
     // Clear previous cards
     cardsContainer.innerHTML = '';
@@ -401,6 +486,108 @@ function displayOpponentHand(cards, opponentName) {
         overlay.classList.add('hiding');
         setTimeout(() => {
             overlay.classList.remove('show', 'hiding');
+        }, 300);
+        button.removeEventListener('click', closeHandReveal);
+    };
+    
+    button.addEventListener('click', closeHandReveal);
+}
+
+function displayOpponentHandForSteal(cards, opponentName, gameId) {
+    const overlay = document.getElementById('handRevealOverlay');
+    const cardsContainer = document.getElementById('handRevealCards');
+    const button = document.getElementById('handRevealButton');
+    const title = document.querySelector('.hand-reveal-title');
+    
+    if (!overlay || !cardsContainer || !button || !title) {
+        console.error('Hand reveal elements not found');
+        return;
+    }
+    
+    // Update title to indicate selection mode
+    title.textContent = 'Select a Card to Steal';
+    
+    // Clear previous cards
+    cardsContainer.innerHTML = '';
+    
+    // Display each card as clickable
+    if (cards && cards.length > 0) {
+        cards.forEach((card, index) => {
+            const cardElement = document.createElement('div');
+            cardElement.className = 'hand-reveal-card';
+            cardElement.style.animationDelay = `${index * 0.1}s`;
+            cardElement.style.cursor = 'pointer';
+            cardElement.innerHTML = `
+                <div class="hand-reveal-card-title">${card.title}</div>
+                <div class="hand-reveal-card-description">${card.description}</div>
+            `;
+            
+            // Add hover effect
+            cardElement.addEventListener('mouseenter', () => {
+                cardElement.style.transform = 'translateY(-5px) scale(1.05)';
+                cardElement.style.borderColor = '#6aaa64';
+                cardElement.style.boxShadow = '0 12px 24px rgba(106, 170, 100, 0.4)';
+            });
+            
+            cardElement.addEventListener('mouseleave', () => {
+                cardElement.style.transform = '';
+                cardElement.style.borderColor = '';
+                cardElement.style.boxShadow = '';
+            });
+            
+            // Add click handler to select and steal the card
+            cardElement.addEventListener('click', () => {
+                // Hide overlay immediately
+                overlay.classList.add('hiding');
+                setTimeout(() => {
+                    overlay.classList.remove('show', 'hiding');
+                    // Reset title and button
+                    title.textContent = 'Opponent\'s Hand Revealed';
+                    button.textContent = 'Got it!';
+                }, 300);
+                
+                // Show splash immediately for better feedback
+                const config = getCardConfig();
+                if (config && config[card.id]) {
+                    const splashBehavior = config[card.id].modifier?.splashBehavior || 'show';
+                    if (splashBehavior === 'show') {
+                        showCardSplash(card, 'You');
+                    }
+                }
+                
+                // Send the selected card to server
+                socket.emit('selectOpponentCard', {
+                    gameId: gameId,
+                    card: card
+                });
+            });
+            
+            cardsContainer.appendChild(cardElement);
+        });
+    } else {
+        // No cards in hand
+        const noCardsMsg = document.createElement('div');
+        noCardsMsg.style.cssText = 'color: #d7dadc; font-size: 1.1rem; padding: 20px;';
+        noCardsMsg.textContent = 'Opponent has no cards in hand';
+        cardsContainer.appendChild(noCardsMsg);
+    }
+    
+    // Show overlay
+    overlay.classList.remove('show', 'hiding');
+    void overlay.offsetWidth; // Force reflow
+    overlay.classList.add('show');
+    
+    // Update button text
+    button.textContent = 'Cancel';
+    
+    // Close handler (cancel)
+    const closeHandReveal = () => {
+        overlay.classList.add('hiding');
+        setTimeout(() => {
+            overlay.classList.remove('show', 'hiding');
+            // Reset title
+            title.textContent = 'Opponent\'s Hand Revealed';
+            button.textContent = 'Got it!';
         }, 300);
         button.removeEventListener('click', closeHandReveal);
     };
@@ -509,6 +696,7 @@ function initializeGame(data) {
     currentRow = 0;
     // Reset card hand and initialize deck pool for new game
     window.playerCardHand = [];
+    window.blockedCardId = null; // Clear blocked card for new game
     initializeDeckPool();
     createBoard();
     createKeyboard();
@@ -764,11 +952,20 @@ function updateHandPanel() {
     if (window.playerCardHand && window.playerCardHand.length > 0) {
         window.playerCardHand.slice(0, 3).forEach((card) => {
             const cardElement = document.createElement('div');
+            const isBlocked = window.blockedCardId === card.id;
             cardElement.className = 'hand-card-item';
+            
+            if (isBlocked) {
+                cardElement.style.opacity = '0.4';
+                cardElement.style.filter = 'grayscale(100%)';
+            }
             
             const title = document.createElement('div');
             title.className = 'hand-card-title';
             title.textContent = card.title || 'Unknown Card';
+            if (isBlocked) {
+                title.textContent += ' (Blocked)';
+            }
             
             const description = document.createElement('div');
             description.className = 'hand-card-description';
@@ -850,6 +1047,14 @@ function generateCards() {
         window.playerCardHand.push(newCard);
     }
     
+    // Check if blocked card is still in hand - clear it if not
+    if (window.blockedCardId) {
+        const blockedCardStillInHand = window.playerCardHand.slice(0, 3).some(c => c.id === window.blockedCardId);
+        if (!blockedCardStillInHand) {
+            window.blockedCardId = null;
+        }
+    }
+    
     // If we're in a card chain, filter out modifier cards that are already in the chain
     let availableCards = window.playerCardHand.slice(0, 3);
     if (cardChainActive) {
@@ -876,17 +1081,27 @@ function generateCards() {
         }
     }
     
-    // Show available cards (up to 3)
+    // Show available cards (up to 3, including blocked card but greyed out)
     const selectedCards = availableCards.slice(0, 3);
     
     selectedCards.forEach((card, index) => {
         const cardElement = document.createElement('div');
+        const isBlocked = window.blockedCardId === card.id;
         cardElement.className = 'card';
+        if (isBlocked) {
+            cardElement.classList.add('blocked');
+            cardElement.style.opacity = '0.4';
+            cardElement.style.filter = 'grayscale(100%)';
+            cardElement.style.cursor = 'not-allowed';
+            cardElement.style.pointerEvents = 'none';
+        }
         cardElement.innerHTML = `
             <div class="card-title">${card.title}</div>
             <div class="card-description">${card.description}</div>
         `;
-        cardElement.onclick = () => selectCard(card, cardElement);
+        if (!isBlocked) {
+            cardElement.onclick = () => selectCard(card, cardElement);
+        }
         container.appendChild(cardElement);
     });
     
@@ -898,6 +1113,12 @@ function selectCard(card, cardElement) {
     // Check if player is card locked
     if (isCardLocked()) {
         showGameMessage('Card Locked', 'You cannot use a card this turn!', '🔒');
+        return;
+    }
+    
+    // Check if card is blocked
+    if (window.blockedCardId === card.id) {
+        showGameMessage('🚫', 'Card Blocked', 'This card has been blocked and cannot be used!');
         return;
     }
     
@@ -964,6 +1185,11 @@ function selectCard(card, cardElement) {
             
             if (newCard) {
                 window.playerCardHand.push(newCard);
+            }
+            
+            // Clear blocked card if the blocked card was removed from hand
+            if (window.blockedCardId === card.id) {
+                window.blockedCardId = null;
             }
             
             // Update hand panel after card is selected and replaced

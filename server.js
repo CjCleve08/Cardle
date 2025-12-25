@@ -238,6 +238,111 @@ const CARD_CONFIG = {
         effects: {
             // Hand reveal is handled in selectCard, not onGuess
         }
+    },
+    'blindGuess': {
+        metadata: {
+            id: 'blindGuess',
+            title: 'Blind Guess',
+            description: 'Your opponent\'s next guess will be hidden from them',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                // Find the opponent
+                const opponent = game.players.find(p => p.id !== playerId);
+                if (opponent) {
+                    // Add blind guess effect targeting the opponent
+                    game.activeEffects.push({
+                        type: 'blindGuess',
+                        target: opponent.id,
+                        description: 'Your next guess will be hidden from you',
+                        used: false
+                    });
+                }
+            }
+        }
+    },
+    'cardSteal': {
+        metadata: {
+            id: 'cardSteal',
+            title: 'Card Steal',
+            description: 'Pick a card from your opponent\'s hand to play as your own',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            // Card steal is handled in selectCard, not onGuess
+        }
+    },
+    'greenToGrey': {
+        metadata: {
+            id: 'greenToGrey',
+            title: 'Green to Grey',
+            description: 'Your opponent\'s next green letters will show as grey',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                // Find the opponent
+                const opponent = game.players.find(p => p.id !== playerId);
+                if (opponent) {
+                    // Add greenToGrey effect targeting the opponent
+                    game.activeEffects.push({
+                        type: 'greenToGrey',
+                        target: opponent.id,
+                        description: 'Your green letters will show as grey on your next guess',
+                        used: false
+                    });
+                }
+            },
+            onFeedback: (feedback, isOpponent) => {
+                // Modify feedback for the guesser (when isOpponent is false)
+                // This card targets the opponent, so when they guess, we modify their feedback
+                if (isOpponent) return feedback;
+                const modifiedFeedback = [...feedback];
+                // Change all 'correct' (green) to 'absent' (grey)
+                for (let i = 0; i < feedback.length; i++) {
+                    if (modifiedFeedback[i] === 'correct') {
+                        modifiedFeedback[i] = 'absent';
+                    }
+                }
+                return modifiedFeedback;
+            }
+        }
+    },
+    'cardBlock': {
+        metadata: {
+            id: 'cardBlock',
+            title: 'Card Block',
+            description: 'A random card in your opponent\'s hand is blocked and cannot be used',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            // Card block is handled in selectCard, not onGuess
+        }
     }
 };
 
@@ -611,6 +716,15 @@ io.on('connection', (socket) => {
             return;
         }
         
+        // Check if the selected card is blocked
+        if (game.blockedCards && game.blockedCards.has(socket.id)) {
+            const blockedCardId = game.blockedCards.get(socket.id);
+            if (data.card.id === blockedCardId) {
+                socket.emit('error', { message: 'This card is blocked and cannot be used!' });
+                return;
+            }
+        }
+        
         const player = game.players.find(p => p.id === socket.id);
         
         // Initialize card chain tracking if needed
@@ -679,6 +793,38 @@ io.on('connection', (socket) => {
             }
         }
         
+        // Check if this is a card steal card - trigger it immediately
+        if (realCard.id === 'cardSteal' && opponent) {
+            const opponentSocket = io.sockets.sockets.get(opponent.id);
+            if (opponentSocket) {
+                opponentSocket.emit('requestHandForSteal', {
+                    gameId: data.gameId,
+                    requesterId: socket.id
+                });
+            }
+        }
+        
+        // Show splash based on config (for the player who played it)
+        const splashBehavior = getSplashBehavior(realCard.id);
+        if (splashBehavior === 'show' && !shouldHideFromOpponent) {
+            socket.emit('cardPlayed', {
+                card: realCard,
+                playerName: player ? player.name : 'Player',
+                playerId: socket.id
+            });
+        }
+        
+        // Check if this is a card block card - trigger it immediately
+        if (realCard.id === 'cardBlock' && opponent) {
+            const opponentSocket = io.sockets.sockets.get(opponent.id);
+            if (opponentSocket) {
+                opponentSocket.emit('requestHandForBlock', {
+                    gameId: data.gameId,
+                    requesterId: socket.id
+                });
+            }
+        }
+        
         // Notify the player with the real card
         socket.emit('cardSelected', {
             playerId: socket.id,
@@ -693,9 +839,9 @@ io.on('connection', (socket) => {
             if (opponentSocket) {
                 opponentSocket.emit('cardPlayed', {
                     card: cardToShowOpponent,
-            playerName: player ? player.name : 'Player',
-            playerId: socket.id
-        });
+                    playerName: player ? player.name : 'Player',
+                    playerId: socket.id
+                });
             }
         }
         
@@ -715,6 +861,162 @@ io.on('connection', (socket) => {
                 opponentName: game.players.find(p => p.id === socket.id)?.name || 'Opponent'
             });
         }
+    });
+    
+    socket.on('sendHandForSteal', (data) => {
+        // Opponent is sending their hand in response to a card steal request
+        const game = games.get(data.gameId);
+        if (!game) return;
+        
+        const requesterSocket = io.sockets.sockets.get(data.requesterId);
+        if (requesterSocket) {
+            requesterSocket.emit('opponentHandForSteal', {
+                cards: data.cards,
+                opponentName: game.players.find(p => p.id === socket.id)?.name || 'Opponent',
+                gameId: data.gameId
+            });
+        }
+    });
+    
+    socket.on('sendHandForBlock', (data) => {
+        // Opponent is sending their hand in response to a card block request
+        const game = games.get(data.gameId);
+        if (!game) return;
+        
+        // Initialize blocked cards tracking if needed
+        if (!game.blockedCards) {
+            game.blockedCards = new Map();
+        }
+        
+        // Pick a random card from the opponent's hand to block
+        if (data.cards && data.cards.length > 0) {
+            const randomIndex = Math.floor(Math.random() * data.cards.length);
+            const blockedCardId = data.cards[randomIndex].id;
+            
+            // Block this card for the opponent
+            game.blockedCards.set(socket.id, blockedCardId);
+            
+            // Notify the opponent that a card has been blocked (but don't tell them which one)
+            socket.emit('cardBlocked', {
+                blockedCardId: blockedCardId
+            });
+        }
+    });
+    
+    socket.on('selectOpponentCard', (data) => {
+        // Player is selecting a card from opponent's hand to play
+        const game = games.get(data.gameId);
+        if (!game || game.currentTurn !== socket.id) return;
+        
+        // Check if player is card locked
+        const isCardLocked = game.activeEffects.some(e => 
+            e.type === 'cardLock' && e.target === socket.id && !e.used
+        );
+        if (isCardLocked) {
+            socket.emit('error', { message: 'You cannot use a card this turn - Card Lock is active!' });
+            return;
+        }
+        
+        // Check if the selected card is blocked
+        if (game.blockedCards && game.blockedCards.has(socket.id)) {
+            const blockedCardId = game.blockedCards.get(socket.id);
+            if (data.card.id === blockedCardId) {
+                socket.emit('error', { message: 'This card is blocked and cannot be used!' });
+                return;
+            }
+        }
+        
+        const player = game.players.find(p => p.id === socket.id);
+        
+        // Initialize card chain tracking if needed
+        if (!game.cardChains) {
+            game.cardChains = new Map();
+        }
+        
+        // Get or initialize the card chain for this player
+        let cardChain = game.cardChains.get(socket.id) || [];
+        
+        // The selected card from opponent's hand
+        const stolenCard = data.card;
+        
+        // Check if this card is a modifier card using config
+        const cardIsModifier = isModifierCard(stolenCard.id);
+        
+        // If it's a modifier card, add it to the chain and allow another selection
+        if (cardIsModifier) {
+            cardChain.push(stolenCard);
+            game.cardChains.set(socket.id, cardChain);
+            
+            // Show splash based on config
+            const splashBehavior = getSplashBehavior(stolenCard.id);
+            if (splashBehavior === 'show') {
+                io.to(data.gameId).emit('cardPlayed', {
+                    card: stolenCard,
+                    playerName: player ? player.name : 'Player',
+                    playerId: socket.id
+                });
+            }
+            
+            // Notify the player they can select another card
+            socket.emit('cardSelected', {
+                playerId: socket.id,
+                card: stolenCard,
+                allowSecondCard: true
+            });
+            return;
+        }
+        
+        // This is a regular card (final card in the chain)
+        // Add it to the chain
+        cardChain.push(stolenCard);
+        
+        // Process the card chain using config
+        const realCard = stolenCard; // The last card is always the real card
+        const { cardToShowOpponent, shouldHideFromOpponent } = processCardChain(cardChain, realCard);
+        
+        // Find opponent
+        const opponent = game.players.find(p => p.id !== socket.id);
+        
+        // Store the real card for when guess is submitted (if needed by config)
+        if (cardChain.some(c => needsRealCardStorage(c.id))) {
+            if (!game.phonyCardRealCards) {
+                game.phonyCardRealCards = new Map();
+            }
+            game.phonyCardRealCards.set(socket.id, realCard);
+        }
+        
+        // Show splash based on config (for the player who stole it)
+        const splashBehavior = getSplashBehavior(realCard.id);
+        if (splashBehavior === 'show' && !shouldHideFromOpponent) {
+            socket.emit('cardPlayed', {
+                card: realCard,
+                playerName: player ? player.name : 'Player',
+                playerId: socket.id
+            });
+        }
+        
+        // Notify the player with the real card
+        socket.emit('cardSelected', {
+            playerId: socket.id,
+            card: realCard,
+            hidden: shouldHideFromOpponent,
+            isRealCard: true
+        });
+        
+        // Show card to opponent (fake if phonyCard was used, hidden if hideCard was used)
+        if (opponent && !shouldHideFromOpponent) {
+            const opponentSocket = io.sockets.sockets.get(opponent.id);
+            if (opponentSocket) {
+                opponentSocket.emit('cardPlayed', {
+                    card: cardToShowOpponent,
+                    playerName: player ? player.name : 'Player',
+                    playerId: socket.id
+                });
+            }
+        }
+        
+        // Clear the card chain
+        game.cardChains.delete(socket.id);
     });
     
     socket.on('submitGuess', (data) => {
@@ -794,6 +1096,11 @@ io.on('connection', (socket) => {
             e.type === 'gamblerHide' && e.target === socket.id && !e.used
         );
         
+        // Check if blindGuess is active (hides opponent's guess from themselves)
+        const shouldHideFromSelfBlind = game.activeEffects.some(e => 
+            e.type === 'blindGuess' && e.target === socket.id && !e.used
+        );
+        
         // Check if gamblerReveal is active (reveals a letter)
         const gamblerReveal = game.activeEffects.find(e => 
             e.type === 'gamblerReveal' && e.target === socket.id && !e.used
@@ -804,6 +1111,11 @@ io.on('connection', (socket) => {
             e.type === 'falseFeedback' && e.target === socket.id && !e.used
         );
         
+        // Check if greenToGrey is active (targets the opponent making the guess)
+        const greenToGreyActive = game.activeEffects.some(e => 
+            e.type === 'greenToGrey' && e.target === socket.id && !e.used
+        );
+        
         // Calculate false feedback if active (for opponent's view only)
         let falseFeedback = null;
         if (falseFeedbackActive) {
@@ -812,9 +1124,16 @@ io.on('connection', (socket) => {
             console.log('False feedback calculated. Real:', realFeedback, 'False:', falseFeedback);
         }
         
-        // Send to guesser (hide if gamblerHide is active, otherwise show normally)
-        if (shouldHideFromSelf) {
-            // Hide guess from player themselves (gambler's card bad luck)
+        // Calculate greenToGrey feedback if active (converts green to grey for the player making the guess)
+        let greenToGreyFeedback = null;
+        if (greenToGreyActive) {
+            greenToGreyFeedback = applyCardEffect(realFeedback, { id: 'greenToGrey' }, false);
+            console.log('Green to grey feedback calculated. Real:', realFeedback, 'Modified:', greenToGreyFeedback);
+        }
+        
+        // Send to guesser (hide if gamblerHide or blindGuess is active, otherwise show normally)
+        if (shouldHideFromSelf || shouldHideFromSelfBlind) {
+            // Hide guess from player themselves (gambler's card bad luck or blind guess card)
             socket.emit('guessSubmitted', {
                 playerId: socket.id,
                 guess: null, // Hide the guess
@@ -823,14 +1142,15 @@ io.on('connection', (socket) => {
                 hidden: true
             });
         } else {
-            // Normal display for guesser
-        socket.emit('guessSubmitted', {
-            playerId: socket.id,
-            guess: guess,
-            feedback: realFeedback, // Real feedback for the guesser
+            // Normal display for guesser (apply greenToGrey if active)
+            const guesserFeedback = greenToGreyActive && greenToGreyFeedback ? greenToGreyFeedback : realFeedback;
+            socket.emit('guessSubmitted', {
+                playerId: socket.id,
+                guess: guess,
+                feedback: guesserFeedback, // Real feedback or modified (green to grey) for the guesser
                 row: boardRow,
-            hidden: false
-        });
+                hidden: false
+            });
         }
         
         // Send letter reveal if gambler was lucky
@@ -898,13 +1218,15 @@ io.on('connection', (socket) => {
         
         // Remove used effects (mark as used and remove)
         game.activeEffects = game.activeEffects.filter(e => {
-            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, and gamblerReveal after they've been used on this guess
+            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, and greenToGrey after they've been used on this guess
             if (e.target === socket.id && (
                 e.type === 'hiddenGuess' || 
                 e.type === 'hiddenFeedback' || 
                 e.type === 'falseFeedback' ||
                 e.type === 'gamblerHide' ||
-                e.type === 'gamblerReveal'
+                e.type === 'gamblerReveal' ||
+                e.type === 'blindGuess' ||
+                e.type === 'greenToGrey'
             )) {
                 if (e.type === 'falseFeedback') {
                     console.log('Removing falseFeedback effect after it was applied to player:', socket.id);
