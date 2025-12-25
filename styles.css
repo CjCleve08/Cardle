@@ -188,7 +188,7 @@ header h1 {
 
 .auth-divider span {
     padding: 0 16px;
-}
+    }
 
 /* Lobby Styles */
 #lobby.screen {
@@ -491,8 +491,8 @@ header h1 {
 }
 
 .btn-large:active {
-    transform: translateY(0);
-}
+        transform: translateY(0);
+    }
 
 .matchmaking-status {
     display: flex;

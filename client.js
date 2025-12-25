@@ -147,6 +147,8 @@ async function handleGoogleSignIn() {
         // Auth state change will automatically show lobby
     } catch (error) {
         console.error('Google sign-in error:', error);
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
         let errorMessage = 'Failed to sign in with Google. Please try again.';
         if (error.code === 'auth/popup-closed-by-user') {
             errorMessage = 'Sign-in popup was closed. Please try again.';
@@ -154,6 +156,15 @@ async function handleGoogleSignIn() {
             errorMessage = 'Sign-in popup was blocked. Please allow popups for this site.';
         } else if (error.code === 'auth/cancelled-popup-request') {
             errorMessage = 'Only one popup request is allowed at a time.';
+        } else if (error.code === 'auth/operation-not-allowed') {
+            errorMessage = 'Google sign-in is not enabled. Please enable it in Firebase Console.';
+        } else if (error.code === 'auth/unauthorized-domain') {
+            errorMessage = 'This domain is not authorized for Google sign-in. Please add it in Firebase Console.';
+        } else if (error.code === 'auth/network-request-failed') {
+            errorMessage = 'Network error. Please check your connection and try again.';
+        } else {
+            // Show the actual error message for debugging
+            errorMessage = `Google sign-in failed: ${error.message || error.code || 'Unknown error'}`;
         }
         showAuthError('loginError', errorMessage);
     }
@@ -752,7 +763,7 @@ socket.on('gameStarted', (data) => {
     }
     
     if (ScreenManager.show('game')) {
-        initializeGame(gameState);
+    initializeGame(gameState);
     } else {
         console.error('Failed to show game screen!');
     }
@@ -1727,7 +1738,7 @@ function generateCards() {
             <div class="card-description">${card.description}</div>
         `;
         if (!isBlocked) {
-            cardElement.onclick = () => selectCard(card, cardElement);
+        cardElement.onclick = () => selectCard(card, cardElement);
         }
         container.appendChild(cardElement);
     });
@@ -1768,46 +1779,58 @@ function selectCard(card, cardElement) {
         hidden: isInChain // Mark as hidden if we're in a chain
     });
     
-    // Remove the selected card from hand and draw a new card from deck
-    // (Do this for both hideCard and the second card)
+    // Remove the selected card from hand and cycle it to the back of deck pool
+    // Then draw the next card from the front of the deck pool
     if (window.playerCardHand) {
         const cardIndex = window.playerCardHand.findIndex(c => c.id === card.id);
         if (cardIndex !== -1) {
+            const selectedCardObj = window.playerCardHand[cardIndex];
             window.playerCardHand.splice(cardIndex, 1);
             
-            // Draw a new card from the deck pool
-            // If we're in a card chain, make sure we don't draw a modifier card that's already in chain
+            // Ensure deck pool is initialized
+            if (!window.deckPool || window.deckPool.length === 0) {
+                initializeDeckPool();
+            }
+            
+            // Put the selected card at the BACK of the deck pool (end of cycle)
+            window.deckPool.push(selectedCardObj);
+            
+            // Draw the next card from the FRONT of the deck pool
             let newCard = null;
             let attempts = 0;
-            const maxAttempts = 20; // Prevent infinite loop
+            const maxAttempts = 50; // Prevent infinite loop
             
-            while (!newCard && attempts < maxAttempts) {
-                const drawnCard = drawCardFromDeck();
+            // Draw cards until we get one that's not already in hand
+            while (!newCard && attempts < maxAttempts && window.deckPool.length > 0) {
+                const drawnCard = window.deckPool.shift();
                 
-                // Check if card is already in hand
+                // Check if card is already in hand - if so, put it back at the end and try next
                 if (window.playerCardHand.some(handCard => handCard.id === drawnCard.id)) {
+                    window.deckPool.push(drawnCard);
                     attempts++;
                     continue;
-                }
-                
-                // If in a chain, check modifier card restrictions
-                if (cardChainActive && selectedCard) {
-                    const cardsInChain = [];
-                    if (isModifierCard(selectedCard.id)) {
-                        cardsInChain.push(selectedCard.id);
-                    }
-                    if (isModifierCard(drawnCard.id) && cardsInChain.includes(drawnCard.id)) {
-                        attempts++;
-                        continue;
-                    }
                 }
                 
                 newCard = drawnCard;
             }
             
-            // Fallback: if we couldn't find a suitable card, just draw any card
+            // If deck pool is empty or we couldn't find a suitable card, reshuffle
             if (!newCard) {
-                newCard = drawCardFromDeck();
+                initializeDeckPool();
+                // Remove cards currently in hand from the new pool to avoid duplicates
+                const handCardIds = new Set(window.playerCardHand.map(c => c.id));
+                window.deckPool = window.deckPool.filter(c => !handCardIds.has(c.id));
+                // Draw from the filtered pool
+                if (window.deckPool.length > 0) {
+                    newCard = window.deckPool.shift();
+                } else {
+                    // If pool is still empty after filtering, just use any card from deck
+                    const deckCards = getDeckCards();
+                    const availableCard = deckCards.find(c => !handCardIds.has(c.id)) || deckCards[0];
+                    if (availableCard) {
+                        newCard = availableCard;
+                    }
+                }
             }
             
             if (newCard) {
@@ -1864,7 +1887,7 @@ function updateTurnIndicator() {
             indicator.classList.add('active-turn');
         } else {
             indicator.textContent = 'Your Turn';
-            indicator.classList.add('active-turn');
+        indicator.classList.add('active-turn');
         }
         startTurnTimer();
     } else {

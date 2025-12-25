@@ -22,6 +22,14 @@ To use Firebase authentication and database in Cardle, you need to:
    - Toggle "Enable" to ON
    - Enter a project support email (your email address)
    - Click "Save"
+6. **Configure Authorized Domains** (IMPORTANT for Google sign-in):
+   - Still in **Authentication** → **Settings** tab
+   - Scroll down to **Authorized domains**
+   - Make sure your domain is listed (localhost is there by default)
+   - If deploying to Render or another service, add your domain:
+     - Click "Add domain"
+     - Enter your domain (e.g., `your-app.onrender.com`)
+     - Click "Add"
 
 ## 3. Enable Firestore Database
 
