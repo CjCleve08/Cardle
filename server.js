@@ -308,6 +308,9 @@ app.use(express.static(__dirname));
 const games = new Map();
 const players = new Map();
 
+// Matchmaking queue
+const matchmakingQueue = [];
+
 // Word list (5-letter words)
 const WORDS = [
     'APPLE', 'BEACH', 'CHAIR', 'DANCE', 'EARTH', 'FLAME', 'GLASS', 'HEART',
@@ -393,6 +396,124 @@ io.on('connection', (socket) => {
             if (game) {
                 socket.emit('wordResponse', { word: game.word, gameId: game.gameId });
             }
+        }
+    });
+    
+    // Matchmaking handlers
+    socket.on('findMatch', (data) => {
+        // Check if player is already in queue
+        const existingIndex = matchmakingQueue.findIndex(p => p.id === socket.id);
+        if (existingIndex !== -1) {
+            socket.emit('matchmakingStatus', { status: 'alreadyInQueue' });
+            return;
+        }
+        
+        // Check if player is already in a game
+        const playerData = players.get(socket.id);
+        if (playerData && games.get(playerData.gameId)) {
+            socket.emit('error', { message: 'You are already in a game' });
+            return;
+        }
+        
+        // Add player to queue
+        const player = {
+            id: socket.id,
+            name: data.playerName
+        };
+        
+        matchmakingQueue.push(player);
+        socket.emit('matchmakingStatus', { status: 'searching' });
+        
+        console.log(`Player ${data.playerName} (${socket.id}) joined matchmaking queue. Queue size: ${matchmakingQueue.length}`);
+        
+        // Check if we can match players
+        if (matchmakingQueue.length >= 2) {
+            // Match the first two players
+            const player1 = matchmakingQueue.shift();
+            const player2 = matchmakingQueue.shift();
+            
+            // Create a game for them
+            const gameId = generateGameId();
+            const word = getRandomWord();
+            
+            const game = {
+                gameId: gameId,
+                word: word,
+                players: [
+                    {
+                        id: player1.id,
+                        name: player1.name,
+                        guesses: [],
+                        row: 0
+                    },
+                    {
+                        id: player2.id,
+                        name: player2.name,
+                        guesses: [],
+                        row: 0
+                    }
+                ],
+                currentTurn: player1.id, // Randomly choose first player (or could use Math.random())
+                activeEffects: [],
+                status: 'waiting',
+                totalGuesses: 0
+            };
+            
+            games.set(gameId, game);
+            players.set(player1.id, { gameId: gameId, playerId: player1.id });
+            players.set(player2.id, { gameId: gameId, playerId: player2.id });
+            
+            // Join both players to the game room
+            const player1Socket = io.sockets.sockets.get(player1.id);
+            const player2Socket = io.sockets.sockets.get(player2.id);
+            
+            if (player1Socket) {
+                player1Socket.join(gameId);
+                player1Socket.emit('matchmakingStatus', { status: 'matched' });
+                player1Socket.emit('playerJoinedGame', { playerId: player1.id, gameId: gameId });
+            }
+            
+            if (player2Socket) {
+                player2Socket.join(gameId);
+                player2Socket.emit('matchmakingStatus', { status: 'matched' });
+                player2Socket.emit('playerJoinedGame', { playerId: player2.id, gameId: gameId });
+            }
+            
+            // Notify both players
+            io.to(gameId).emit('playerJoined', { players: game.players });
+            
+            // Start the game
+            setTimeout(() => {
+                console.log('Matchmade game starting. Current turn:', game.currentTurn);
+                console.log('Players:', game.players.map(p => ({ id: p.id, name: p.name })));
+                const gameStateForClients = {
+                    gameId: game.gameId,
+                    currentTurn: game.currentTurn,
+                    players: game.players,
+                    status: game.status,
+                    activeEffects: game.activeEffects,
+                    totalGuesses: game.totalGuesses
+                };
+                
+                game.players.forEach(player => {
+                    const playerSocket = io.sockets.sockets.get(player.id);
+                    if (playerSocket) {
+                        playerSocket.emit('gameStarted', {
+                            ...gameStateForClients,
+                            yourPlayerId: player.id
+                        });
+                    }
+                });
+            }, 1000);
+        }
+    });
+    
+    socket.on('cancelMatchmaking', () => {
+        const index = matchmakingQueue.findIndex(p => p.id === socket.id);
+        if (index !== -1) {
+            matchmakingQueue.splice(index, 1);
+            socket.emit('matchmakingStatus', { status: 'cancelled' });
+            console.log(`Player ${socket.id} left matchmaking queue. Queue size: ${matchmakingQueue.length}`);
         }
     });
     
@@ -843,6 +964,14 @@ io.on('connection', (socket) => {
     
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
+        
+        // Remove from matchmaking queue if present
+        const queueIndex = matchmakingQueue.findIndex(p => p.id === socket.id);
+        if (queueIndex !== -1) {
+            matchmakingQueue.splice(queueIndex, 1);
+            console.log(`Player ${socket.id} removed from matchmaking queue. Queue size: ${matchmakingQueue.length}`);
+        }
+        
         const playerData = players.get(socket.id);
         if (playerData) {
             const game = games.get(playerData.gameId);

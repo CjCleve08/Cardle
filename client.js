@@ -134,6 +134,16 @@ socket.on('playerJoined', (data) => {
 socket.on('gameStarted', (data) => {
     console.log('Game started event received:', data);
     
+    // Hide matchmaking status if visible
+    const matchmakingStatus = document.getElementById('matchmakingStatus');
+    const findMatchBtn = document.getElementById('findMatchBtn');
+    if (matchmakingStatus) {
+        matchmakingStatus.style.display = 'none';
+    }
+    if (findMatchBtn) {
+        findMatchBtn.disabled = false;
+    }
+    
     // Set currentPlayer from the event if not already set
     if (data.yourPlayerId) {
         currentPlayer = data.yourPlayerId;
@@ -426,6 +436,27 @@ socket.on('error', (data) => {
     alert(data.message);
 });
 
+socket.on('matchmakingStatus', (data) => {
+    const matchmakingStatus = document.getElementById('matchmakingStatus');
+    const matchmakingText = document.getElementById('matchmakingText');
+    const findMatchBtn = document.getElementById('findMatchBtn');
+    
+    if (data.status === 'searching') {
+        // Show matchmaking status
+        matchmakingStatus.style.display = 'flex';
+        matchmakingText.textContent = 'Searching for opponent...';
+        findMatchBtn.disabled = true;
+    } else if (data.status === 'matched') {
+        // Hide matchmaking status (game will start)
+        matchmakingStatus.style.display = 'none';
+        findMatchBtn.disabled = false;
+    } else if (data.status === 'cancelled') {
+        // Hide matchmaking status
+        matchmakingStatus.style.display = 'none';
+        findMatchBtn.disabled = false;
+    }
+});
+
 socket.on('cardPlayed', (data) => {
     // Show splash for both players when a card is played
     console.log('Card played event received:', data);
@@ -489,6 +520,9 @@ function initializeGame(data) {
     if (chatMessages) {
         chatMessages.innerHTML = '';
     }
+    
+    // Update hand panel when game initializes
+    updateHandPanel();
     
     if (data.currentTurn === currentPlayer) {
         // It's my turn - show card selection and enable input
@@ -700,6 +734,85 @@ function initializeDeckPool() {
     window.playerCardHand = [];
 }
 
+// Update the hand panel display
+function updateHandPanel() {
+    const handCardsContainer = document.getElementById('handCards');
+    const nextCardContainer = document.getElementById('nextCardContainer');
+    
+    if (!handCardsContainer || !nextCardContainer) {
+        return;
+    }
+    
+    // Ensure deck pool is initialized
+    if (!window.deckPool || window.deckPool.length === 0) {
+        initializeDeckPool();
+    }
+    
+    // Ensure hand has cards (draw if needed)
+    if (!window.playerCardHand) {
+        window.playerCardHand = [];
+    }
+    while (window.playerCardHand.length < 3 && window.deckPool && window.deckPool.length > 0) {
+        const newCard = drawCardFromDeck();
+        window.playerCardHand.push(newCard);
+    }
+    
+    // Clear existing content
+    handCardsContainer.innerHTML = '';
+    
+    // Display current hand (up to 3 cards)
+    if (window.playerCardHand && window.playerCardHand.length > 0) {
+        window.playerCardHand.slice(0, 3).forEach((card) => {
+            const cardElement = document.createElement('div');
+            cardElement.className = 'hand-card-item';
+            
+            const title = document.createElement('div');
+            title.className = 'hand-card-title';
+            title.textContent = card.title || 'Unknown Card';
+            
+            const description = document.createElement('div');
+            description.className = 'hand-card-description';
+            description.textContent = card.description || '';
+            
+            cardElement.appendChild(title);
+            cardElement.appendChild(description);
+            handCardsContainer.appendChild(cardElement);
+        });
+    } else {
+        // Show empty state
+        const emptyState = document.createElement('div');
+        emptyState.className = 'hand-card-item';
+        emptyState.style.opacity = '0.5';
+        emptyState.innerHTML = '<div class="hand-card-description">No cards in hand</div>';
+        handCardsContainer.appendChild(emptyState);
+    }
+    
+    // Display next card in rotation
+    nextCardContainer.innerHTML = '';
+    if (window.deckPool && window.deckPool.length > 0) {
+        const nextCard = window.deckPool[0];
+        const nextCardElement = document.createElement('div');
+        
+        const title = document.createElement('div');
+        title.className = 'next-card-title';
+        title.textContent = nextCard.title || 'Unknown Card';
+        
+        const description = document.createElement('div');
+        description.className = 'next-card-description';
+        description.textContent = nextCard.description || '';
+        
+        nextCardElement.appendChild(title);
+        nextCardElement.appendChild(description);
+        nextCardContainer.appendChild(nextCardElement);
+    } else {
+        // Deck is empty or will be reshuffled
+        const emptyState = document.createElement('div');
+        emptyState.className = 'next-card-description';
+        emptyState.textContent = 'Deck will be reshuffled';
+        nextCardContainer.appendChild(emptyState);
+    }
+}
+
 function drawCardFromDeck() {
     // If deck pool is empty, reshuffle
     if (!window.deckPool || window.deckPool.length === 0) {
@@ -776,6 +889,9 @@ function generateCards() {
         cardElement.onclick = () => selectCard(card, cardElement);
         container.appendChild(cardElement);
     });
+    
+    // Update hand panel after cards are generated
+    updateHandPanel();
 }
 
 function selectCard(card, cardElement) {
@@ -849,6 +965,9 @@ function selectCard(card, cardElement) {
             if (newCard) {
                 window.playerCardHand.push(newCard);
             }
+            
+            // Update hand panel after card is selected and replaced
+            updateHandPanel();
         }
     }
     
@@ -1436,10 +1555,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 100);
 });
 
+document.getElementById('findMatchBtn').addEventListener('click', () => {
+    const name = document.getElementById('playerName').value.trim();
+    if (name) {
+        closeDeckBuilder(); // Close deck builder if open
+        socket.emit('findMatch', { playerName: name });
+    } else {
+        alert('Please enter your name');
+    }
+});
+
+document.getElementById('cancelMatchmakingBtn').addEventListener('click', () => {
+    socket.emit('cancelMatchmaking');
+});
+
 document.getElementById('createGameBtn').addEventListener('click', () => {
     const name = document.getElementById('playerName').value.trim();
     if (name) {
         closeDeckBuilder(); // Close deck builder if open
+        // Cancel matchmaking if active
+        socket.emit('cancelMatchmaking');
         socket.emit('createGame', { playerName: name });
     } else {
         alert('Please enter your name');
@@ -1447,11 +1582,42 @@ document.getElementById('createGameBtn').addEventListener('click', () => {
 });
 
 document.getElementById('joinGameBtn').addEventListener('click', () => {
+    // Cancel matchmaking if active
+    socket.emit('cancelMatchmaking');
     document.getElementById('joinGroup').style.display = 'block';
 });
 
 document.getElementById('deckBuilderBtn').addEventListener('click', () => {
     openDeckBuilder();
+});
+
+// Help modal functions
+function openHelp() {
+    const helpOverlay = document.getElementById('helpOverlay');
+    if (helpOverlay) {
+        helpOverlay.style.display = 'flex';
+        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+    }
+}
+
+function closeHelp() {
+    const helpOverlay = document.getElementById('helpOverlay');
+    if (helpOverlay) {
+        helpOverlay.style.display = 'none';
+        document.body.style.overflow = ''; // Restore scrolling
+    }
+}
+
+// Help button event listeners
+document.getElementById('helpBtn').addEventListener('click', openHelp);
+document.getElementById('closeHelpBtn').addEventListener('click', closeHelp);
+document.getElementById('closeHelpBtnBottom').addEventListener('click', closeHelp);
+
+// Close help when clicking outside the modal
+document.getElementById('helpOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'helpOverlay') {
+        closeHelp();
+    }
 });
 
 document.getElementById('saveDeckBtn').addEventListener('click', () => {
@@ -1478,6 +1644,8 @@ document.getElementById('joinWithIdBtn').addEventListener('click', () => {
     const gameId = document.getElementById('gameIdInput').value.trim();
     if (name && gameId) {
         closeDeckBuilder(); // Close deck builder if open
+        // Cancel matchmaking if active
+        socket.emit('cancelMatchmaking');
         socket.emit('joinGame', { playerName: name, gameId: gameId });
     } else {
         alert('Please enter your name and game ID');

@@ -8,15 +8,16 @@
 </head>
 <body>
     <div class="container">
-        <header>
-            <h1>Cardle</h1>
-        </header>
-
         <!-- Lobby Screen -->
         <div id="lobby" class="screen active">
             <div class="lobby-content">
                 <div class="lobby-header">
-                    <div class="lobby-icon">🎮</div>
+                    <button id="helpBtn" class="help-btn" title="How to Play">
+                        <span>?</span>
+                    </button>
+                    <div class="lobby-logo-container">
+                        <img src="images/CardleLogo.png" alt="Cardle Logo" class="lobby-logo">
+                    </div>
                     <h2 class="lobby-title">Join or Create Game</h2>
                     <p class="lobby-subtitle">Enter your name to get started</p>
                 </div>
@@ -26,7 +27,11 @@
                     <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
                 </div>
                 <div class="button-group">
-                        <button id="createGameBtn" class="btn btn-primary">
+                        <button id="findMatchBtn" class="btn btn-primary">
+                            <span class="btn-icon">⚡</span>
+                            <span>Find Match</span>
+                        </button>
+                        <button id="createGameBtn" class="btn btn-secondary">
                             <span class="btn-icon">✨</span>
                             <span>Create Game</span>
                         </button>
@@ -38,6 +43,11 @@
                             <span class="btn-icon">🃏</span>
                             <span>Build Deck</span>
                         </button>
+                </div>
+                <div id="matchmakingStatus" class="matchmaking-status" style="display: none;">
+                    <div class="matchmaking-spinner"></div>
+                    <span id="matchmakingText">Searching for opponent...</span>
+                    <button id="cancelMatchmakingBtn" class="btn btn-secondary btn-small">Cancel</button>
                 </div>
                     <div class="join-section" id="joinGroup" style="display: none;">
                         <div class="input-group">
@@ -53,6 +63,78 @@
                         <div class="game-id-label">Share this Game ID:</div>
                         <div class="game-id" id="gameId"></div>
                         <div class="game-id-hint">Share this code with your friend to play together</div>
+                    </div>
+                </div>
+                
+                <!-- Help Overlay -->
+                <div id="helpOverlay" class="help-overlay" style="display: none;">
+                    <div class="help-modal">
+                        <div class="help-header">
+                            <h2>How to Play Cardle</h2>
+                            <button id="closeHelpBtn" class="close-btn">✕</button>
+                        </div>
+                        <div class="help-content">
+                            <div class="help-section">
+                                <h3>🎯 Objective</h3>
+                                <p>Guess the 5-letter word before your opponent! Use strategy cards to gain an advantage.</p>
+                            </div>
+                            
+                            <div class="help-section">
+                                <h3>📝 How to Play</h3>
+                                <ol>
+                                    <li><strong>Choose a Card:</strong> At the start of your turn, select a power card from your hand</li>
+                                    <li><strong>Make a Guess:</strong> Enter a 5-letter word and submit</li>
+                                    <li><strong>Get Feedback:</strong> Letters turn green (correct position), yellow (in word, wrong position), or gray (not in word)</li>
+                                    <li><strong>Use Clues:</strong> Use the feedback to narrow down the word</li>
+                                    <li><strong>Win:</strong> First player to guess the word correctly wins!</li>
+                                </ol>
+                            </div>
+                            
+                            <div class="help-section">
+                                <h3>🃏 Power Cards</h3>
+                                <p>Each turn, you can play a card to help yourself or hinder your opponent:</p>
+                                <ul>
+                                    <li><strong>Help Cards:</strong> Give you advantages like extra turns, hidden guesses, or hidden feedback</li>
+                                    <li><strong>Hurt Cards:</strong> Disrupt your opponent with false feedback, card locks, or hidden guesses</li>
+                                    <li><strong>Special Cards:</strong> Some cards can be chained together for powerful combos</li>
+                                </ul>
+                            </div>
+                            
+                            <div class="help-section">
+                                <h3>🎮 Turn Structure</h3>
+                                <ol>
+                                    <li>Wait for your turn (indicated at the top of the screen)</li>
+                                    <li>Select a card from your hand</li>
+                                    <li>Type your 5-letter guess</li>
+                                    <li>Press Enter or click Submit</li>
+                                    <li>Watch the feedback and plan your next move</li>
+                                </ol>
+                            </div>
+                            
+                            <div class="help-section">
+                                <h3>💡 Tips</h3>
+                                <ul>
+                                    <li>Start with common letters (E, A, R, T, O) to get information quickly</li>
+                                    <li>Use cards strategically - save powerful cards for key moments</li>
+                                    <li>Pay attention to your opponent's guesses to learn about the word</li>
+                                    <li>Build your deck in the Deck Builder to customize your strategy</li>
+                                    <li>Use the chat to communicate with your opponent (or distract them!)</li>
+                                </ul>
+                            </div>
+                            
+                            <div class="help-section">
+                                <h3>⌨️ Controls</h3>
+                                <ul>
+                                    <li><strong>Keyboard:</strong> Type letters directly or use the on-screen keyboard</li>
+                                    <li><strong>Enter:</strong> Submit your guess</li>
+                                    <li><strong>Backspace:</strong> Delete letters</li>
+                                    <li><strong>Chat:</strong> Click the chat icon to toggle the chat panel</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="help-footer">
+                            <button id="closeHelpBtnBottom" class="btn btn-primary">Got it!</button>
+                        </div>
                     </div>
                 </div>
                 
@@ -126,8 +208,29 @@
 
                 <!-- Game Layout Container -->
                 <div class="game-layout">
+                    <!-- Hand Panel -->
+                    <div class="hand-panel" id="handPanel">
+                        <div class="hand-panel-header">
+                            <h3>Your Hand</h3>
+                        </div>
+                        <div class="hand-panel-content">
+                            <div class="hand-cards" id="handCards">
+                                <!-- Hand cards will be displayed here -->
+                            </div>
+                            <div class="next-card-section">
+                                <div class="next-card-label">Next Card</div>
+                                <div class="next-card-container" id="nextCardContainer">
+                                    <!-- Next card will be displayed here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Game Board -->
                     <div id="gameBoard" class="game-board">
+                    <div class="game-header-logo">
+                        <img src="images/CardleLogo.png" alt="Cardle Logo" class="game-logo">
+                    </div>
                     <div class="turn-indicator" id="turnIndicator">
                         <span id="turnMessage"></span>
                     </div>
