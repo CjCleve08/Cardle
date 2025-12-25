@@ -1,5 +1,376 @@
 const socket = io();
 
+// Firebase Authentication State
+let currentUser = null;
+let isGuestMode = false;
+let guestName = null;
+
+// Turn Timer
+let turnTimer = null;
+let turnTimeRemaining = 60; // 60 seconds per turn
+const TURN_TIME_LIMIT = 60;
+
+// Initialize Firebase Auth State Listener
+function initializeAuth() {
+    // Ensure screens are initialized first
+    if (!ScreenManager.exists('login')) {
+        console.warn('Screens not initialized yet, retrying...');
+        setTimeout(initializeAuth, 100);
+        return;
+    }
+    
+    // Initially hide all screens (remove any active classes from HTML)
+    Object.values(ScreenManager.screens).forEach(screen => {
+        if (screen) screen.classList.remove('active');
+    });
+    
+    // Check if user was in guest mode (stored in sessionStorage)
+    const savedGuestName = sessionStorage.getItem('guestName');
+    if (savedGuestName) {
+        isGuestMode = true;
+        guestName = savedGuestName;
+        // Clear stats cache for guest mode
+        clearStatsCache();
+        if (ScreenManager.show('lobby')) {
+            updateLobbyUserInfo();
+            // Load and display guest stats
+            updateStatsDisplay().catch(error => {
+                console.error('Error loading guest stats:', error);
+            });
+        }
+        return;
+    }
+    
+    if (window.firebaseAuth) {
+        window.firebaseAuth.onAuthStateChanged((user) => {
+            if (user) {
+                currentUser = user;
+                isGuestMode = false;
+                guestName = null;
+                console.log('User signed in:', user.email);
+                // Clear stats cache when user changes
+                clearStatsCache();
+                // User is signed in - show lobby
+                if (ScreenManager.show('lobby')) {
+                    updateLobbyUserInfo();
+                    // Load and display stats
+                    updateStatsDisplay().catch(error => {
+                        console.error('Error loading stats:', error);
+                    });
+                }
+            } else {
+                currentUser = null;
+                isGuestMode = false;
+                guestName = null;
+                console.log('User signed out');
+                // Clear stats cache on logout
+                clearStatsCache();
+                // User is signed out - show login
+                ScreenManager.show('login');
+            }
+        });
+    } else {
+        console.warn('Firebase Auth not initialized. Make sure firebase-config.js is loaded and configured.');
+        // If Firebase is not configured, show login
+        ScreenManager.show('login');
+    }
+}
+
+// Initialize auth when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        // Wait a bit for screens to initialize
+        setTimeout(initializeAuth, 50);
+    });
+} else {
+    // DOM is already ready, but screens might not be initialized yet
+    setTimeout(initializeAuth, 50);
+}
+
+// Authentication Functions
+async function handleLogin() {
+    if (!window.firebaseAuth) {
+        showAuthError('loginError', 'Firebase is not configured. Please set up Firebase first.');
+        return;
+    }
+    
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const errorDiv = document.getElementById('loginError');
+    
+    if (!email || !password) {
+        showAuthError('loginError', 'Please enter both email and password');
+        return;
+    }
+    
+    try {
+        const userCredential = await window.firebaseAuth.signInWithEmailAndPassword(email, password);
+        console.log('Login successful:', userCredential.user.email);
+        // Auth state change will automatically show lobby
+    } catch (error) {
+        console.error('Login error:', error);
+        let errorMessage = 'Failed to sign in. Please try again.';
+        if (error.code === 'auth/user-not-found') {
+            errorMessage = 'No account found with this email.';
+        } else if (error.code === 'auth/wrong-password') {
+            errorMessage = 'Incorrect password.';
+        } else if (error.code === 'auth/invalid-email') {
+            errorMessage = 'Invalid email address.';
+        }
+        showAuthError('loginError', errorMessage);
+    }
+}
+
+async function handleGoogleSignIn() {
+    if (!window.firebaseAuth) {
+        showAuthError('loginError', 'Firebase is not configured. Please set up Firebase first.');
+        return;
+    }
+    
+    try {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        const userCredential = await window.firebaseAuth.signInWithPopup(provider);
+        console.log('Google sign-in successful:', userCredential.user.email);
+        
+        // Save user data to Firestore if it's a new user
+        if (window.firebaseDb && userCredential.additionalUserInfo?.isNewUser) {
+            const user = userCredential.user;
+            await window.firebaseDb.collection('users').doc(user.uid).set({
+                displayName: user.displayName,
+                email: user.email,
+                photoURL: user.photoURL,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                provider: 'google'
+            }, { merge: true });
+        }
+        
+        // Auth state change will automatically show lobby
+    } catch (error) {
+        console.error('Google sign-in error:', error);
+        let errorMessage = 'Failed to sign in with Google. Please try again.';
+        if (error.code === 'auth/popup-closed-by-user') {
+            errorMessage = 'Sign-in popup was closed. Please try again.';
+        } else if (error.code === 'auth/popup-blocked') {
+            errorMessage = 'Sign-in popup was blocked. Please allow popups for this site.';
+        } else if (error.code === 'auth/cancelled-popup-request') {
+            errorMessage = 'Only one popup request is allowed at a time.';
+        }
+        showAuthError('loginError', errorMessage);
+    }
+}
+
+async function handleSignup() {
+    if (!window.firebaseAuth) {
+        showAuthError('signupError', 'Firebase is not configured. Please set up Firebase first.');
+        return;
+    }
+    
+    const name = document.getElementById('signupName').value.trim();
+    const email = document.getElementById('signupEmail').value.trim();
+    const password = document.getElementById('signupPassword').value;
+    const passwordConfirm = document.getElementById('signupPasswordConfirm').value;
+    const errorDiv = document.getElementById('signupError');
+    
+    if (!name || !email || !password || !passwordConfirm) {
+        showAuthError('signupError', 'Please fill in all fields');
+        return;
+    }
+    
+    if (password.length < 6) {
+        showAuthError('signupError', 'Password must be at least 6 characters');
+        return;
+    }
+    
+    if (password !== passwordConfirm) {
+        showAuthError('signupError', 'Passwords do not match');
+        return;
+    }
+    
+    try {
+        const userCredential = await window.firebaseAuth.createUserWithEmailAndPassword(email, password);
+        // Update user profile with display name
+        await userCredential.user.updateProfile({
+            displayName: name
+        });
+        
+        // Save user data to Firestore
+        if (window.firebaseDb) {
+            await window.firebaseDb.collection('users').doc(userCredential.user.uid).set({
+                displayName: name,
+                email: email,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+        }
+        
+        console.log('Signup successful:', userCredential.user.email);
+        // Auth state change will automatically show lobby
+    } catch (error) {
+        console.error('Signup error:', error);
+        let errorMessage = 'Failed to create account. Please try again.';
+        if (error.code === 'auth/email-already-in-use') {
+            errorMessage = 'An account with this email already exists.';
+        } else if (error.code === 'auth/invalid-email') {
+            errorMessage = 'Invalid email address.';
+        } else if (error.code === 'auth/weak-password') {
+            errorMessage = 'Password is too weak.';
+        }
+        showAuthError('signupError', errorMessage);
+    }
+}
+
+function handlePlayAsGuest() {
+    // Show guest name input screen
+    if (ScreenManager.show('guestName')) {
+        hideAuthErrors();
+    }
+}
+
+function handleContinueAsGuest() {
+    const name = document.getElementById('guestNameInput').value.trim();
+    
+    if (!name) {
+        showAuthError('guestNameError', 'Please enter your name');
+        return;
+    }
+    
+    if (name.length < 2) {
+        showAuthError('guestNameError', 'Name must be at least 2 characters');
+        return;
+    }
+    
+    // Set guest mode
+    isGuestMode = true;
+    guestName = name;
+    sessionStorage.setItem('guestName', name);
+    // Clear stats cache for guest mode
+    clearStatsCache();
+    
+    // Show lobby
+    if (ScreenManager.show('lobby')) {
+        updateLobbyUserInfo();
+        // Load and display guest stats
+        updateStatsDisplay().catch(error => {
+            console.error('Error loading guest stats:', error);
+        });
+    }
+}
+
+async function handleLogout() {
+    // Clear guest mode if active
+    if (isGuestMode) {
+        isGuestMode = false;
+        guestName = null;
+        sessionStorage.removeItem('guestName');
+        clearStatsCache();
+        ScreenManager.show('login');
+        return;
+    }
+    
+    if (!window.firebaseAuth) {
+        console.warn('Firebase Auth not available for logout');
+        return;
+    }
+    
+    try {
+        await window.firebaseAuth.signOut();
+        // Auth state change will automatically show login
+    } catch (error) {
+        console.error('Logout error:', error);
+    }
+}
+
+function showAuthError(elementId, message) {
+    const errorDiv = document.getElementById(elementId);
+    if (errorDiv) {
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+    }
+}
+
+function hideAuthErrors() {
+    const loginError = document.getElementById('loginError');
+    const signupError = document.getElementById('signupError');
+    const guestNameError = document.getElementById('guestNameError');
+    if (loginError) loginError.style.display = 'none';
+    if (signupError) signupError.style.display = 'none';
+    if (guestNameError) guestNameError.style.display = 'none';
+}
+
+function updateLobbyUserInfo() {
+    const userInfoHeader = document.getElementById('userInfoHeader');
+    const userDisplayNameHeader = document.getElementById('userDisplayNameHeader');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const profileName = document.getElementById('profileName');
+    const profileEmail = document.getElementById('profileEmail');
+    const profileAccountType = document.getElementById('profileAccountType');
+    const profileAvatar = document.getElementById('profileAvatar');
+    
+    if (isGuestMode && guestName) {
+        // Guest mode
+        if (userDisplayNameHeader) {
+            userDisplayNameHeader.textContent = `Playing as ${guestName}`;
+        }
+        if (userInfoHeader) {
+            userInfoHeader.style.display = 'block';
+        }
+        if (logoutBtn) {
+            logoutBtn.style.display = 'block';
+        }
+        // Update profile tab
+        if (profileName) profileName.textContent = guestName;
+        if (profileEmail) profileEmail.textContent = 'Guest Account';
+        if (profileAccountType) profileAccountType.textContent = 'Guest';
+        if (profileAvatar) profileAvatar.textContent = '👤';
+    } else if (currentUser) {
+        // Authenticated user
+        const displayName = currentUser.displayName || currentUser.email?.split('@')[0] || 'Player';
+        if (userDisplayNameHeader) {
+            userDisplayNameHeader.textContent = displayName;
+        }
+        if (userInfoHeader) {
+            userInfoHeader.style.display = 'block';
+        }
+        if (logoutBtn) {
+            logoutBtn.style.display = 'block';
+        }
+        // Update profile tab
+        if (profileName) profileName.textContent = displayName;
+        if (profileEmail) profileEmail.textContent = currentUser.email || '-';
+        if (profileAccountType) {
+            const provider = currentUser.providerData?.[0]?.providerId || 'email';
+            profileAccountType.textContent = provider === 'google.com' ? 'Google Account' : 'Email Account';
+        }
+        if (profileAvatar) {
+            if (currentUser.photoURL) {
+                profileAvatar.style.backgroundImage = `url(${currentUser.photoURL})`;
+                profileAvatar.style.backgroundSize = 'cover';
+                profileAvatar.style.backgroundPosition = 'center';
+                profileAvatar.textContent = '';
+            } else {
+                profileAvatar.textContent = displayName.charAt(0).toUpperCase();
+            }
+        }
+    } else {
+        // Not signed in
+        if (userInfoHeader) {
+            userInfoHeader.style.display = 'none';
+        }
+        if (logoutBtn) {
+            logoutBtn.style.display = 'none';
+        }
+    }
+}
+
+function getPlayerName() {
+    if (isGuestMode && guestName) {
+        return guestName;
+    }
+    if (currentUser) {
+        return currentUser.displayName || currentUser.email?.split('@')[0] || 'Player';
+    }
+    return 'Player';
+}
+
 // Debug helper: expose function to get word
 window.getWord = function() {
     socket.emit('getWord');
@@ -66,6 +437,143 @@ const ALL_CARDS = getAllCards();
 const DECK_STORAGE_KEY = 'cardle_player_deck';
 const DECK_SIZE = 6;
 
+// Statistics Management
+// Cache for current stats to avoid repeated Firestore reads
+let cachedStats = null;
+
+function getDefaultStats() {
+    return {
+        gamesPlayed: 0,
+        wins: 0,
+        losses: 0,
+        totalGuesses: 0,
+        gamesWithGuesses: 0
+    };
+}
+
+async function getPlayerStats() {
+    // For guests, use localStorage as fallback
+    if (isGuestMode || !currentUser) {
+        const stored = localStorage.getItem('cardle_guest_stats');
+        if (stored) {
+            try {
+                return JSON.parse(stored);
+            } catch (e) {
+                console.error('Error loading guest stats:', e);
+            }
+        }
+        return getDefaultStats();
+    }
+    
+    // For authenticated users, use Firestore
+    if (!window.firebaseDb || !currentUser || !currentUser.uid) {
+        console.warn('Firebase not available or user not authenticated');
+        return getDefaultStats();
+    }
+    
+    // Return cached stats if available
+    if (cachedStats !== null) {
+        return cachedStats;
+    }
+    
+    try {
+        const statsDoc = await window.firebaseDb.collection('stats').doc(currentUser.uid).get();
+        if (statsDoc.exists) {
+            cachedStats = statsDoc.data();
+            return cachedStats;
+        } else {
+            // No stats yet, return defaults
+            cachedStats = getDefaultStats();
+            return cachedStats;
+        }
+    } catch (error) {
+        console.error('Error loading stats from Firestore:', error);
+        return getDefaultStats();
+    }
+}
+
+async function savePlayerStats(stats) {
+    // For guests, use localStorage
+    if (isGuestMode || !currentUser) {
+        localStorage.setItem('cardle_guest_stats', JSON.stringify(stats));
+        cachedStats = stats;
+        return;
+    }
+    
+    // For authenticated users, save to Firestore
+    if (!window.firebaseDb || !currentUser || !currentUser.uid) {
+        console.warn('Firebase not available or user not authenticated');
+        return;
+    }
+    
+    try {
+        await window.firebaseDb.collection('stats').doc(currentUser.uid).set(stats, { merge: true });
+        cachedStats = stats;
+    } catch (error) {
+        console.error('Error saving stats to Firestore:', error);
+    }
+}
+
+async function updateStats(gameResult) {
+    const stats = await getPlayerStats();
+    
+    stats.gamesPlayed++;
+    
+    if (gameResult.won) {
+        stats.wins++;
+    } else {
+        stats.losses++;
+    }
+    
+    if (gameResult.guesses > 0) {
+        stats.totalGuesses += gameResult.guesses;
+        stats.gamesWithGuesses++;
+    }
+    
+    await savePlayerStats(stats);
+    await updateStatsDisplay();
+}
+
+async function updateStatsDisplay() {
+    const stats = await getPlayerStats();
+    
+    const gamesPlayedEl = document.getElementById('statGamesPlayed');
+    const winsEl = document.getElementById('statWins');
+    const winRateEl = document.getElementById('statWinRate');
+    const avgGuessesEl = document.getElementById('statAvgGuesses');
+    
+    if (gamesPlayedEl) {
+        gamesPlayedEl.textContent = stats.gamesPlayed;
+    }
+    
+    if (winsEl) {
+        winsEl.textContent = stats.wins;
+    }
+    
+    if (winRateEl) {
+        if (stats.gamesPlayed > 0) {
+            const winRate = Math.round((stats.wins / stats.gamesPlayed) * 100);
+            winRateEl.textContent = winRate + '%';
+        } else {
+            winRateEl.textContent = '0%';
+        }
+    }
+    
+    if (avgGuessesEl) {
+        if (stats.gamesWithGuesses > 0) {
+            const avgGuesses = (stats.totalGuesses / stats.gamesWithGuesses).toFixed(1);
+            avgGuessesEl.textContent = avgGuesses;
+        } else {
+            avgGuessesEl.textContent = '-';
+        }
+    }
+}
+
+// Clear cached stats when user changes (login/logout)
+function clearStatsCache() {
+    cachedStats = null;
+}
+
 function getPlayerDeck() {
     const stored = localStorage.getItem(DECK_STORAGE_KEY);
     if (stored) {
@@ -93,13 +601,89 @@ function getDeckCards() {
     return deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
 }
 
-// DOM Elements
-const screens = {
-    lobby: document.getElementById('lobby'),
-    waiting: document.getElementById('waiting'),
-    game: document.getElementById('game'),
-    gameOver: document.getElementById('gameOver')
+// Screen Management System
+const ScreenManager = {
+    screens: {},
+    currentScreen: null,
+    
+    // Initialize all screens
+    init() {
+        const screenIds = ['login', 'signup', 'guestName', 'lobby', 'waiting', 'game', 'gameOver'];
+        screenIds.forEach(id => {
+            const element = document.getElementById(id);
+            if (!element) {
+                console.error(`Screen element with id "${id}" not found in HTML!`);
+            } else {
+                this.screens[id] = element;
+                // Remove any existing active class during initialization
+                element.classList.remove('active');
+            }
+        });
+        
+        // Verify all screens were found
+        const missingScreens = screenIds.filter(id => !this.screens[id]);
+        if (missingScreens.length > 0) {
+            console.error('Missing screen elements:', missingScreens);
+        }
+        
+        console.log('ScreenManager initialized. Available screens:', Object.keys(this.screens));
+    },
+    
+    // Show a specific screen
+    show(screenName) {
+        if (!screenName) {
+            console.error('showScreen called without screen name');
+            return false;
+        }
+        
+        const screen = this.screens[screenName];
+        if (!screen) {
+            console.error(`Screen "${screenName}" not found! Available screens:`, Object.keys(this.screens));
+            return false;
+        }
+        
+        // Hide all screens first
+        Object.values(this.screens).forEach(s => {
+            if (s) {
+                s.classList.remove('active');
+            }
+        });
+        
+        // Show the requested screen
+        screen.classList.add('active');
+        this.currentScreen = screenName;
+        
+        console.log(`Screen changed to: ${screenName}`);
+        return true;
+    },
+    
+    // Get current screen name
+    getCurrent() {
+        return this.currentScreen;
+    },
+    
+    // Check if a screen exists
+    exists(screenName) {
+        return !!this.screens[screenName];
+    }
 };
+
+// Initialize screens when DOM is ready
+function initScreens() {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => ScreenManager.init());
+    } else {
+        ScreenManager.init();
+    }
+}
+
+// Initialize immediately
+initScreens();
+
+// Convenience function for backward compatibility
+function showScreen(screenName) {
+    return ScreenManager.show(screenName);
+}
 
 // Socket Events
 socket.on('connect', () => {
@@ -109,11 +693,17 @@ socket.on('connect', () => {
 socket.on('gameCreated', (data) => {
     currentPlayer = data.playerId;
     // Show game ID in both lobby and waiting screens
-    document.getElementById('gameId').textContent = data.gameId;
-    document.getElementById('gameIdDisplay').style.display = 'block';
-    document.getElementById('gameIdWaiting').textContent = data.gameId;
-    document.getElementById('gameIdDisplayWaiting').style.display = 'block';
-    showScreen('waiting');
+    const gameIdEl = document.getElementById('gameId');
+    const gameIdDisplay = document.getElementById('gameIdDisplay');
+    const gameIdWaiting = document.getElementById('gameIdWaiting');
+    const gameIdDisplayWaiting = document.getElementById('gameIdDisplayWaiting');
+    
+    if (gameIdEl) gameIdEl.textContent = data.gameId;
+    if (gameIdDisplay) gameIdDisplay.style.display = 'block';
+    if (gameIdWaiting) gameIdWaiting.textContent = data.gameId;
+    if (gameIdDisplayWaiting) gameIdDisplayWaiting.style.display = 'block';
+    
+    ScreenManager.show('waiting');
 });
 
 socket.on('playerJoinedGame', (data) => {
@@ -155,8 +745,17 @@ socket.on('gameStarted', (data) => {
     // Remove yourPlayerId from data before storing in gameState
     const { yourPlayerId, ...gameStateData } = data;
     gameState = gameStateData;
-    showScreen('game');
-    initializeGame(gameState);
+    
+    // Ensure gameId is set in gameState (it might be in the data)
+    if (data.gameId && !gameState.gameId) {
+        gameState.gameId = data.gameId;
+    }
+    
+    if (ScreenManager.show('game')) {
+        initializeGame(gameState);
+    } else {
+        console.error('Failed to show game screen!');
+    }
 });
 
 socket.on('cardSelected', (data) => {
@@ -213,10 +812,9 @@ socket.on('turnChanged', (data) => {
         gameState = gameStateData;
     }
     
-    updateTurnIndicator();
-    updatePlayerStatus();
+    stopTurnTimer(); // Stop timer when turn changes
     
-    // Convert both to strings for comparison to avoid type issues
+    // Both players should track the timer, but only the player whose turn it is can trigger timeout
     const currentTurnStr = String(data.currentTurn).trim();
     const currentPlayerStr = String(currentPlayer).trim();
     
@@ -233,6 +831,10 @@ socket.on('turnChanged', (data) => {
     console.log('After string conversion - Is it my turn?', myTurn);
     console.log('String comparison:', `"${currentTurnStr}" === "${currentPlayerStr}"`);
     console.log('Current turn length:', currentTurnStr.length, 'Current player length:', currentPlayerStr.length);
+    
+    // Update turn indicator and start timer (both players track the timer)
+    updateTurnIndicator();
+    updatePlayerStatus();
     
     // Always show game board so players can see previous guesses
     showGameBoard();
@@ -596,13 +1198,32 @@ function displayOpponentHandForSteal(cards, opponentName, gameId) {
 }
 
 socket.on('gameOver', (data) => {
-    showScreen('gameOver');
+    if (!ScreenManager.show('gameOver')) {
+        console.error('Failed to show gameOver screen!');
+        return;
+    }
+    
     const titleEl = document.getElementById('gameOverTitle');
     const messageEl = document.getElementById('gameOverMessage');
     const iconEl = document.getElementById('gameOverIcon');
     const wordEl = document.getElementById('gameOverWord');
     
-    if (data.winner === currentPlayer) {
+    const won = data.winner === currentPlayer;
+    // Get guess count - use player's row (individual guess count) if available
+    let guesses = 0;
+    if (gameState && gameState.players) {
+        const player = gameState.players.find(p => p.id === currentPlayer);
+        if (player) {
+            // Use player.row which tracks individual player's guesses
+            guesses = player.row || 0;
+            // If row is 0 but they won, they must have guessed at least once
+            if (guesses === 0 && won) {
+                guesses = 1;
+            }
+        }
+    }
+    
+    if (won) {
         titleEl.textContent = 'You Win!';
         titleEl.classList.add('win');
         titleEl.classList.remove('lose');
@@ -617,6 +1238,14 @@ socket.on('gameOver', (data) => {
         iconEl.textContent = '😔';
         wordEl.textContent = data.word;
     }
+    
+    // Update statistics (async, but don't wait for it)
+    updateStats({
+        won: won,
+        guesses: guesses
+    }).catch(error => {
+        console.error('Error updating stats:', error);
+    });
 });
 
 socket.on('error', (data) => {
@@ -678,10 +1307,7 @@ socket.on('chatMessage', (data) => {
 });
 
 // UI Functions
-function showScreen(screenName) {
-    Object.values(screens).forEach(screen => screen.classList.remove('active'));
-    screens[screenName].classList.add('active');
-}
+// showScreen is now provided by ScreenManager (defined earlier)
 
 function updatePlayersList(players) {
     if (players[0]) {
@@ -700,6 +1326,7 @@ function initializeGame(data) {
     initializeDeckPool();
     createBoard();
     createKeyboard();
+    stopTurnTimer(); // Reset timer for new game
     updateTurnIndicator();
     updatePlayerStatus();
     
@@ -1229,17 +1856,153 @@ function isCardLocked() {
 
 function updateTurnIndicator() {
     const indicator = document.getElementById('turnIndicator');
-    if (gameState.currentTurn === currentPlayer) {
+    if (!indicator) return;
+    
+    if (gameState && gameState.currentTurn === currentPlayer) {
         if (isCardLocked()) {
-            indicator.textContent = 'Your Turn - Card Locked! You cannot use a card this turn.';
+            indicator.textContent = 'Your Turn - Card Locked!';
             indicator.classList.add('active-turn');
         } else {
-        indicator.textContent = 'Your Turn - Choose a card, then guess!';
-        indicator.classList.add('active-turn');
+            indicator.textContent = 'Your Turn';
+            indicator.classList.add('active-turn');
         }
+        startTurnTimer();
     } else {
-        indicator.textContent = "Opponent's Turn - Waiting...";
+        indicator.textContent = "Opponent's Turn";
         indicator.classList.remove('active-turn');
+        // Start timer for opponent's turn too (both players track it)
+        startTurnTimer();
+    }
+}
+
+function startTurnTimer() {
+    // Both players should track the timer
+    if (!gameState || !gameState.currentTurn) {
+        console.log('Not starting timer - no game state or current turn');
+        return;
+    }
+    
+    stopTurnTimer(); // Clear any existing timer
+    
+    // Check if there's a timeRush effect active for the current player
+    const currentTurnPlayerId = gameState.currentTurn;
+    const hasTimeRush = gameState.activeEffects && gameState.activeEffects.some(e => 
+        e.type === 'timeRush' && e.target === currentTurnPlayerId && !e.used
+    );
+    
+    // Set timer limit based on whether timeRush is active
+    const timeLimit = hasTimeRush ? 20 : TURN_TIME_LIMIT;
+    turnTimeRemaining = timeLimit;
+    
+    const isMyTurn = gameState.currentTurn === currentPlayer;
+    if (hasTimeRush && isMyTurn) {
+        console.log('Time Rush effect active - timer set to 20 seconds');
+    }
+    console.log(`Starting turn timer - is my turn: ${isMyTurn}`);
+    
+    updateTimerDisplay();
+    
+    turnTimer = setInterval(() => {
+        // Check if turn has changed
+        if (!gameState || !gameState.currentTurn) {
+            console.log('Timer: Game state invalid, stopping timer');
+            stopTurnTimer();
+            return;
+        }
+        
+        const stillMyTurn = gameState.currentTurn === currentPlayer;
+        
+        // If turn changed, stop timer
+        if (isMyTurn && !stillMyTurn) {
+            console.log('Timer: Turn changed, stopping timer');
+            stopTurnTimer();
+            return;
+        }
+        
+        turnTimeRemaining--;
+        updateTimerDisplay();
+        
+        // Only the player whose turn it is can trigger timeout
+        if (turnTimeRemaining <= 0) {
+            stopTurnTimer();
+            if (stillMyTurn && gameState.gameId) {
+                console.log('Turn timer expired - switching turn, gameId:', gameState.gameId);
+                socket.emit('turnTimeout', { gameId: gameState.gameId });
+            }
+        }
+    }, 1000);
+}
+
+function stopTurnTimer() {
+    if (turnTimer) {
+        clearInterval(turnTimer);
+        turnTimer = null;
+    }
+    turnTimeRemaining = TURN_TIME_LIMIT;
+    updateTimerDisplay();
+}
+
+function updateTimerDisplay() {
+    const timerText = document.getElementById('timerText');
+    const timerCircle = document.getElementById('timerCircle');
+    
+    if (!gameState || !gameState.currentTurn) {
+        // No game state, reset timer
+        if (timerText) timerText.textContent = '60';
+        if (timerCircle) {
+            timerCircle.style.strokeDashoffset = 100;
+            timerCircle.classList.remove('warning', 'danger');
+        }
+        const timerContainer = document.querySelector('.turn-timer');
+        if (timerContainer) timerContainer.style.opacity = '0.3';
+        return;
+    }
+    
+    const isMyTurn = gameState.currentTurn === currentPlayer;
+    
+    // Check if timeRush is active for the current turn
+    const currentTurnPlayerId = gameState.currentTurn;
+    const hasTimeRush = gameState.activeEffects && gameState.activeEffects.some(e => 
+        e.type === 'timeRush' && e.target === currentTurnPlayerId && !e.used
+    );
+    const timeLimit = hasTimeRush ? 20 : TURN_TIME_LIMIT;
+    
+    // Both players see the same countdown
+    if (timerText) {
+        timerText.textContent = Math.max(0, turnTimeRemaining);
+    }
+    
+    if (timerCircle) {
+        const progress = (turnTimeRemaining / timeLimit) * 100;
+        const circumference = 2 * Math.PI * 15.9155; // radius of the circle
+        const offset = circumference - (progress / 100) * circumference;
+        
+        timerCircle.style.strokeDashoffset = offset;
+        
+        // Update color based on time remaining (both players see the same)
+        // For timeRush (20 seconds), show warning earlier
+        timerCircle.classList.remove('warning', 'danger');
+        if (hasTimeRush) {
+            // For 20 second timer, show danger at 5 seconds, warning at 10
+            if (turnTimeRemaining <= 5) {
+                timerCircle.classList.add('danger');
+            } else if (turnTimeRemaining <= 10) {
+                timerCircle.classList.add('warning');
+            }
+        } else {
+            // Normal 60 second timer
+            if (turnTimeRemaining <= 10) {
+                timerCircle.classList.add('danger');
+            } else if (turnTimeRemaining <= 30) {
+                timerCircle.classList.add('warning');
+            }
+        }
+        
+        // Slightly dimmed when it's not your turn, but still visible
+        const timerContainer = document.querySelector('.turn-timer');
+        if (timerContainer) {
+            timerContainer.style.opacity = isMyTurn ? '1' : '0.7';
+        }
     }
 }
 
@@ -1524,6 +2287,8 @@ function createDeckSlots() {
 }
 
 function updateDeckSlots() {
+    updateDeckCount();
+    updateSaveButton();
     const slots = document.querySelectorAll('.deck-slot');
     slots.forEach((slot, index) => {
         const cardId = currentDeckSelection[index];
@@ -1584,6 +2349,14 @@ function createDeckSlotCard(card, slotIndex) {
 }
 
 function renderDeckBuilder() {
+    const deckCardsGrid = document.getElementById('deckCardsGrid');
+    const deckSlots = document.getElementById('deckSlots');
+    
+    if (!deckCardsGrid || !deckSlots) {
+        console.error('Deck builder elements not found');
+        return;
+    }
+    
     const allCards = getAllCards();
     const currentDeck = getPlayerDeck();
     
@@ -1594,7 +2367,40 @@ function renderDeckBuilder() {
     }
     
     createDeckSlots();
+    updateDeckSlots();
     renderAvailableCards();
+    
+    // Set up drop handling on the grid (only once)
+    if (!deckCardsGrid.dataset.dropHandlersAdded) {
+        deckCardsGrid.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (draggedSlotIndex !== null) {
+                // Card is being dragged from a deck slot
+                deckCardsGrid.style.borderColor = '#6aaa64';
+                deckCardsGrid.style.backgroundColor = '#1a2a1b';
+            }
+        });
+        
+        deckCardsGrid.addEventListener('dragleave', (e) => {
+            if (!deckCardsGrid.contains(e.relatedTarget)) {
+                deckCardsGrid.style.borderColor = '#3a3a3c';
+                deckCardsGrid.style.backgroundColor = '#121213';
+            }
+        });
+        
+        deckCardsGrid.addEventListener('drop', (e) => {
+            e.preventDefault();
+            deckCardsGrid.style.borderColor = '#3a3a3c';
+            deckCardsGrid.style.backgroundColor = '#121213';
+            
+            // If card was dragged from a deck slot, remove it from deck
+            if (draggedSlotIndex !== null && draggedCard) {
+                removeCardFromSlot(draggedSlotIndex);
+            }
+        });
+        
+        deckCardsGrid.dataset.dropHandlersAdded = 'true';
+    }
 }
 
 function renderAvailableCards() {
@@ -1688,7 +2494,8 @@ function saveDeck() {
     if (filledSlots.length === DECK_SIZE) {
         savePlayerDeck(filledSlots);
         showGameMessage('Deck Saved', 'Your deck has been saved successfully!', '💾');
-        closeDeckBuilder();
+        // Update slots to reflect saved deck
+        renderDeckBuilder();
     } else {
         alert(`Please fill all ${DECK_SIZE} deck slots.`);
     }
@@ -1701,53 +2508,14 @@ function clearDeck() {
     }
 }
 
+// Deck builder is now in a tab, so these functions are simplified
 function openDeckBuilder() {
-    const deckBuilder = document.getElementById('deckBuilderOverlay');
-    const deckCardsGrid = document.getElementById('deckCardsGrid');
-    
-    renderDeckBuilder();
-    
-    // Set up drop handling on the grid (only once)
-    if (!deckCardsGrid.dataset.dropHandlersAdded) {
-        deckCardsGrid.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            if (draggedSlotIndex !== null) {
-                // Card is being dragged from a deck slot
-                deckCardsGrid.style.borderColor = '#6aaa64';
-                deckCardsGrid.style.backgroundColor = '#1a2a1b';
-            }
-        });
-        
-        deckCardsGrid.addEventListener('dragleave', (e) => {
-            if (!deckCardsGrid.contains(e.relatedTarget)) {
-                deckCardsGrid.style.borderColor = '#3a3a3c';
-                deckCardsGrid.style.backgroundColor = '#121213';
-            }
-        });
-        
-        deckCardsGrid.addEventListener('drop', (e) => {
-            e.preventDefault();
-            deckCardsGrid.style.borderColor = '#3a3a3c';
-            deckCardsGrid.style.backgroundColor = '#121213';
-            
-            // If card was dragged from a deck slot, remove it from deck
-            if (draggedSlotIndex !== null && draggedCard) {
-                removeCardFromSlot(draggedSlotIndex);
-            }
-        });
-        
-        deckCardsGrid.dataset.dropHandlersAdded = 'true';
-    }
-    
-    deckBuilder.style.display = 'flex';
-    document.body.style.overflow = 'hidden'; // Prevent background scrolling
+    // Switch to deck tab
+    switchTab('deck');
 }
 
 function closeDeckBuilder() {
-    const deckBuilder = document.getElementById('deckBuilderOverlay');
-    deckBuilder.style.display = 'none';
-    document.body.style.overflow = ''; // Restore scrolling
-    // Reset to saved deck
+    // Reset to saved deck when leaving
     const savedDeck = getPlayerDeck();
     currentDeckSelection = [...savedDeck];
     while (currentDeckSelection.length < DECK_SIZE) {
@@ -1779,12 +2547,124 @@ document.addEventListener('DOMContentLoaded', () => {
             savePlayerDeck(validDeck);
         }
     }, 100);
+    
+    // Initialize stats display
+    updateStatsDisplay().catch(error => {
+        console.error('Error initializing stats display:', error);
+    });
+});
+
+// Authentication Event Listeners
+document.addEventListener('DOMContentLoaded', () => {
+    // Login form
+    const loginBtn = document.getElementById('loginBtn');
+    const googleSignInBtn = document.getElementById('googleSignInBtn');
+    const showSignupBtn = document.getElementById('showSignupBtn');
+    const signupBtn = document.getElementById('signupBtn');
+    const showLoginBtn = document.getElementById('showLoginBtn');
+    const logoutBtn = document.getElementById('logoutBtn');
+    const playAsGuestBtn = document.getElementById('playAsGuestBtn');
+    const continueAsGuestBtn = document.getElementById('continueAsGuestBtn');
+    const backToLoginFromGuestBtn = document.getElementById('backToLoginFromGuestBtn');
+    
+    if (loginBtn) {
+        loginBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleLogin();
+        });
+    }
+    
+    if (googleSignInBtn) {
+        googleSignInBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleGoogleSignIn();
+        });
+    }
+    
+    // Enter key on login form
+    const loginPassword = document.getElementById('loginPassword');
+    if (loginPassword) {
+        loginPassword.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleLogin();
+            }
+        });
+    }
+    
+    if (showSignupBtn) {
+        showSignupBtn.addEventListener('click', () => {
+            hideAuthErrors();
+            ScreenManager.show('signup');
+        });
+    }
+    
+    if (signupBtn) {
+        signupBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleSignup();
+        });
+    }
+    
+    // Enter key on signup form
+    const signupPasswordConfirm = document.getElementById('signupPasswordConfirm');
+    if (signupPasswordConfirm) {
+        signupPasswordConfirm.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSignup();
+            }
+        });
+    }
+    
+    if (showLoginBtn) {
+        showLoginBtn.addEventListener('click', () => {
+            hideAuthErrors();
+            ScreenManager.show('login');
+        });
+    }
+    
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            handleLogout();
+        });
+    }
+    
+    if (playAsGuestBtn) {
+        playAsGuestBtn.addEventListener('click', () => {
+            handlePlayAsGuest();
+        });
+    }
+    
+    if (continueAsGuestBtn) {
+        continueAsGuestBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleContinueAsGuest();
+        });
+    }
+    
+    // Enter key on guest name input
+    const guestNameInput = document.getElementById('guestNameInput');
+    if (guestNameInput) {
+        guestNameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleContinueAsGuest();
+            }
+        });
+    }
+    
+    if (backToLoginFromGuestBtn) {
+        backToLoginFromGuestBtn.addEventListener('click', () => {
+            hideAuthErrors();
+            ScreenManager.show('login');
+        });
+    }
 });
 
 document.getElementById('findMatchBtn').addEventListener('click', () => {
-    const name = document.getElementById('playerName').value.trim();
+    const name = getPlayerName();
     if (name) {
-        closeDeckBuilder(); // Close deck builder if open
         socket.emit('findMatch', { playerName: name });
     } else {
         alert('Please enter your name');
@@ -1796,14 +2676,13 @@ document.getElementById('cancelMatchmakingBtn').addEventListener('click', () => 
 });
 
 document.getElementById('createGameBtn').addEventListener('click', () => {
-    const name = document.getElementById('playerName').value.trim();
+    const name = getPlayerName();
     if (name) {
-        closeDeckBuilder(); // Close deck builder if open
         // Cancel matchmaking if active
         socket.emit('cancelMatchmaking');
         socket.emit('createGame', { playerName: name });
     } else {
-        alert('Please enter your name');
+        alert('Please sign in to create a game');
     }
 });
 
@@ -1813,8 +2692,52 @@ document.getElementById('joinGameBtn').addEventListener('click', () => {
     document.getElementById('joinGroup').style.display = 'block';
 });
 
-document.getElementById('deckBuilderBtn').addEventListener('click', () => {
-    openDeckBuilder();
+// Tab switching functionality
+function switchTab(tabName) {
+    // Remove active class from all tabs and panels
+    document.querySelectorAll('.lobby-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+    
+    // Add active class to selected tab and panel
+    const selectedTab = document.querySelector(`[data-tab="${tabName}"]`);
+    const selectedPanel = document.getElementById(`${tabName}Tab`);
+    
+    if (selectedTab) selectedTab.classList.add('active');
+    if (selectedPanel) selectedPanel.classList.add('active');
+    
+    // If switching to deck tab, initialize deck builder
+    if (tabName === 'deck') {
+        renderDeckBuilder();
+        updateDeckCount();
+    }
+    
+    // If switching to stats tab, update stats display
+    if (tabName === 'stats') {
+        updateStatsDisplay().catch(error => {
+            console.error('Error loading stats:', error);
+        });
+    }
+}
+
+// Update deck count display
+function updateDeckCount() {
+    const deckCountEl = document.getElementById('deckCount');
+    if (deckCountEl) {
+        const filledSlots = currentDeckSelection.filter(id => id !== null).length;
+        deckCountEl.textContent = filledSlots;
+    }
+}
+
+// Tab switching event listeners
+document.querySelectorAll('.lobby-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        const tabName = tab.getAttribute('data-tab');
+        switchTab(tabName);
+    });
 });
 
 // Help modal functions
@@ -1854,27 +2777,15 @@ document.getElementById('clearDeckBtn').addEventListener('click', () => {
     clearDeck();
 });
 
-document.getElementById('closeDeckBuilderBtn').addEventListener('click', () => {
-    closeDeckBuilder();
-});
-
-// Close deck builder when clicking outside the modal
-document.getElementById('deckBuilderOverlay').addEventListener('click', (e) => {
-    if (e.target.id === 'deckBuilderOverlay') {
-        closeDeckBuilder();
-    }
-});
-
 document.getElementById('joinWithIdBtn').addEventListener('click', () => {
-    const name = document.getElementById('playerName').value.trim();
+    const name = getPlayerName();
     const gameId = document.getElementById('gameIdInput').value.trim();
     if (name && gameId) {
-        closeDeckBuilder(); // Close deck builder if open
         // Cancel matchmaking if active
         socket.emit('cancelMatchmaking');
         socket.emit('joinGame', { playerName: name, gameId: gameId });
     } else {
-        alert('Please enter your name and game ID');
+        alert('Please sign in and enter a game ID');
     }
 });
 

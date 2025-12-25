@@ -343,6 +343,35 @@ const CARD_CONFIG = {
         effects: {
             // Card block is handled in selectCard, not onGuess
         }
+    },
+    'timeRush': {
+        metadata: {
+            id: 'timeRush',
+            title: 'Time Rush',
+            description: 'Your opponent\'s next turn will only have 20 seconds',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                // Find the opponent
+                const opponent = game.players.find(p => p.id !== playerId);
+                if (opponent) {
+                    // Add timeRush effect targeting the opponent
+                    game.activeEffects.push({
+                        type: 'timeRush',
+                        target: opponent.id,
+                        description: 'Your next turn will only have 20 seconds',
+                        used: false
+                    });
+                }
+            }
+        }
     }
 };
 
@@ -839,9 +868,9 @@ io.on('connection', (socket) => {
             if (opponentSocket) {
                 opponentSocket.emit('cardPlayed', {
                     card: cardToShowOpponent,
-                    playerName: player ? player.name : 'Player',
-                    playerId: socket.id
-                });
+            playerName: player ? player.name : 'Player',
+            playerId: socket.id
+        });
             }
         }
         
@@ -1019,6 +1048,52 @@ io.on('connection', (socket) => {
         game.cardChains.delete(socket.id);
     });
     
+    socket.on('turnTimeout', (data) => {
+        const game = games.get(data.gameId);
+        if (!game) {
+            console.log('Turn timeout: Game not found for gameId:', data.gameId);
+            return;
+        }
+        
+        const player = game.players.find(p => p.id === socket.id);
+        if (!player) {
+            console.log('Turn timeout: Player not found in game');
+            return;
+        }
+        
+        // Only allow timeout if it's actually this player's turn
+        if (game.currentTurn !== socket.id) {
+            console.log('Turn timeout: Not player\'s turn, ignoring');
+            return; // Not their turn, ignore
+        }
+        
+        // Find opponent
+        const opponent = game.players.find(p => p.id !== socket.id);
+        if (!opponent) {
+            console.log('Turn timeout: Opponent not found');
+            return;
+        }
+        
+        // Switch turn to opponent
+        game.currentTurn = opponent.id;
+        console.log(`Turn timeout - switched from ${socket.id} to ${opponent.id}`);
+        
+        // Notify both players with their respective player IDs
+        game.players.forEach(player => {
+            const playerSocket = io.sockets.sockets.get(player.id);
+            if (playerSocket) {
+                playerSocket.emit('turnChanged', {
+                    currentTurn: game.currentTurn,
+                    players: game.players,
+                    status: game.status,
+                    activeEffects: game.activeEffects,
+                    totalGuesses: game.totalGuesses,
+                    yourPlayerId: player.id
+                });
+            }
+        });
+    });
+    
     socket.on('submitGuess', (data) => {
         const game = games.get(data.gameId);
         if (!game) return;
@@ -1144,13 +1219,13 @@ io.on('connection', (socket) => {
         } else {
             // Normal display for guesser (apply greenToGrey if active)
             const guesserFeedback = greenToGreyActive && greenToGreyFeedback ? greenToGreyFeedback : realFeedback;
-            socket.emit('guessSubmitted', {
-                playerId: socket.id,
-                guess: guess,
+        socket.emit('guessSubmitted', {
+            playerId: socket.id,
+            guess: guess,
                 feedback: guesserFeedback, // Real feedback or modified (green to grey) for the guesser
                 row: boardRow,
-                hidden: false
-            });
+            hidden: false
+        });
         }
         
         // Send letter reveal if gambler was lucky
@@ -1218,7 +1293,7 @@ io.on('connection', (socket) => {
         
         // Remove used effects (mark as used and remove)
         game.activeEffects = game.activeEffects.filter(e => {
-            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, and greenToGrey after they've been used on this guess
+            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, greenToGrey, and timeRush after they've been used on this guess
             if (e.target === socket.id && (
                 e.type === 'hiddenGuess' || 
                 e.type === 'hiddenFeedback' || 
@@ -1226,10 +1301,14 @@ io.on('connection', (socket) => {
                 e.type === 'gamblerHide' ||
                 e.type === 'gamblerReveal' ||
                 e.type === 'blindGuess' ||
-                e.type === 'greenToGrey'
+                e.type === 'greenToGrey' ||
+                e.type === 'timeRush'
             )) {
                 if (e.type === 'falseFeedback') {
                     console.log('Removing falseFeedback effect after it was applied to player:', socket.id);
+                }
+                if (e.type === 'timeRush') {
+                    console.log('Removing timeRush effect after it was applied to player:', socket.id);
                 }
                 return false; // Remove used effects
             }
