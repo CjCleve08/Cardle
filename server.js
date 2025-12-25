@@ -809,6 +809,7 @@ io.on('connection', (socket) => {
                 game.phonyCardRealCards = new Map();
             }
             game.phonyCardRealCards.set(socket.id, realCard);
+            console.log('Stored real card for phony card chain. Player:', socket.id, 'Real card:', realCard.id, 'Chain cards:', cardChain.map(c => c.id));
         }
         
         // Check if this is a hand reveal card - trigger it immediately
@@ -1012,6 +1013,7 @@ io.on('connection', (socket) => {
                 game.phonyCardRealCards = new Map();
             }
             game.phonyCardRealCards.set(socket.id, realCard);
+            console.log('Stored real card for phony card chain (stolen card). Player:', socket.id, 'Real card:', realCard.id, 'Chain cards:', cardChain.map(c => c.id));
         }
         
         // Show splash based on config (for the player who stole it)
@@ -1131,11 +1133,26 @@ io.on('connection', (socket) => {
         game.totalGuesses++; // Increment shared counter
         
         // Check if phonyCard was used - if so, use the real card instead
+        // IMPORTANT: If phonyCard was used, the stored real card takes precedence over data.card
+        // This ensures we always apply the correct card effect, not the fake card shown to opponent
         let actualCard = data.card;
         if (game.phonyCardRealCards && game.phonyCardRealCards.has(socket.id)) {
             actualCard = game.phonyCardRealCards.get(socket.id);
             game.phonyCardRealCards.delete(socket.id);
-            console.log('Phony card used - real card is:', actualCard, 'but opponent saw fake card');
+            console.log('Phony card used - real card is:', actualCard?.id, 'Client sent card:', data.card?.id || 'null/undefined', 'but opponent saw fake card');
+            
+            // Safety check: if client sent a modifier card but we have a stored real card, warn about potential issue
+            if (data.card && isModifierCard(data.card.id) && data.card.id === 'phonyCard') {
+                console.log('Warning: Client sent phonyCard in submitGuess, but stored real card will be used:', actualCard?.id);
+            }
+        } else if (data.card) {
+            actualCard = data.card;
+            
+            // Warning: if client sent a modifier card (like phonyCard), this shouldn't happen
+            // unless there was an error storing the real card
+            if (isModifierCard(data.card.id) && data.card.id === 'phonyCard') {
+                console.warn('Warning: phonyCard sent in submitGuess but no stored real card found. This may indicate a bug.');
+            }
         }
         
         // Apply card effects to game state using config (use actual card, not the fake one)
@@ -1143,8 +1160,15 @@ io.on('connection', (socket) => {
             const config = CARD_CONFIG[actualCard.id];
             // Only apply effects if it's not a modifier card (modifiers are handled in selectCard)
             if (!isModifierCard(actualCard.id) && config.effects?.onGuess) {
+                console.log('Applying card effect for:', actualCard.id);
                 config.effects.onGuess(game, socket.id);
+            } else if (isModifierCard(actualCard.id)) {
+                console.log('Skipping modifier card effect:', actualCard.id, '(modifiers handled in selectCard)');
+            } else {
+                console.log('No onGuess effect for card:', actualCard.id);
             }
+        } else if (actualCard) {
+            console.log('Warning: Card not found in CARD_CONFIG:', actualCard.id);
         }
         
         // Check for win
