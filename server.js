@@ -37,7 +37,7 @@ const CARD_CONFIG = {
                 if (!isOpponent) return feedback;
                 const modifiedFeedback = [...feedback];
                 for (let i = 0; i < feedback.length; i++) {
-                    if (Math.random() < 0.25) {
+                    if (Math.random() < 0.40) {
                         const options = ['correct', 'present', 'absent'];
                         modifiedFeedback[i] = options[Math.floor(Math.random() * options.length)];
                     }
@@ -152,7 +152,7 @@ const CARD_CONFIG = {
         metadata: {
             id: 'gamblersCard',
             title: 'Gambler\'s Card',
-            description: '50% chance to reveal a letter, 50% chance to hide your next guess from yourself',
+            description: '60% chance to reveal a letter, 40% chance to hide your next guess from yourself',
             type: 'help'
         },
         modifier: {
@@ -163,8 +163,8 @@ const CARD_CONFIG = {
         },
         effects: {
             onGuess: (game, playerId) => {
-                // 50/50 chance
-                const isLucky = Math.random() < 0.5;
+                // 60% chance for letter reveal, 40% chance for hidden guess
+                const isLucky = Math.random() < 0.60;
                 
                 if (isLucky) {
                     // Reveal a random letter position
@@ -372,6 +372,80 @@ const CARD_CONFIG = {
                 }
             }
         }
+    },
+    'wordScramble': {
+        metadata: {
+            id: 'wordScramble',
+            title: 'Word Scramble',
+            description: 'Your opponent\'s next guess letters will appear in random order',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                // Find the opponent
+                const opponent = game.players.find(p => p.id !== playerId);
+                if (opponent) {
+                    // Add wordScramble effect targeting the opponent
+                    game.activeEffects.push({
+                        type: 'wordScramble',
+                        target: opponent.id,
+                        description: 'Your next guess letters will appear in random order',
+                        used: false
+                    });
+                }
+            }
+        }
+    },
+    'cardMirror': {
+        metadata: {
+            id: 'cardMirror',
+            title: 'Card Mirror',
+            description: 'Copy and play the last card your opponent used',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                const opponent = game.players.find(p => p.id !== playerId);
+                if (!opponent) return;
+                
+                // Resolve the actual card being mirrored (following Card Mirror chains)
+                const actualMirroredCard = resolveMirroredCard(game, opponent.id);
+                
+                if (!actualMirroredCard) {
+                    // No card to mirror - do nothing (or could add a message)
+                    console.log('Card Mirror: No card to mirror for player', playerId, '- opponent has no last played card');
+                    return;
+                }
+                
+                // Get the card config for the mirrored card
+                const mirroredCardConfig = CARD_CONFIG[actualMirroredCard.id];
+                if (!mirroredCardConfig) {
+                    console.log('Card Mirror: Could not find config for mirrored card:', actualMirroredCard.id);
+                    return;
+                }
+                
+                // Apply the mirrored card's effect
+                if (mirroredCardConfig.effects && mirroredCardConfig.effects.onGuess) {
+                    console.log('Card Mirror: Applying effect from resolved card:', actualMirroredCard.id, '(followed Card Mirror chain)');
+                    // Apply the effect as if the current player used it
+                    mirroredCardConfig.effects.onGuess(game, playerId);
+                } else {
+                    console.log('Card Mirror: Mirrored card has no onGuess effect:', actualMirroredCard.id);
+                }
+            }
+        }
     }
 };
 
@@ -390,6 +464,64 @@ function getChainBehavior(cardId) {
 
 function needsRealCardStorage(cardId) {
     return CARD_CONFIG[cardId]?.modifier?.needsRealCardStorage === true;
+}
+
+// Helper function to resolve Card Mirror chains recursively
+// Given a player ID, returns the actual card being mirrored (following Card Mirror chains)
+function resolveMirroredCard(game, playerId, visitedPlayers = new Set()) {
+    // Prevent infinite loops
+    if (visitedPlayers.has(playerId)) {
+        console.warn('Card Mirror: Circular reference detected for player', playerId);
+        return null;
+    }
+    visitedPlayers.add(playerId);
+    
+    if (!game.lastPlayedCards) {
+        return null;
+    }
+    
+    const lastCard = game.lastPlayedCards.get(playerId);
+    if (!lastCard) {
+        return null;
+    }
+    
+    // If it's not Card Mirror, return it directly
+    if (lastCard.id !== 'cardMirror') {
+        return lastCard;
+    }
+    
+    // If it's Card Mirror, check what it actually mirrored
+    if (!game.mirroredCards) {
+        return null;
+    }
+    
+    const actualMirroredCard = game.mirroredCards.get(playerId);
+    if (!actualMirroredCard) {
+        // Card Mirror was played but we don't have record of what it mirrored
+        // Fallback: look at opponent's last card (for backwards compatibility or edge cases)
+        const opponent = game.players.find(p => p.id !== playerId);
+        if (opponent) {
+            const opponentLastCard = game.lastPlayedCards.get(opponent.id);
+            if (opponentLastCard && opponentLastCard.id !== 'cardMirror') {
+                return opponentLastCard;
+            }
+        }
+        return null;
+    }
+    
+    // If the card that was mirrored is also Card Mirror, recursively resolve it
+    if (actualMirroredCard.id === 'cardMirror') {
+        // Find the opponent (the player whose card was mirrored)
+        const opponent = game.players.find(p => p.id !== playerId);
+        if (opponent) {
+            // Recursively resolve what the opponent's Card Mirror was mirroring
+            const newVisited = new Set(visitedPlayers);
+            return resolveMirroredCard(game, opponent.id, newVisited);
+        }
+        return actualMirroredCard;
+    }
+    
+    return actualMirroredCard;
 }
 
 function getModifierCards() {
@@ -519,6 +651,41 @@ function applyCardEffect(feedback, card, isOpponent) {
     return feedback;
 }
 
+function scrambleWord(word) {
+    // Convert word to array, shuffle, and join back
+    const letters = word.split('');
+    // Fisher-Yates shuffle algorithm
+    for (let i = letters.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [letters[i], letters[j]] = [letters[j], letters[i]];
+    }
+    return letters.join('');
+}
+
+function scrambleWordAndGetPermutation(word) {
+    // Create an array of indices to track the permutation
+    const indices = Array.from({ length: word.length }, (_, i) => i);
+    const letters = word.split('');
+    
+    // Fisher-Yates shuffle algorithm - shuffle both letters and indices together
+    for (let i = letters.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [letters[i], letters[j]] = [letters[j], letters[i]];
+        [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+    
+    return {
+        scrambledWord: letters.join(''),
+        permutation: indices // permutation[i] tells us which original position is now at position i
+    };
+}
+
+function applyPermutationToArray(array, permutation) {
+    // permutation[i] tells us which original position is now at position i
+    // So we create a new array where newArray[i] = oldArray[permutation[i]]
+    return permutation.map(originalIndex => array[originalIndex]);
+}
+
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
     
@@ -590,7 +757,9 @@ io.on('connection', (socket) => {
                 currentTurn: player1.id, // Randomly choose first player (or could use Math.random())
                 activeEffects: [],
                 status: 'waiting',
-                totalGuesses: 0
+                totalGuesses: 0,
+                lastPlayedCards: new Map(),  // Track last card played by each player
+                mirroredCards: new Map()  // Track what card each Card Mirror actually mirrored (playerId -> card)
             };
             
             games.set(gameId, game);
@@ -667,7 +836,9 @@ io.on('connection', (socket) => {
             currentTurn: socket.id,
             activeEffects: [],
             status: 'waiting',
-            totalGuesses: 0  // Shared counter for board rows
+            totalGuesses: 0,  // Shared counter for board rows
+            lastPlayedCards: new Map(),  // Track last card played by each player
+            mirroredCards: new Map()  // Track what card each Card Mirror actually mirrored (playerId -> card)
         };
         
         games.set(gameId, game);
@@ -835,10 +1006,19 @@ io.on('connection', (socket) => {
         }
         
         // Show splash based on config (for the player who played it)
+        // If cardMirror, show the opponent's last card instead (following Card Mirror chains)
+        let cardForSplash = realCard;
+        if (realCard.id === 'cardMirror' && opponent) {
+            const resolvedCard = resolveMirroredCard(game, opponent.id);
+            if (resolvedCard) {
+                cardForSplash = resolvedCard;
+            }
+        }
+        
         const splashBehavior = getSplashBehavior(realCard.id);
         if (splashBehavior === 'show' && !shouldHideFromOpponent) {
             socket.emit('cardPlayed', {
-                card: realCard,
+                card: cardForSplash,
                 playerName: player ? player.name : 'Player',
                 playerId: socket.id
             });
@@ -864,19 +1044,44 @@ io.on('connection', (socket) => {
         });
         
         // Show card to opponent (fake if phonyCard was used, hidden if hideCard was used)
+        // If cardMirror, show the opponent's last card instead (following Card Mirror chains)
+        let cardToShowOpponentForSplash = cardToShowOpponent;
+        if (realCard.id === 'cardMirror' && opponent) {
+            const resolvedCard = resolveMirroredCard(game, opponent.id);
+            if (resolvedCard) {
+                cardToShowOpponentForSplash = resolvedCard;
+            }
+        }
+        
         if (opponent && !shouldHideFromOpponent) {
             const opponentSocket = io.sockets.sockets.get(opponent.id);
             if (opponentSocket) {
                 opponentSocket.emit('cardPlayed', {
-                    card: cardToShowOpponent,
+                    card: cardToShowOpponentForSplash,
             playerName: player ? player.name : 'Player',
             playerId: socket.id
         });
             }
         }
         
-        // Clear the card chain
+        // Clear the card chain and track the last played card
         game.cardChains.delete(socket.id);
+        
+        // Track the last played card for this player (store the real card, not the fake one shown to opponent)
+        if (!game.lastPlayedCards) {
+            game.lastPlayedCards = new Map();
+        }
+        // If Card Mirror, store what card it's actually mirroring (opponent's last card at this moment)
+        if (realCard.id === 'cardMirror' && opponent) {
+            if (!game.mirroredCards) {
+                game.mirroredCards = new Map();
+            }
+            const opponentLastCard = game.lastPlayedCards.get(opponent.id);
+            if (opponentLastCard) {
+                game.mirroredCards.set(socket.id, opponentLastCard);
+            }
+        }
+        game.lastPlayedCards.set(socket.id, realCard);
     });
     
     socket.on('sendHand', (data) => {
@@ -1017,10 +1222,19 @@ io.on('connection', (socket) => {
         }
         
         // Show splash based on config (for the player who stole it)
+        // If cardMirror, show the opponent's last card instead (following Card Mirror chains)
+        let cardForSplash = realCard;
+        if (realCard.id === 'cardMirror' && opponent) {
+            const resolvedCard = resolveMirroredCard(game, opponent.id);
+            if (resolvedCard) {
+                cardForSplash = resolvedCard;
+            }
+        }
+        
         const splashBehavior = getSplashBehavior(realCard.id);
         if (splashBehavior === 'show' && !shouldHideFromOpponent) {
             socket.emit('cardPlayed', {
-                card: realCard,
+                card: cardForSplash,
                 playerName: player ? player.name : 'Player',
                 playerId: socket.id
             });
@@ -1035,19 +1249,44 @@ io.on('connection', (socket) => {
         });
         
         // Show card to opponent (fake if phonyCard was used, hidden if hideCard was used)
+        // If cardMirror, show the opponent's last card instead (following Card Mirror chains)
+        let cardToShowOpponentForSplash = cardToShowOpponent;
+        if (realCard.id === 'cardMirror' && opponent) {
+            const resolvedCard = resolveMirroredCard(game, opponent.id);
+            if (resolvedCard) {
+                cardToShowOpponentForSplash = resolvedCard;
+            }
+        }
+        
         if (opponent && !shouldHideFromOpponent) {
             const opponentSocket = io.sockets.sockets.get(opponent.id);
             if (opponentSocket) {
                 opponentSocket.emit('cardPlayed', {
-                    card: cardToShowOpponent,
+                    card: cardToShowOpponentForSplash,
                     playerName: player ? player.name : 'Player',
                     playerId: socket.id
                 });
             }
         }
         
-        // Clear the card chain
+        // Clear the card chain and track the last played card (for stolen card)
         game.cardChains.delete(socket.id);
+        
+        // Track the last played card for this player (stolen card)
+        if (!game.lastPlayedCards) {
+            game.lastPlayedCards = new Map();
+        }
+        // If Card Mirror, store what card it's actually mirroring (opponent's last card at this moment)
+        if (realCard.id === 'cardMirror' && opponent) {
+            if (!game.mirroredCards) {
+                game.mirroredCards = new Map();
+            }
+            const opponentLastCard = game.lastPlayedCards.get(opponent.id);
+            if (opponentLastCard) {
+                game.mirroredCards.set(socket.id, opponentLastCard);
+            }
+        }
+        game.lastPlayedCards.set(socket.id, realCard);
     });
     
     socket.on('turnTimeout', (data) => {
@@ -1215,6 +1454,11 @@ io.on('connection', (socket) => {
             e.type === 'greenToGrey' && e.target === socket.id && !e.used
         );
         
+        // Check if wordScramble is active (targets the opponent making the guess)
+        const wordScrambleActive = game.activeEffects.some(e => 
+            e.type === 'wordScramble' && e.target === socket.id && !e.used
+        );
+        
         // Calculate false feedback if active (for opponent's view only)
         let falseFeedback = null;
         if (falseFeedbackActive) {
@@ -1241,12 +1485,21 @@ io.on('connection', (socket) => {
                 hidden: true
             });
         } else {
-            // Normal display for guesser (apply greenToGrey if active)
+            // Normal display for guesser (apply greenToGrey if active, wordScramble if active)
             const guesserFeedback = greenToGreyActive && greenToGreyFeedback ? greenToGreyFeedback : realFeedback;
+            // Scramble the guess and feedback if wordScramble is active (player sees scrambled letters)
+            let guesserGuess = guess;
+            let scrambledFeedback = guesserFeedback;
+            if (wordScrambleActive) {
+                const scrambled = scrambleWordAndGetPermutation(guess);
+                guesserGuess = scrambled.scrambledWord;
+                // Apply the same permutation to the feedback so colors align with scrambled letters
+                scrambledFeedback = applyPermutationToArray(guesserFeedback, scrambled.permutation);
+            }
         socket.emit('guessSubmitted', {
             playerId: socket.id,
-            guess: guess,
-                feedback: guesserFeedback, // Real feedback or modified (green to grey) for the guesser
+            guess: guesserGuess, // Scrambled if wordScramble active, otherwise real guess
+                feedback: scrambledFeedback, // Feedback aligned with scrambled letters if wordScramble active
                 row: boardRow,
             hidden: false
         });
@@ -1317,7 +1570,7 @@ io.on('connection', (socket) => {
         
         // Remove used effects (mark as used and remove)
         game.activeEffects = game.activeEffects.filter(e => {
-            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, greenToGrey, and timeRush after they've been used on this guess
+            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, greenToGrey, timeRush, and wordScramble after they've been used on this guess
             if (e.target === socket.id && (
                 e.type === 'hiddenGuess' || 
                 e.type === 'hiddenFeedback' || 
@@ -1326,7 +1579,8 @@ io.on('connection', (socket) => {
                 e.type === 'gamblerReveal' ||
                 e.type === 'blindGuess' ||
                 e.type === 'greenToGrey' ||
-                e.type === 'timeRush'
+                e.type === 'timeRush' ||
+                e.type === 'wordScramble'
             )) {
                 if (e.type === 'falseFeedback') {
                     console.log('Removing falseFeedback effect after it was applied to player:', socket.id);

@@ -2273,6 +2273,56 @@ let currentDeckSelection = []; // Array of card IDs in deck slots (index = slot 
 let draggedCard = null;
 let draggedSlotIndex = null;
 
+// Helper function to create a custom drag image that doesn't get cut off
+function createDragImage(element) {
+    // Get the computed styles and dimensions
+    const rect = element.getBoundingClientRect();
+    const computedStyle = getComputedStyle(element);
+    
+    // Create a clone of the element
+    const dragImage = element.cloneNode(true);
+    
+    // Remove any classes that might apply transforms (like 'dragging') BEFORE setting styles
+    dragImage.classList.remove('dragging');
+    
+    // Position it off-screen but visible for rendering
+    dragImage.style.position = 'absolute';
+    dragImage.style.top = '-9999px';
+    dragImage.style.left = '0px';
+    dragImage.style.margin = '0';
+    dragImage.style.opacity = '0.9';
+    
+    // Ensure all styles are explicitly set to prevent clipping
+    dragImage.style.width = `${rect.width}px`;
+    dragImage.style.height = `${rect.height}px`;
+    dragImage.style.boxSizing = 'border-box';
+    dragImage.style.overflow = 'visible';
+    
+    // Copy important computed styles
+    dragImage.style.backgroundColor = computedStyle.backgroundColor;
+    dragImage.style.backgroundImage = computedStyle.backgroundImage;
+    dragImage.style.backgroundSize = computedStyle.backgroundSize;
+    dragImage.style.border = computedStyle.border;
+    dragImage.style.borderRadius = computedStyle.borderRadius;
+    dragImage.style.boxShadow = computedStyle.boxShadow;
+    dragImage.style.padding = computedStyle.padding;
+    dragImage.style.display = computedStyle.display;
+    dragImage.style.flexDirection = computedStyle.flexDirection;
+    dragImage.style.justifyContent = computedStyle.justifyContent;
+    dragImage.style.alignItems = computedStyle.alignItems;
+    
+    // CRITICAL: Reset any transforms/rotations to ensure the drag image is straight
+    // This must be set AFTER all other styles to override any CSS transforms
+    // Inline styles will override CSS classes, so setting to 'none' should work
+    dragImage.style.setProperty('transform', 'none', 'important');
+    dragImage.style.transition = 'none';
+    
+    // Append to body so it can be measured and rendered
+    document.body.appendChild(dragImage);
+    
+    return dragImage;
+}
+
 function createDeckSlots() {
     const deckSlots = document.getElementById('deckSlots');
     deckSlots.innerHTML = '';
@@ -2355,6 +2405,17 @@ function createDeckSlotCard(card, slotIndex) {
         draggedSlotIndex = slotIndex;
         cardElement.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
+        
+        // Create custom drag image to prevent edge clipping
+        const dragImage = createDragImage(cardElement);
+        e.dataTransfer.setDragImage(dragImage, 0, 0);
+        
+        // Clean up drag image after a short delay
+        setTimeout(() => {
+            if (dragImage.parentNode) {
+                document.body.removeChild(dragImage);
+            }
+        }, 0);
     });
     
     cardElement.addEventListener('dragend', () => {
@@ -2455,6 +2516,17 @@ function renderAvailableCards() {
             cardElement.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'copy';
             e.dataTransfer.setData('text/plain', card.id);
+            
+            // Create custom drag image to prevent edge clipping
+            const dragImage = createDragImage(cardElement);
+            e.dataTransfer.setDragImage(dragImage, 0, 0);
+            
+            // Clean up drag image after a short delay
+            setTimeout(() => {
+                if (dragImage.parentNode) {
+                    document.body.removeChild(dragImage);
+                }
+            }, 0);
         });
         
         cardElement.addEventListener('dragend', (e) => {
