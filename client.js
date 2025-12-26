@@ -613,6 +613,89 @@ function getDeckCards() {
 }
 
 // Screen Management System
+// Lobby Background Animation
+let lobbyAnimationInterval = null;
+let lobbyAnimationElements = [];
+
+function startLobbyBackgroundAnimation() {
+    const container = document.getElementById('lobbyBackgroundAnimation');
+    if (!container) return;
+    
+    // Clear any existing animation
+    stopLobbyBackgroundAnimation();
+    
+    // Create initial elements immediately (no delay)
+    for (let i = 0; i < 15; i++) {
+        createFallingElement(container);
+    }
+    
+    // Create falling elements periodically
+    lobbyAnimationInterval = setInterval(() => {
+        createFallingElement(container);
+    }, 600); // Create a new element every 0.6 seconds
+}
+
+function stopLobbyBackgroundAnimation() {
+    if (lobbyAnimationInterval) {
+        clearInterval(lobbyAnimationInterval);
+        lobbyAnimationInterval = null;
+    }
+    
+    // Remove all falling elements
+    lobbyAnimationElements.forEach(el => {
+        if (el && el.parentNode) {
+            el.parentNode.removeChild(el);
+        }
+    });
+    lobbyAnimationElements = [];
+}
+
+function createFallingElement(container) {
+    if (!container) return;
+    
+    const isCard = Math.random() > 0.5; // 50% chance of card vs letter
+    const element = document.createElement('div');
+    element.className = `falling-element ${isCard ? 'falling-card' : 'falling-letter'}`;
+    
+    if (isCard) {
+        element.textContent = '🃏';
+    } else {
+        // Random letter from A-Z
+        const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        element.textContent = letters[Math.floor(Math.random() * letters.length)];
+    }
+    
+    // Random horizontal position
+    const leftPosition = Math.random() * 100;
+    element.style.left = `${leftPosition}%`;
+    
+    // Random animation duration (10-20 seconds)
+    const duration = 10 + Math.random() * 10;
+    element.style.animationDuration = `${duration}s`;
+    
+    // Very small or no delay to start immediately
+    const delay = Math.random() * 0.2; // 0 to 0.2 seconds
+    element.style.animationDelay = `${delay}s`;
+    
+    // Random rotation amount (some elements rotate more than others)
+    const rotationAmount = (Math.random() * 2 - 1) * 720; // -720 to 720 degrees
+    element.style.setProperty('--rotation', `${rotationAmount}deg`);
+    
+    container.appendChild(element);
+    lobbyAnimationElements.push(element);
+    
+    // Remove element after animation completes
+    setTimeout(() => {
+        if (element && element.parentNode) {
+            element.parentNode.removeChild(element);
+            const index = lobbyAnimationElements.indexOf(element);
+            if (index > -1) {
+                lobbyAnimationElements.splice(index, 1);
+            }
+        }
+    }, (duration + delay) * 1000);
+}
+
 const ScreenManager = {
     screens: {},
     currentScreen: null,
@@ -653,6 +736,11 @@ const ScreenManager = {
             return false;
         }
         
+        // Clean up background animation if leaving lobby
+        if (this.currentScreen === 'lobby' && screenName !== 'lobby') {
+            stopLobbyBackgroundAnimation();
+        }
+        
         // Hide all screens first
         Object.values(this.screens).forEach(s => {
             if (s) {
@@ -663,6 +751,11 @@ const ScreenManager = {
         // Show the requested screen
         screen.classList.add('active');
         this.currentScreen = screenName;
+        
+        // Initialize background animation if showing lobby
+        if (screenName === 'lobby') {
+            startLobbyBackgroundAnimation();
+        }
         
         console.log(`Screen changed to: ${screenName}`);
         return true;

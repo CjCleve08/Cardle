@@ -145,6 +145,8 @@
 
         <!-- Lobby Screen -->
         <div id="lobby" class="screen">
+            <!-- Animated Background -->
+            <div class="lobby-background-animation" id="lobbyBackgroundAnimation"></div>
             <div class="lobby-container">
                 <!-- Header -->
                 <div class="lobby-header">
@@ -175,18 +177,20 @@
                     <div id="playTab" class="tab-panel active">
                         <div class="tab-panel-inner">
                             <div class="play-actions">
-                                <button id="findMatchBtn" class="btn btn-primary btn-large">
+                                <button id="findMatchBtn" class="btn btn-primary btn-large btn-find-match">
                             <span class="btn-icon">⚡</span>
                             <span>Find Match</span>
                         </button>
-                                <button id="createGameBtn" class="btn btn-secondary btn-large">
-                            <span class="btn-icon">✨</span>
-                            <span>Create Game</span>
-                        </button>
-                                <button id="joinGameBtn" class="btn btn-secondary btn-large">
-                            <span class="btn-icon">🔗</span>
-                            <span>Join Game</span>
-                        </button>
+                                <div class="play-actions-secondary">
+                                    <button id="createGameBtn" class="btn btn-secondary btn-large">
+                                <span class="btn-icon">✨</span>
+                                <span>Create Game</span>
+                            </button>
+                                    <button id="joinGameBtn" class="btn btn-secondary btn-large">
+                                <span class="btn-icon">🔗</span>
+                                <span>Join Game</span>
+                            </button>
+                                </div>
                 </div>
                 <div id="matchmakingStatus" class="matchmaking-status" style="display: none;">
                     <div class="matchmaking-spinner"></div>
