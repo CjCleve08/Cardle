@@ -1,5 +1,48 @@
 const socket = io();
 
+// Initialize sound manager on user interaction (required for autoplay policy)
+function initSoundOnInteraction() {
+    if (typeof soundManager !== 'undefined') {
+        soundManager.ensureAudioContext();
+        // Try to resume background music if it exists but was paused
+        if (soundManager.backgroundMusic && soundManager.backgroundMusic.paused) {
+            soundManager.backgroundMusic.play().then(() => {
+                // Trigger fade in if music was paused
+                if (soundManager.backgroundMusic && soundManager.backgroundMusic.volume === 0) {
+                    soundManager.backgroundMusic.dispatchEvent(new Event('play'));
+                }
+            }).catch(error => {
+                console.log('Could not resume background music:', error);
+            });
+        }
+    }
+}
+
+// Load saved volume settings on startup
+function loadVolumeSettings() {
+    if (typeof soundManager !== 'undefined') {
+        const savedSoundEffectsVolume = localStorage.getItem('soundEffectsVolume');
+        const savedMusicVolume = localStorage.getItem('musicVolume');
+        
+        if (savedSoundEffectsVolume !== null) {
+            soundManager.setVolume(parseInt(savedSoundEffectsVolume) / 100);
+        }
+        
+        if (savedMusicVolume !== null) {
+            soundManager.setMusicVolume(parseInt(savedMusicVolume) / 100);
+        }
+    }
+}
+
+// Add sound initialization on first user interaction
+document.addEventListener('click', initSoundOnInteraction, { once: true });
+document.addEventListener('keydown', initSoundOnInteraction, { once: true });
+
+// Load volume settings when sound manager is available
+if (typeof soundManager !== 'undefined') {
+    loadVolumeSettings();
+}
+
 // Firebase Authentication State
 let currentUser = null;
 let isGuestMode = false;
@@ -741,6 +784,20 @@ const ScreenManager = {
             stopLobbyBackgroundAnimation();
         }
         
+        // Stop background music if leaving game (but not if going to lobby, lobby has its own music)
+        if (this.currentScreen === 'game' && screenName !== 'game' && screenName !== 'lobby') {
+            if (typeof soundManager !== 'undefined') {
+                soundManager.stopBackgroundMusic();
+            }
+        }
+        
+        // Stop lobby music if leaving lobby (but not if going to game, game has its own music)
+        if (this.currentScreen === 'lobby' && screenName !== 'lobby' && screenName !== 'game') {
+            if (typeof soundManager !== 'undefined') {
+                soundManager.stopBackgroundMusic();
+            }
+        }
+        
         // Hide all screens first
         Object.values(this.screens).forEach(s => {
             if (s) {
@@ -755,6 +812,10 @@ const ScreenManager = {
         // Initialize background animation if showing lobby
         if (screenName === 'lobby') {
             startLobbyBackgroundAnimation();
+            // Start lobby music
+            if (typeof soundManager !== 'undefined') {
+                soundManager.playLobbyMusic('LobbySoundTrack.mp4');
+            }
         }
         
         console.log(`Screen changed to: ${screenName}`);
@@ -828,6 +889,11 @@ socket.on('playerJoined', (data) => {
 socket.on('gameStarted', (data) => {
     console.log('Game started event received:', data);
     
+    // Play game start sound
+    if (typeof soundManager !== 'undefined') {
+        soundManager.playGameStart();
+    }
+    
     // Hide matchmaking status if visible
     const matchmakingStatus = document.getElementById('matchmakingStatus');
     const findMatchBtn = document.getElementById('findMatchBtn');
@@ -856,7 +922,11 @@ socket.on('gameStarted', (data) => {
     }
     
     if (ScreenManager.show('game')) {
-    initializeGame(gameState);
+        // Start background music when game starts
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playBackgroundMusic('GameSoundTrack.mp4');
+        }
+        initializeGame(gameState);
     } else {
         console.error('Failed to show game screen!');
     }
@@ -942,6 +1012,11 @@ socket.on('turnChanged', (data) => {
     
     // Always show game board so players can see previous guesses
     showGameBoard();
+    
+    // Play turn change sound
+    if (typeof soundManager !== 'undefined') {
+        soundManager.playTurnChange();
+    }
     
     if (myTurn) {
         // It's my turn - show card selection and enable input
@@ -1334,6 +1409,11 @@ socket.on('gameOver', (data) => {
         messageEl.textContent = 'Congratulations! You guessed the word!';
         iconEl.textContent = '🎉';
         wordEl.textContent = data.word;
+        
+        // Play win sound
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playGameWin();
+        }
     } else {
         titleEl.textContent = 'You Lost!';
         titleEl.classList.add('lose');
@@ -1341,6 +1421,11 @@ socket.on('gameOver', (data) => {
         messageEl.textContent = 'Better luck next time! The word was:';
         iconEl.textContent = '😔';
         wordEl.textContent = data.word;
+        
+        // Play lose sound
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playGameLose();
+        }
     }
     
     // Update statistics (async, but don't wait for it)
@@ -1367,6 +1452,10 @@ socket.on('matchmakingStatus', (data) => {
         matchmakingText.textContent = 'Searching for opponent...';
         findMatchBtn.disabled = true;
     } else if (data.status === 'matched') {
+        // Play match found sound
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playMatchFound();
+        }
         // Hide matchmaking status (game will start)
         matchmakingStatus.style.display = 'none';
         findMatchBtn.disabled = false;
@@ -1388,6 +1477,11 @@ socket.on('cardPlayed', (data) => {
 socket.on('chatMessage', (data) => {
     // Receive and display chat message
     displayChatMessage(data.playerName, data.message, data.timestamp, data.playerId === currentPlayer);
+    
+    // Play chat message sound (only for messages from others)
+    if (typeof soundManager !== 'undefined' && data.playerId !== currentPlayer) {
+        soundManager.playChatMessage();
+    }
     
     // Flash the show chat button if chat is hidden and it's not your own message
     const chatContainer = document.getElementById('chatContainer');
@@ -1833,6 +1927,14 @@ function generateCards() {
         if (!isBlocked) {
         cardElement.onclick = () => selectCard(card, cardElement);
         }
+        
+        // Add hover sound to card
+        cardElement.addEventListener('mouseenter', () => {
+            if (typeof soundManager !== 'undefined' && !isBlocked) {
+                soundManager.playCardHover();
+            }
+        });
+        
         container.appendChild(cardElement);
     });
     
@@ -1843,14 +1945,25 @@ function generateCards() {
 function selectCard(card, cardElement) {
     // Check if player is card locked
     if (isCardLocked()) {
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
         showGameMessage('Card Locked', 'You cannot use a card this turn!', '🔒');
         return;
     }
     
     // Check if card is blocked
     if (window.blockedCardId === card.id) {
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
         showGameMessage('🚫', 'Card Blocked', 'This card has been blocked and cannot be used!');
         return;
+    }
+    
+    // Play card select sound
+    if (typeof soundManager !== 'undefined') {
+        soundManager.playCardSelect();
     }
     
     selectedCard = card;
@@ -2131,10 +2244,16 @@ function handleKeyPress(key) {
     if (key === 'BACKSPACE') {
         input.value = input.value.slice(0, -1);
         currentGuess = input.value.toUpperCase();
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playLetterDelete();
+        }
     } else if (key.length === 1 && /[A-Z]/.test(key)) {
         if (input.value.length < 5) {
             input.value += key;
             currentGuess = input.value.toUpperCase();
+            if (typeof soundManager !== 'undefined') {
+                soundManager.playLetterType();
+            }
         }
     }
 }
@@ -2152,22 +2271,49 @@ function displayGuess(guess, feedback, row) {
         }
     }
     
+    // Check if all letters are correct for win sound
+    const allCorrect = feedback && feedback.every(f => f === 'correct');
+    
     // Then animate the feedback with a delay (like Wordle)
     setTimeout(() => {
         for (let i = 0; i < 5; i++) {
             const cell = document.getElementById(`cell-${row}-${i}`);
             if (cell) {
             setTimeout(() => {
-                if (feedback[i] === 'correct') {
-                    cell.classList.add('correct');
-                } else if (feedback[i] === 'present') {
-                    cell.classList.add('present');
+                if (typeof soundManager !== 'undefined') {
+                    if (feedback[i] === 'correct') {
+                        cell.classList.add('correct');
+                        if (!allCorrect) { // Only play individual sound if not all correct
+                            soundManager.playCorrectLetter();
+                        }
+                    } else if (feedback[i] === 'present') {
+                        cell.classList.add('present');
+                        soundManager.playPresentLetter();
+                    } else {
+                        cell.classList.add('absent');
+                        soundManager.playWrongLetter();
+                    }
                 } else {
-                    cell.classList.add('absent');
+                    // No sound manager, just add classes
+                    if (feedback[i] === 'correct') {
+                        cell.classList.add('correct');
+                    } else if (feedback[i] === 'present') {
+                        cell.classList.add('present');
+                    } else {
+                        cell.classList.add('absent');
+                    }
                 }
             }, i * 150); // Stagger the animations
         }
         }
+        
+        // Play win sound if all correct (after last letter animation)
+        if (allCorrect && typeof soundManager !== 'undefined') {
+            setTimeout(() => {
+                soundManager.playCorrectWord();
+            }, 5 * 150 + 200);
+        }
+        
         // Update scroll buttons after animation
         setTimeout(updateScrollButtons, 1000);
     }, 200);
@@ -2903,11 +3049,16 @@ function switchTab(tabName) {
         updateDeckCount();
     }
     
-    // If switching to stats tab, update stats display
-    if (tabName === 'stats') {
+    // If switching to profile tab, update stats display
+    if (tabName === 'profile') {
         updateStatsDisplay().catch(error => {
             console.error('Error loading stats:', error);
         });
+    }
+    
+    // If switching to settings tab, initialize settings
+    if (tabName === 'settings') {
+        initializeSettings();
     }
 }
 
@@ -2965,6 +3116,78 @@ document.getElementById('clearDeckBtn').addEventListener('click', () => {
     clearDeck();
 });
 
+// Settings Functions
+function initializeSettings() {
+    // Load saved volume settings from localStorage
+    const savedSoundEffectsVolume = localStorage.getItem('soundEffectsVolume');
+    const savedMusicVolume = localStorage.getItem('musicVolume');
+    
+    const soundEffectsSlider = document.getElementById('soundEffectsVolume');
+    const musicSlider = document.getElementById('musicVolume');
+    const soundEffectsValue = document.getElementById('soundEffectsValue');
+    const musicValue = document.getElementById('musicVolumeValue');
+    
+    if (soundEffectsSlider && soundEffectsValue) {
+        const volume = savedSoundEffectsVolume !== null ? parseInt(savedSoundEffectsVolume) : 30;
+        soundEffectsSlider.value = volume;
+        soundEffectsValue.textContent = `${volume}%`;
+        
+        // Update sound manager
+        if (typeof soundManager !== 'undefined') {
+            soundManager.setVolume(volume / 100);
+        }
+    }
+    
+    if (musicSlider && musicValue) {
+        const volume = savedMusicVolume !== null ? parseInt(savedMusicVolume) : 40;
+        musicSlider.value = volume;
+        musicValue.textContent = `${volume}%`;
+        
+        // Update sound manager
+        if (typeof soundManager !== 'undefined') {
+            soundManager.setMusicVolume(volume / 100);
+        }
+    }
+}
+
+// Settings event listeners
+document.addEventListener('DOMContentLoaded', () => {
+    const soundEffectsSlider = document.getElementById('soundEffectsVolume');
+    const musicSlider = document.getElementById('musicVolume');
+    const soundEffectsValue = document.getElementById('soundEffectsValue');
+    const musicValue = document.getElementById('musicVolumeValue');
+    
+    if (soundEffectsSlider && soundEffectsValue) {
+        soundEffectsSlider.addEventListener('input', (e) => {
+            const volume = parseInt(e.target.value);
+            soundEffectsValue.textContent = `${volume}%`;
+            
+            // Update sound manager
+            if (typeof soundManager !== 'undefined') {
+                soundManager.setVolume(volume / 100);
+            }
+            
+            // Save to localStorage
+            localStorage.setItem('soundEffectsVolume', volume);
+        });
+    }
+    
+    if (musicSlider && musicValue) {
+        musicSlider.addEventListener('input', (e) => {
+            const volume = parseInt(e.target.value);
+            musicValue.textContent = `${volume}%`;
+            
+            // Update sound manager
+            if (typeof soundManager !== 'undefined') {
+                soundManager.setMusicVolume(volume / 100);
+            }
+            
+            // Save to localStorage
+            localStorage.setItem('musicVolume', volume);
+        });
+    }
+});
+
 document.getElementById('joinWithIdBtn').addEventListener('click', () => {
     const name = getPlayerName();
     const gameId = document.getElementById('gameIdInput').value.trim();
@@ -2986,11 +3209,23 @@ document.getElementById('wordInput').addEventListener('keypress', (e) => {
 });
 
 document.getElementById('wordInput').addEventListener('input', (e) => {
+    const oldValue = currentGuess || '';
     e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
     currentGuess = e.target.value;
+    
+    // Play sound for typing (only when adding, not deleting)
+    if (typeof soundManager !== 'undefined' && currentGuess.length > oldValue.length) {
+        soundManager.playLetterType();
+    } else if (typeof soundManager !== 'undefined' && currentGuess.length < oldValue.length) {
+        soundManager.playLetterDelete();
+    }
 });
 
 document.getElementById('playAgainBtn').addEventListener('click', () => {
+    // Stop background music before reloading
+    if (typeof soundManager !== 'undefined') {
+        soundManager.stopBackgroundMusic();
+    }
     location.reload();
 });
 
@@ -3032,6 +3267,11 @@ function sendChatMessage() {
     const message = chatInput.value.trim();
     
     if (!message) return;
+    
+    // Play chat send sound
+    if (typeof soundManager !== 'undefined') {
+        soundManager.playChatSend();
+    }
     
     socket.emit('chatMessage', {
         gameId: gameState.gameId,
@@ -3114,6 +3354,9 @@ document.addEventListener('keydown', (e) => {
 
 function submitGuess() {
     if (gameState.currentTurn !== currentPlayer) {
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
         alert("It's not your turn!");
         return;
     }
@@ -3121,12 +3364,18 @@ function submitGuess() {
     // Allow submitting without a card if player is card locked
     const locked = isCardLocked();
     if (!selectedCard && !locked) {
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
         alert('Please select a card first!');
         return;
     }
     
     // Can't submit if we're in a card chain (modifier card selected but no final card)
     if (cardChainActive && selectedCard && isModifierCard(selectedCard.id)) {
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
         alert('Please select a final card to complete the chain!');
         return;
     }
@@ -3134,8 +3383,16 @@ function submitGuess() {
     const guess = document.getElementById('wordInput').value.toUpperCase();
     
     if (guess.length !== 5) {
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
         alert('Please enter a 5-letter word');
         return;
+    }
+    
+    // Play submit sound
+    if (typeof soundManager !== 'undefined') {
+        soundManager.playWordSubmit();
     }
     
     socket.emit('submitGuess', {

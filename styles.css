@@ -773,7 +773,21 @@ header h1 {
     align-items: center;
     gap: 24px;
     max-width: 400px;
+    margin: 0 auto 32px auto;
+}
+
+.profile-stats-section {
+    width: 100%;
+    max-width: 600px;
     margin: 0 auto;
+}
+
+.profile-stats-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #6aaa64;
+    margin-bottom: 20px;
+    text-align: center;
 }
 
 .profile-avatar {
@@ -829,6 +843,110 @@ header h1 {
     font-size: 0.875rem;
     font-weight: 600;
     margin-top: 8px;
+}
+
+/* Settings Tab Styles */
+.settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.settings-section {
+    background: linear-gradient(135deg, rgba(26, 26, 27, 0.6), rgba(18, 18, 19, 0.6));
+    border: 1px solid #3a3a3c;
+    border-radius: 12px;
+    padding: 24px;
+}
+
+.settings-section-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0 0 24px 0;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #3a3a3c;
+}
+
+.settings-item {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.settings-item:last-child {
+    margin-bottom: 0;
+}
+
+.settings-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 1rem;
+    color: #d7dadc;
+    font-weight: 500;
+}
+
+.settings-value {
+    color: #6aaa64;
+    font-weight: 600;
+    font-size: 0.9375rem;
+    min-width: 50px;
+    text-align: right;
+}
+
+.settings-slider {
+    width: 100%;
+    height: 8px;
+    border-radius: 4px;
+    background: #3a3a3c;
+    outline: none;
+    -webkit-appearance: none;
+    appearance: none;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.settings-slider:hover {
+    background: #4a4a4c;
+}
+
+.settings-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #6aaa64;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(106, 170, 100, 0.3);
+    transition: all 0.2s ease;
+}
+
+.settings-slider::-webkit-slider-thumb:hover {
+    background: #7aba74;
+    transform: scale(1.1);
+    box-shadow: 0 3px 8px rgba(106, 170, 100, 0.5);
+}
+
+.settings-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #6aaa64;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 6px rgba(106, 170, 100, 0.3);
+    transition: all 0.2s ease;
+}
+
+.settings-slider::-moz-range-thumb:hover {
+    background: #7aba74;
+    transform: scale(1.1);
+    box-shadow: 0 3px 8px rgba(106, 170, 100, 0.5);
 }
 
 .user-info {

@@ -246,36 +246,6 @@
                         </div>
                     </div>
                     
-                    <!-- Stats Tab -->
-                    <div id="statsTab" class="tab-panel">
-                        <div class="tab-panel-inner">
-                            <h2 class="tab-panel-title">Statistics</h2>
-                            <div class="stats-content">
-                                <div class="stats-grid">
-                                    <div class="stat-card">
-                                        <div class="stat-label">Games Played</div>
-                                        <div class="stat-value" id="statGamesPlayed">0</div>
-                                    </div>
-                                    <div class="stat-card">
-                                        <div class="stat-label">Wins</div>
-                                        <div class="stat-value" id="statWins">0</div>
-                                    </div>
-                                    <div class="stat-card">
-                                        <div class="stat-label">Win Rate</div>
-                                        <div class="stat-value" id="statWinRate">0%</div>
-                                    </div>
-                                    <div class="stat-card">
-                                        <div class="stat-label">Average Guesses</div>
-                                        <div class="stat-value" id="statAvgGuesses">-</div>
-                                    </div>
-                                </div>
-                                <div class="stats-note">
-                                    Statistics will be tracked as you play games
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
                     <!-- Profile Tab -->
                     <div id="profileTab" class="tab-panel">
                         <div class="tab-panel-inner">
@@ -288,6 +258,58 @@
                                     <div class="profile-name" id="profileName">Loading...</div>
                                     <div class="profile-email" id="profileEmail">-</div>
                                     <span class="profile-badge" id="profileAccountType">-</span>
+                                </div>
+                            </div>
+                            <div class="profile-stats-section">
+                                <h3 class="profile-stats-title">Statistics</h3>
+                                <div class="stats-content">
+                                    <div class="stats-grid">
+                                        <div class="stat-card">
+                                            <div class="stat-label">Games Played</div>
+                                            <div class="stat-value" id="statGamesPlayed">0</div>
+                                        </div>
+                                        <div class="stat-card">
+                                            <div class="stat-label">Wins</div>
+                                            <div class="stat-value" id="statWins">0</div>
+                                        </div>
+                                        <div class="stat-card">
+                                            <div class="stat-label">Win Rate</div>
+                                            <div class="stat-value" id="statWinRate">0%</div>
+                                        </div>
+                                        <div class="stat-card">
+                                            <div class="stat-label">Average Guesses</div>
+                                            <div class="stat-value" id="statAvgGuesses">-</div>
+                                        </div>
+                                    </div>
+                                    <div class="stats-note">
+                                        Statistics will be tracked as you play games
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Settings Tab -->
+                    <div id="settingsTab" class="tab-panel">
+                        <div class="tab-panel-inner">
+                            <h2 class="tab-panel-title">Settings</h2>
+                            <div class="settings-content">
+                                <div class="settings-section">
+                                    <h3 class="settings-section-title">Audio</h3>
+                                    <div class="settings-item">
+                                        <label class="settings-label">
+                                            <span>Sound Effects Volume</span>
+                                            <span class="settings-value" id="soundEffectsValue">30%</span>
+                                        </label>
+                                        <input type="range" id="soundEffectsVolume" class="settings-slider" min="0" max="100" value="30" step="1">
+                                    </div>
+                                    <div class="settings-item">
+                                        <label class="settings-label">
+                                            <span>Music Volume</span>
+                                            <span class="settings-value" id="musicVolumeValue">40%</span>
+                                        </label>
+                                        <input type="range" id="musicVolume" class="settings-slider" min="0" max="100" value="40" step="1">
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -308,17 +330,17 @@
                         </div>
                         <span class="tab-label">Deck</span>
                     </button>
-                    <button class="lobby-tab" data-tab="stats">
-                        <div class="tab-icon-wrapper">
-                            <span class="tab-icon">📊</span>
-                        </div>
-                        <span class="tab-label">Stats</span>
-                    </button>
                     <button class="lobby-tab" data-tab="profile">
                         <div class="tab-icon-wrapper">
                             <span class="tab-icon">👤</span>
                         </div>
                         <span class="tab-label">Profile</span>
+                    </button>
+                    <button class="lobby-tab" data-tab="settings">
+                        <div class="tab-icon-wrapper">
+                            <span class="tab-icon">⚙️</span>
+                        </div>
+                        <span class="tab-label">Settings</span>
                     </button>
                 </div>
                 
@@ -603,6 +625,8 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
+    <script src="soundManager.js"></script>
+    <script src="soundIntegration.js"></script>
     <script src="client.js"></script>
 </body>
 </html>
