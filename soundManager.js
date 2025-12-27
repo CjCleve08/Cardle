@@ -245,10 +245,20 @@ class SoundManager {
         this.stopBackgroundMusic();
         
         // Create audio element for background music
-        this.backgroundMusic = new Audio(`sounds/music/${filename}`);
+        this.backgroundMusic = new Audio(`Sounds/Music/${filename}`);
         this.backgroundMusic.loop = true;
         this.backgroundMusic.volume = 0; // Start at 0 for fade in
         this.backgroundMusic.preload = 'auto';
+        
+        // Add error handling for debugging
+        this.backgroundMusic.addEventListener('error', (e) => {
+            console.error('Error loading background music:', filename, e);
+            console.error('Audio error details:', {
+                code: this.backgroundMusic.error?.code,
+                message: this.backgroundMusic.error?.message,
+                path: `Sounds/Music/${filename}`
+            });
+        });
         
         // Fade durations (in seconds)
         const fadeInDuration = 2;
