@@ -3,6 +3,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
 
 const app = express();
 const server = http.createServer(app);
@@ -577,8 +578,21 @@ const players = new Map();
 // Matchmaking queue
 const matchmakingQueue = [];
 
-// Word list (5-letter words)
-const WORDS = [
+// Track bot matchmaking timeouts
+const matchmakingTimeouts = new Map(); // socket.id -> timeout
+
+// Bot names pool
+const BOT_NAMES = [
+    'Alex', 'Jordan', 'Casey', 'Sam', 'Taylor', 'Morgan', 'Riley', 'Jamie',
+    'Quinn', 'Avery', 'Blake', 'Cameron', 'Dakota', 'Emery', 'Finley', 'Hayden',
+    'Parker', 'River', 'Sage', 'Skylar'
+];
+
+// Bot games tracking
+const botGames = new Map(); // gameId -> { botId, botTurnProcessor }
+
+// Word list (5-letter words) - will be loaded from API or fallback to default
+let WORDS = [
     'APPLE', 'BEACH', 'CHAIR', 'DANCE', 'EARTH', 'FLAME', 'GLASS', 'HEART',
     'IMAGE', 'JOKER', 'KNIFE', 'LEMON', 'MUSIC', 'NIGHT', 'OCEAN', 'PAPER',
     'QUICK', 'RIVER', 'STORM', 'TABLE', 'UNITY', 'VALUE', 'WATER', 'YOUTH',
@@ -590,6 +604,118 @@ const WORDS = [
     'PILOT', 'QUERY', 'RADIO', 'SCOUT', 'TREND', 'USAGE', 'VOCAL', 'WOMAN',
     'YIELD', 'ZONED'
 ];
+
+// Load expanded word list from API
+function loadWordList() {
+    return new Promise((resolve) => {
+        // Try multiple sources - JSON first, then TXT
+        const sources = [
+            { url: 'https://raw.githubusercontent.com/cheaderthecoder/5-Letter-words/main/words.json', type: 'json' },
+            { url: 'https://darkermango.github.io/5-Letter-words/words.json', type: 'json' },
+            { url: 'https://raw.githubusercontent.com/cheaderthecoder/5-Letter-words/main/words.txt', type: 'txt' },
+            { url: 'https://darkermango.github.io/5-Letter-words/words.txt', type: 'txt' }
+        ];
+        
+        let sourceIndex = 0;
+        
+        function tryNextSource() {
+            if (sourceIndex >= sources.length) {
+                console.log('All word list sources failed, using fallback word list');
+                resolve();
+                return;
+            }
+            
+            const source = sources[sourceIndex];
+            console.log(`Attempting to load words from: ${source.url} (${source.type})`);
+            
+            const request = https.get(source.url, (res) => {
+                if (res.statusCode !== 200) {
+                    console.log(`Failed to load word list: HTTP ${res.statusCode}`);
+                    sourceIndex++;
+                    tryNextSource();
+                    return;
+                }
+                
+                let data = '';
+                
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                
+                res.on('end', () => {
+                    try {
+                        let words = [];
+                        
+                        if (source.type === 'json') {
+                            const parsed = JSON.parse(data);
+                            // Handle both array format and object with words property
+                            if (Array.isArray(parsed)) {
+                                words = parsed;
+                            } else if (parsed.words && Array.isArray(parsed.words)) {
+                                words = parsed.words;
+                            } else if (parsed.data && Array.isArray(parsed.data)) {
+                                words = parsed.data;
+                            } else {
+                                console.log('Unexpected JSON format');
+                                sourceIndex++;
+                                tryNextSource();
+                                return;
+                            }
+                        } else if (source.type === 'txt') {
+                            // Parse TXT format - one word per line
+                            words = data.split('\n')
+                                .map(line => line.trim())
+                                .filter(line => line.length > 0);
+                        }
+                        
+                        if (words.length > 0) {
+                            // Filter to valid 5-letter uppercase words
+                            const validWords = words
+                                .filter(word => typeof word === 'string')
+                                .map(word => word.toUpperCase().trim())
+                                .filter(word => word.length === 5 && /^[A-Z]+$/.test(word));
+                            
+                            if (validWords.length > 0) {
+                                WORDS = validWords;
+                                console.log(`✓ Successfully loaded ${WORDS.length} words from API`);
+                                resolve();
+                                return;
+                            } else {
+                                console.log('No valid 5-letter words found in response');
+                            }
+                        } else {
+                            console.log('No words found in response');
+                        }
+                    } catch (error) {
+                        console.log(`Failed to parse word list: ${error.message}`);
+                    }
+                    
+                    // Try next source
+                    sourceIndex++;
+                    tryNextSource();
+                });
+            });
+            
+            request.on('error', (error) => {
+                console.log(`Failed to load word list from ${source.url}: ${error.message}`);
+                sourceIndex++;
+                tryNextSource();
+            });
+            
+            request.setTimeout(10000, () => {
+                console.log(`Timeout loading word list from ${source.url}`);
+                request.destroy();
+                sourceIndex++;
+                tryNextSource();
+            });
+        }
+        
+        tryNextSource();
+    });
+}
+
+// Load words on server start
+loadWordList();
 
 function generateGameId() {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -686,6 +812,584 @@ function applyPermutationToArray(array, permutation) {
     return permutation.map(originalIndex => array[originalIndex]);
 }
 
+// ==================== BOT AI SYSTEM ====================
+
+function getRandomBotName() {
+    return BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)] + 
+           Math.floor(Math.random() * 1000).toString();
+}
+
+// Bot Wordle Solver - filters possible words based on feedback
+class BotWordleSolver {
+    constructor(wordList) {
+        this.wordList = [...wordList]; // Copy the word list
+        this.possibleWords = [...wordList];
+        this.knownCorrect = new Array(5).fill(null); // Position -> letter
+        this.knownPresent = {}; // Letter -> set of positions it's NOT in
+        this.knownAbsent = new Set(); // Letters that aren't in the word
+    }
+    
+    updateKnowledge(guess, feedback) {
+        // Process feedback to update knowledge
+        const guessLetters = guess.split('');
+        
+        for (let i = 0; i < 5; i++) {
+            if (feedback[i] === 'correct') {
+                this.knownCorrect[i] = guessLetters[i];
+            } else if (feedback[i] === 'present') {
+                if (!this.knownPresent[guessLetters[i]]) {
+                    this.knownPresent[guessLetters[i]] = new Set();
+                }
+                this.knownPresent[guessLetters[i]].add(i);
+            } else if (feedback[i] === 'absent') {
+                // Only mark as absent if it doesn't appear as correct or present elsewhere
+                let appearsElsewhere = false;
+                for (let j = 0; j < 5; j++) {
+                    if (j !== i && (feedback[j] === 'correct' || feedback[j] === 'present') && 
+                        guessLetters[j] === guessLetters[i]) {
+                        appearsElsewhere = true;
+                        break;
+                    }
+                }
+                if (!appearsElsewhere) {
+                    this.knownAbsent.add(guessLetters[i]);
+                }
+            }
+        }
+        
+        // Filter possible words
+        this.possibleWords = this.wordList.filter(word => {
+            const wordLetters = word.split('');
+            
+            // Check correct positions
+            for (let i = 0; i < 5; i++) {
+                if (this.knownCorrect[i] !== null && wordLetters[i] !== this.knownCorrect[i]) {
+                    return false;
+                }
+            }
+            
+            // Check absent letters
+            for (let letter of this.knownAbsent) {
+                if (wordLetters.includes(letter)) {
+                    // But allow if it's in a known correct position
+                    let isInCorrectPosition = false;
+                    for (let i = 0; i < 5; i++) {
+                        if (this.knownCorrect[i] === letter) {
+                            isInCorrectPosition = true;
+                            break;
+                        }
+                    }
+                    if (!isInCorrectPosition) {
+                        return false;
+                    }
+                }
+            }
+            
+            // Check present letters (must be in word but not in excluded positions)
+            for (let letter in this.knownPresent) {
+                if (!wordLetters.includes(letter)) {
+                    return false;
+                }
+                // Check it's not in any excluded positions
+                for (let excludedPos of this.knownPresent[letter]) {
+                    if (wordLetters[excludedPos] === letter) {
+                        return false;
+                    }
+                }
+            }
+            
+            return true;
+        });
+    }
+    
+    getBestGuess() {
+        if (this.possibleWords.length === 0) {
+            // Fallback: pick a random word
+            return this.wordList[Math.floor(Math.random() * this.wordList.length)];
+        }
+        
+        // Make bot less perfect - add more randomness and mistakes
+        // Sometimes pick a suboptimal word even when we know the answer
+        const randomFactor = Math.random();
+        
+        // If only one possibility, still sometimes pick wrong word (10% chance)
+        if (this.possibleWords.length === 1) {
+            if (randomFactor < 0.1) {
+                // Pick a random word that matches some known letters (wrong answer)
+                const partialMatches = this.wordList.filter(word => {
+                    let matches = 0;
+                    for (let i = 0; i < 5; i++) {
+                        if (this.knownCorrect[i] !== null && word[i] === this.knownCorrect[i]) {
+                            matches++;
+                        }
+                    }
+                    return matches >= 2 && !this.possibleWords.includes(word);
+                });
+                if (partialMatches.length > 0) {
+                    return partialMatches[Math.floor(Math.random() * partialMatches.length)];
+                }
+            }
+            return this.possibleWords[0];
+        }
+        
+        // If very few possibilities (2-3), sometimes pick wrong one (20% chance)
+        if (this.possibleWords.length <= 3 && randomFactor < 0.2) {
+            // Pick randomly from all words that share some letters
+            const similarWords = this.wordList.filter(word => {
+                if (this.possibleWords.includes(word)) return false;
+                let matches = 0;
+                for (let i = 0; i < 5; i++) {
+                    if (this.knownCorrect[i] !== null && word[i] === this.knownCorrect[i]) {
+                        matches++;
+                    }
+                }
+                return matches >= 1;
+            });
+            if (similarWords.length > 0 && Math.random() < 0.5) {
+                return similarWords[Math.floor(Math.random() * similarWords.length)];
+            }
+        }
+        
+        // Otherwise, pick randomly from a larger pool of candidates (makes it less optimal)
+        // Instead of top 5, pick from top 10-20% of remaining words
+        const candidatePoolSize = Math.max(
+            3, 
+            Math.min(
+                Math.ceil(this.possibleWords.length * 0.15), // 15% of remaining words
+                10
+            )
+        );
+        const candidates = this.possibleWords
+            .slice(0, candidatePoolSize)
+            .sort(() => Math.random() - 0.5); // Shuffle a bit
+        
+        return candidates[Math.floor(Math.random() * candidates.length)];
+    }
+}
+
+// Bot card selection logic - ALWAYS returns a card (unless card locked)
+function botSelectCard(game, botId, botHand) {
+    if (!botHand || botHand.length === 0) {
+        // If no cards, draw one immediately (shouldn't happen, but safety)
+        const allCardsMetadata = getAllCardsMetadata();
+        if (allCardsMetadata.length > 0) {
+            return allCardsMetadata[Math.floor(Math.random() * allCardsMetadata.length)];
+        }
+        return null; // Last resort
+    }
+    
+    // Check if bot is card locked
+    const isCardLocked = game.activeEffects.some(e => 
+        e.type === 'cardLock' && e.target === botId && !e.used
+    );
+    if (isCardLocked) {
+        return null; // Can't play cards when locked
+    }
+    
+    // ALWAYS play a card - no random skipping
+    // Prefer offensive cards if opponent is ahead, defensive if bot is ahead
+    const botPlayer = game.players.find(p => p.id === botId);
+    const opponent = game.players.find(p => p.id !== botId);
+    const botGuesses = botPlayer ? botPlayer.guesses.length : 0;
+    const opponentGuesses = opponent ? opponent.guesses.length : 0;
+    const isAhead = botGuesses < opponentGuesses;
+    
+    // Filter available cards (remove blocked ones if any)
+    let availableCards = botHand;
+    if (game.blockedCards && game.blockedCards.has(botId)) {
+        const blockedCardId = game.blockedCards.get(botId);
+        availableCards = botHand.filter(card => card.id !== blockedCardId);
+    }
+    
+    if (availableCards.length === 0) {
+        // All cards blocked - draw a new one
+        const allCardsMetadata = getAllCardsMetadata();
+        if (allCardsMetadata.length > 0) {
+            return allCardsMetadata[Math.floor(Math.random() * allCardsMetadata.length)];
+        }
+        return null; // Last resort
+    }
+    
+    // Simple card selection strategy
+    if (isAhead) {
+        // Bot is ahead - prefer defensive/helpful cards, but will use any if needed
+        const helpfulCards = availableCards.filter(c => 
+            ['hiddenFeedback', 'hiddenGuess', 'extraGuess', 'gamblersCard'].includes(c.id)
+        );
+        if (helpfulCards.length > 0) {
+            return helpfulCards[Math.floor(Math.random() * helpfulCards.length)];
+        }
+    } else {
+        // Bot is behind - prefer offensive cards, but will use any if needed
+        const offensiveCards = availableCards.filter(c => 
+            ['falseFeedback', 'cardLock', 'blindGuess', 'timeRush', 'wordScramble'].includes(c.id)
+        );
+        if (offensiveCards.length > 0) {
+            return offensiveCards[Math.floor(Math.random() * offensiveCards.length)];
+        }
+    }
+    
+    // Default: always return a random card from available
+    return availableCards[Math.floor(Math.random() * availableCards.length)];
+}
+
+// Create a bot game
+function createBotGame(humanSocket, humanName) {
+    const botId = 'BOT_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+    const botName = getRandomBotName();
+    const gameId = generateGameId();
+    const word = getRandomWord();
+    
+    // Create game state
+    const game = {
+        gameId: gameId,
+        word: word,
+        players: [
+            {
+                id: humanSocket.id,
+                name: humanName,
+                guesses: [],
+                row: 0
+            },
+            {
+                id: botId,
+                name: botName,
+                guesses: [],
+                row: 0,
+                isBot: true
+            }
+        ],
+        currentTurn: Math.random() > 0.5 ? humanSocket.id : botId, // Random first turn
+        activeEffects: [],
+        status: 'waiting',
+        totalGuesses: 0,
+        lastPlayedCards: new Map(),
+        mirroredCards: new Map(),
+        isBotGame: true
+    };
+    
+    games.set(gameId, game);
+    players.set(humanSocket.id, { gameId: gameId, playerId: humanSocket.id });
+    players.set(botId, { gameId: gameId, playerId: botId, isBot: true });
+    
+    // Initialize bot solver
+    const botSolver = new BotWordleSolver(WORDS);
+    
+    // Join human to game room
+    humanSocket.join(gameId);
+    humanSocket.emit('matchmakingStatus', { status: 'matched' });
+    humanSocket.emit('playerJoinedGame', { playerId: humanSocket.id, gameId: gameId });
+    
+    // Notify human that opponent joined
+    io.to(gameId).emit('playerJoined', { players: game.players });
+    
+    // Initialize bot hand with random cards from all available cards
+    const allCardsMetadata = getAllCardsMetadata();
+    const botHand = [];
+    // Draw 3 random cards for bot (similar to human)
+    for (let i = 0; i < 3; i++) {
+        const randomCard = allCardsMetadata[Math.floor(Math.random() * allCardsMetadata.length)];
+        botHand.push(randomCard);
+    }
+    
+    // Store bot game info (including initialized hand)
+    botGames.set(gameId, {
+        botId: botId,
+        botSolver: botSolver,
+        botHand: botHand
+    });
+    
+    // Start the game after a delay
+    setTimeout(() => {
+        game.status = 'playing';
+        const gameStateForClients = {
+            gameId: game.gameId,
+            currentTurn: game.currentTurn,
+            players: game.players,
+            status: game.status,
+            activeEffects: game.activeEffects,
+            totalGuesses: game.totalGuesses
+        };
+        
+        // Send game started to human
+        humanSocket.emit('gameStarted', {
+            ...gameStateForClients,
+            yourPlayerId: humanSocket.id
+        });
+        
+        // If it's the bot's turn, process it
+        if (game.currentTurn === botId) {
+            processBotTurn(gameId);
+        }
+    }, 1500);
+}
+
+// Process bot's turn
+function processBotTurn(gameId) {
+    const game = games.get(gameId);
+    if (!game || game.status !== 'playing') return;
+    
+    const botData = botGames.get(gameId);
+    if (!botData) return;
+    
+    const botId = botData.botId;
+    const botSolver = botData.botSolver;
+    
+    if (game.currentTurn !== botId) {
+        return; // Not bot's turn
+    }
+    
+    // Get bot player
+    const botPlayer = game.players.find(p => p.id === botId);
+    if (!botPlayer) return;
+    
+    // Human-like delay: 5-12 seconds to "think" (longer for more realism)
+    const thinkTime = 5000 + Math.random() * 7000;
+    
+    setTimeout(() => {
+        // Check if game still exists and it's still bot's turn
+        const currentGame = games.get(gameId);
+        if (!currentGame || currentGame.currentTurn !== botId || currentGame.status !== 'playing') {
+            return;
+        }
+        
+        // ALWAYS select a card - bot must play a card every turn
+        let selectedCard = null;
+        if (botData.botHand && botData.botHand.length > 0) {
+            selectedCard = botSelectCard(currentGame, botId, botData.botHand);
+        }
+        
+        // If bot selected a card (should always happen unless card locked), simulate card selection
+        if (selectedCard) {
+            // Handle modifier cards (phonyCard, hideCard)
+            const cardIsModifier = isModifierCard(selectedCard.id);
+            
+            if (cardIsModifier) {
+                // For modifier cards, select a second card
+                const remainingCards = botData.botHand.filter(c => c.id !== selectedCard.id);
+                if (remainingCards.length > 0) {
+                    // Select a random card to combine with modifier
+                    const secondCard = remainingCards[Math.floor(Math.random() * remainingCards.length)];
+                    // Store the card chain
+                    if (!currentGame.cardChains) {
+                        currentGame.cardChains = new Map();
+                    }
+                    currentGame.cardChains.set(botId, [selectedCard, secondCard]);
+                    selectedCard = secondCard; // The real card to use
+                }
+            }
+            
+            // Remove used card from bot hand and draw new one
+            const cardIndex = botData.botHand.findIndex(c => c.id === selectedCard.id);
+            if (cardIndex !== -1) {
+                botData.botHand.splice(cardIndex, 1);
+                // Draw new card
+                const allCardsMetadata = getAllCardsMetadata();
+                const newCard = allCardsMetadata[Math.floor(Math.random() * allCardsMetadata.length)];
+                botData.botHand.push(newCard);
+            }
+            
+            // Emit card played event for human to see
+            const botPlayerForCard = currentGame.players.find(p => p.id === botId);
+            if (botPlayerForCard) {
+                const humanSocket = io.sockets.sockets.get(currentGame.players.find(p => p.id !== botId).id);
+                if (humanSocket) {
+                    // Show card to opponent (might be fake if phonyCard was used)
+                    const splashBehavior = getSplashBehavior(selectedCard.id);
+                    if (splashBehavior === 'show') {
+                        humanSocket.emit('cardPlayed', {
+                            card: selectedCard,
+                            playerName: botPlayerForCard.name,
+                            playerId: botId
+                        });
+                    }
+                }
+            }
+        }
+        
+        // Make a word guess
+        let guess;
+        let extraThinkTime = 0;
+        
+        if (botPlayer.guesses.length === 0) {
+            // First guess: use a common starter word
+            const starterWords = ['APPLE', 'ARISE', 'AUDIO', 'EARTH', 'STARE', 'CRANE', 'SLATE', 'TRACE'];
+            guess = starterWords[Math.floor(Math.random() * starterWords.length)];
+        } else {
+            // Use solver to get best guess (now less optimal)
+            guess = botSolver.getBestGuess();
+            
+            // Occasionally add extra delay to "think harder" (seems more human)
+            if (Math.random() < 0.4 && currentGame.totalGuesses > 2) {
+                extraThinkTime = 2000 + Math.random() * 3000;
+            }
+        }
+        
+        // Submit the guess (with a delay after card selection + optional extra thinking)
+        // Add delay for card selection animation to be visible
+        const cardDelay = selectedCard ? 1200 : 0;
+        setTimeout(() => {
+            submitBotGuess(gameId, botId, guess, selectedCard);
+        }, cardDelay + extraThinkTime);
+        
+    }, thinkTime);
+}
+
+// Submit bot's guess (similar to human submitGuess)
+function submitBotGuess(gameId, botId, guess, card) {
+    const game = games.get(gameId);
+    if (!game || game.currentTurn !== botId) return;
+    
+    const botPlayer = game.players.find(p => p.id === botId);
+    if (!botPlayer) return;
+    
+    // Calculate feedback
+    const realFeedback = calculateFeedback(guess, game.word);
+    
+    // Update bot's solver knowledge
+    const botData = botGames.get(gameId);
+    if (botData && botData.botSolver) {
+        botData.botSolver.updateKnowledge(guess, realFeedback);
+    }
+    
+    // Store guess
+    const boardRow = game.totalGuesses;
+    botPlayer.guesses.push({
+        guess: guess,
+        feedback: realFeedback,
+        row: boardRow
+    });
+    game.totalGuesses++;
+    
+    // Handle card chain if exists (from modifier cards)
+    let actualCard = card;
+    if (game.cardChains && game.cardChains.has(botId)) {
+        const cardChain = game.cardChains.get(botId);
+        const realCard = cardChain[cardChain.length - 1]; // Last card is always real
+        const { cardToShowOpponent, shouldHideFromOpponent } = processCardChain(cardChain, realCard);
+        actualCard = realCard;
+        
+        // Store real card if phonyCard was used
+        if (cardChain.some(c => needsRealCardStorage(c.id))) {
+            if (!game.phonyCardRealCards) {
+                game.phonyCardRealCards = new Map();
+            }
+            game.phonyCardRealCards.set(botId, realCard);
+        }
+        
+        // Clear card chain
+        game.cardChains.delete(botId);
+    }
+    
+    // Apply card effects using actual card (not fake one)
+    if (actualCard && CARD_CONFIG[actualCard.id]) {
+        const config = CARD_CONFIG[actualCard.id];
+        if (!isModifierCard(actualCard.id) && config.effects?.onGuess) {
+            config.effects.onGuess(game, botId);
+        }
+    }
+    
+    // Track last played card
+    if (!game.lastPlayedCards) {
+        game.lastPlayedCards = new Map();
+    }
+    game.lastPlayedCards.set(botId, actualCard);
+    
+    // Check for win
+    if (guess === game.word) {
+        game.status = 'finished';
+        const humanSocket = io.sockets.sockets.get(game.players.find(p => p.id !== botId).id);
+        if (humanSocket) {
+            io.to(gameId).emit('gameOver', {
+                winner: botId,
+                word: game.word
+            });
+        }
+        return;
+    }
+    
+    // Find opponent (human)
+    const opponent = game.players.find(p => p.id !== botId);
+    if (!opponent) return;
+    
+    // Check active effects
+    const shouldHideGuess = game.activeEffects.some(e => 
+        e.type === 'hiddenGuess' && e.target === botId && !e.used
+    );
+    const shouldHideFeedback = game.activeEffects.some(e => 
+        e.type === 'hiddenFeedback' && e.target === botId && !e.used
+    );
+    const falseFeedbackActive = game.activeEffects.some(e => 
+        e.type === 'falseFeedback' && e.target === botId && !e.used
+    );
+    
+    // Send to human (opponent)
+    const opponentSocket = io.sockets.sockets.get(opponent.id);
+    if (opponentSocket) {
+        let opponentFeedback = shouldHideFeedback ? 
+            ['absent', 'absent', 'absent', 'absent', 'absent'] : realFeedback;
+        
+        if (falseFeedbackActive) {
+            opponentFeedback = applyCardEffect(realFeedback, { id: 'falseFeedback' }, true);
+        }
+        
+        opponentSocket.emit('guessSubmitted', {
+            playerId: botId,
+            guess: shouldHideGuess ? null : guess,
+            feedback: opponentFeedback,
+            row: boardRow,
+            hidden: shouldHideGuess
+        });
+    }
+    
+    // Check for extra guess
+    const isExtraGuess = game.activeEffects.some(e => 
+        e.type === 'extraGuess' && e.target === botId && !e.used
+    );
+    
+    // Remove used effects
+    game.activeEffects = game.activeEffects.filter(e => {
+        if (e.target === botId && (
+            e.type === 'hiddenGuess' || 
+            e.type === 'hiddenFeedback' || 
+            e.type === 'falseFeedback' ||
+            e.type === 'extraGuess' ||
+            e.type === 'cardLock'
+        )) {
+            return false;
+        }
+        return true;
+    });
+    
+    // Switch turns
+    if (!isExtraGuess) {
+        game.currentTurn = opponent.id;
+    } else {
+        game.activeEffects = game.activeEffects.filter(e => 
+            !(e.type === 'extraGuess' && e.target === botId)
+        );
+        game.currentTurn = botId; // Bot gets another turn
+    }
+    
+    // Emit turn change
+    const humanSocket = io.sockets.sockets.get(opponent.id);
+    if (humanSocket) {
+        humanSocket.emit('turnChanged', {
+            currentTurn: game.currentTurn,
+            players: game.players,
+            status: game.status,
+            activeEffects: game.activeEffects,
+            totalGuesses: game.totalGuesses,
+            yourPlayerId: opponent.id
+        });
+    }
+    
+    // If it's still bot's turn (extra guess), process again
+    if (game.currentTurn === botId) {
+        setTimeout(() => processBotTurn(gameId), 1000);
+    }
+}
+
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
     
@@ -727,11 +1431,37 @@ io.on('connection', (socket) => {
         
         console.log(`Player ${data.playerName} (${socket.id}) joined matchmaking queue. Queue size: ${matchmakingQueue.length}`);
         
+        // Set timeout to match with bot if no player found (20 seconds)
+        const botTimeout = setTimeout(() => {
+            const queueIndex = matchmakingQueue.findIndex(p => p.id === socket.id);
+            if (queueIndex === -1) return; // Already matched
+            
+            matchmakingQueue.splice(queueIndex, 1);
+            matchmakingTimeouts.delete(socket.id);
+            
+            console.log(`No match found for ${data.playerName}, creating bot game...`);
+            createBotGame(socket, data.playerName);
+        }, 20000); // 20 second timeout
+        
+        matchmakingTimeouts.set(socket.id, botTimeout);
+        
         // Check if we can match players
         if (matchmakingQueue.length >= 2) {
             // Match the first two players
             const player1 = matchmakingQueue.shift();
             const player2 = matchmakingQueue.shift();
+            
+            // Clear bot timeouts for matched players
+            const timeout1 = matchmakingTimeouts.get(player1.id);
+            const timeout2 = matchmakingTimeouts.get(player2.id);
+            if (timeout1) {
+                clearTimeout(timeout1);
+                matchmakingTimeouts.delete(player1.id);
+            }
+            if (timeout2) {
+                clearTimeout(timeout2);
+                matchmakingTimeouts.delete(player2.id);
+            }
             
             // Create a game for them
             const gameId = generateGameId();
@@ -815,6 +1545,14 @@ io.on('connection', (socket) => {
         const index = matchmakingQueue.findIndex(p => p.id === socket.id);
         if (index !== -1) {
             matchmakingQueue.splice(index, 1);
+            
+            // Clear bot timeout
+            const timeout = matchmakingTimeouts.get(socket.id);
+            if (timeout) {
+                clearTimeout(timeout);
+                matchmakingTimeouts.delete(socket.id);
+            }
+            
             socket.emit('matchmakingStatus', { status: 'cancelled' });
             console.log(`Player ${socket.id} left matchmaking queue. Queue size: ${matchmakingQueue.length}`);
         }
@@ -1038,23 +1776,62 @@ io.on('connection', (socket) => {
         
         // Check if this is a hand reveal card - trigger it immediately
         if (realCard.id === 'handReveal' && opponent) {
-            const opponentSocket = io.sockets.sockets.get(opponent.id);
-            if (opponentSocket) {
-                opponentSocket.emit('requestHand', {
-                    gameId: data.gameId,
-                    requesterId: socket.id
-                });
+            // Check if opponent is a bot
+            if (opponent.isBot) {
+                // Bot's hand is stored in botGames
+                const botData = botGames.get(data.gameId);
+                if (botData && botData.botHand) {
+                    const requesterSocket = io.sockets.sockets.get(socket.id);
+                    if (requesterSocket) {
+                        requesterSocket.emit('opponentHandRevealed', {
+                            cards: botData.botHand.slice(0, 3).map(card => ({
+                                id: card.id,
+                                title: card.title,
+                                description: card.description
+                            })),
+                            opponentName: opponent.name
+                        });
+                    }
+                }
+            } else {
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('requestHand', {
+                        gameId: data.gameId,
+                        requesterId: socket.id
+                    });
+                }
             }
         }
         
         // Check if this is a card steal card - trigger it immediately
         if (realCard.id === 'cardSteal' && opponent) {
-            const opponentSocket = io.sockets.sockets.get(opponent.id);
-            if (opponentSocket) {
-                opponentSocket.emit('requestHandForSteal', {
-                    gameId: data.gameId,
-                    requesterId: socket.id
-                });
+            // Check if opponent is a bot
+            if (opponent.isBot) {
+                // Bot's hand is stored in botGames
+                const botData = botGames.get(data.gameId);
+                if (botData && botData.botHand) {
+                    const requesterSocket = io.sockets.sockets.get(socket.id);
+                    if (requesterSocket) {
+                        requesterSocket.emit('opponentHandForSteal', {
+                            cards: botData.botHand.slice(0, 3).map(card => ({
+                                id: card.id,
+                                title: card.title,
+                                description: card.description
+                            })),
+                            opponentName: opponent.name,
+                            gameId: data.gameId
+                        });
+                    }
+                }
+            } else {
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('requestHandForSteal', {
+                        gameId: data.gameId,
+                        requesterId: socket.id
+                    });
+                }
             }
         }
         
@@ -1079,12 +1856,29 @@ io.on('connection', (socket) => {
         
         // Check if this is a card block card - trigger it immediately
         if (realCard.id === 'cardBlock' && opponent) {
-            const opponentSocket = io.sockets.sockets.get(opponent.id);
-            if (opponentSocket) {
-                opponentSocket.emit('requestHandForBlock', {
-                    gameId: data.gameId,
-                    requesterId: socket.id
-                });
+            // Check if opponent is a bot
+            if (opponent.isBot) {
+                // Bot's hand is stored in botGames - block a random card
+                const botData = botGames.get(data.gameId);
+                if (botData && botData.botHand && botData.botHand.length > 0) {
+                    // Initialize blocked cards tracking if needed
+                    if (!game.blockedCards) {
+                        game.blockedCards = new Map();
+                    }
+                    
+                    // Pick a random card from bot's hand to block
+                    const randomIndex = Math.floor(Math.random() * botData.botHand.length);
+                    const blockedCardId = botData.botHand[randomIndex].id;
+                    game.blockedCards.set(opponent.id, blockedCardId);
+                }
+            } else {
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('requestHandForBlock', {
+                        gameId: data.gameId,
+                        requesterId: socket.id
+                    });
+                }
             }
         }
         
@@ -1374,6 +2168,9 @@ io.on('connection', (socket) => {
         
         // Notify both players with their respective player IDs
         game.players.forEach(player => {
+            // Skip bot players (they're handled separately)
+            if (player.isBot) return;
+            
             const playerSocket = io.sockets.sockets.get(player.id);
             if (playerSocket) {
                 playerSocket.emit('turnChanged', {
@@ -1386,6 +2183,11 @@ io.on('connection', (socket) => {
                 });
             }
         });
+        
+        // Check if it's a bot's turn in a bot game
+        if (game.isBotGame && game.currentTurn.startsWith('BOT_')) {
+            setTimeout(() => processBotTurn(game.gameId), 500);
+        }
     });
     
     socket.on('submitGuess', (data) => {
@@ -1466,6 +2268,12 @@ io.on('connection', (socket) => {
         // Check for win
         if (guess === game.word) {
             game.status = 'finished';
+            
+            // Clean up bot game if it's a bot game
+            if (game.isBotGame) {
+                botGames.delete(data.gameId);
+            }
+            
             io.to(data.gameId).emit('gameOver', {
                 winner: socket.id,
                 word: game.word
@@ -1649,6 +2457,9 @@ io.on('connection', (socket) => {
         // Emit turn change to all players in the game (don't send the word)
         // Send personalized turnChanged events to each player with their own ID
         game.players.forEach(player => {
+            // Skip bot players (they're handled separately)
+            if (player.isBot) return;
+            
             const playerSocket = io.sockets.sockets.get(player.id);
             if (playerSocket) {
                 const gameStateForClient = {
@@ -1668,6 +2479,11 @@ io.on('connection', (socket) => {
                 playerSocket.emit('turnChanged', gameStateForClient);
             }
         });
+        
+        // Check if it's a bot's turn in a bot game
+        if (game.isBotGame && game.currentTurn.startsWith('BOT_')) {
+            setTimeout(() => processBotTurn(game.gameId), 500);
+        }
         
         // No longer limit guesses - game continues until someone wins
         // Removed the 6 guess limit check
@@ -1697,6 +2513,13 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         
+        // Clear bot timeout if exists
+        const timeout = matchmakingTimeouts.get(socket.id);
+        if (timeout) {
+            clearTimeout(timeout);
+            matchmakingTimeouts.delete(socket.id);
+        }
+        
         // Remove from matchmaking queue if present
         const queueIndex = matchmakingQueue.findIndex(p => p.id === socket.id);
         if (queueIndex !== -1) {
@@ -1709,6 +2532,12 @@ io.on('connection', (socket) => {
             const game = games.get(playerData.gameId);
             if (game) {
                 game.players = game.players.filter(p => p.id !== socket.id);
+                
+                // Clean up bot games
+                if (game.isBotGame) {
+                    botGames.delete(game.gameId);
+                }
+                
                 if (game.players.length === 0) {
                     games.delete(playerData.gameId);
                 } else {

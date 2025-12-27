@@ -978,7 +978,7 @@ socket.on('gameStarted', (data) => {
         if (typeof soundManager !== 'undefined') {
             soundManager.playBackgroundMusic('GameSoundTrack.mp4');
         }
-        initializeGame(gameState);
+    initializeGame(gameState);
     } else {
         console.error('Failed to show game screen!');
     }
@@ -2333,16 +2333,16 @@ function displayGuess(guess, feedback, row) {
             if (cell) {
             setTimeout(() => {
                 if (typeof soundManager !== 'undefined') {
-                    if (feedback[i] === 'correct') {
-                        cell.classList.add('correct');
+                if (feedback[i] === 'correct') {
+                    cell.classList.add('correct');
                         if (!allCorrect) { // Only play individual sound if not all correct
                             soundManager.playCorrectLetter();
                         }
-                    } else if (feedback[i] === 'present') {
-                        cell.classList.add('present');
+                } else if (feedback[i] === 'present') {
+                    cell.classList.add('present');
                         soundManager.playPresentLetter();
-                    } else {
-                        cell.classList.add('absent');
+                } else {
+                    cell.classList.add('absent');
                         soundManager.playWrongLetter();
                     }
                 } else {
