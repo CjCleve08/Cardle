@@ -1379,14 +1379,8 @@ function displayOpponentHandForSteal(cards, opponentName, gameId) {
                     button.textContent = 'Got it!';
                 }, 300);
                 
-                // Show splash immediately for better feedback
-                const config = getCardConfig();
-                if (config && config[card.id]) {
-                    const splashBehavior = config[card.id].modifier?.splashBehavior || 'show';
-                    if (splashBehavior === 'show') {
-                        showCardSplash(card, 'You');
-                    }
-                }
+                // Don't show splash here - server will emit 'cardPlayed' event which will queue the splash
+                // This prevents double splashes (client-side + server-side)
                 
                 // Send the selected card to server
                 socket.emit('selectOpponentCard', {
@@ -1429,11 +1423,7 @@ function displayOpponentHandForSteal(cards, opponentName, gameId) {
 }
 
 socket.on('gameOver', (data) => {
-    if (!ScreenManager.show('gameOver')) {
-        console.error('Failed to show gameOver screen!');
-        return;
-    }
-    
+    // Prepare UI elements first
     const titleEl = document.getElementById('gameOverTitle');
     const messageEl = document.getElementById('gameOverMessage');
     const iconEl = document.getElementById('gameOverIcon');
@@ -1487,6 +1477,12 @@ socket.on('gameOver', (data) => {
     }).catch(error => {
         console.error('Error updating stats:', error);
     });
+    
+    // Transition to game over screen immediately (server already delayed by 2 seconds)
+    if (!ScreenManager.show('gameOver')) {
+        console.error('Failed to show gameOver screen!');
+        return;
+    }
 });
 
 socket.on('error', (data) => {
@@ -1522,7 +1518,7 @@ socket.on('cardPlayed', (data) => {
     // Show splash for both players when a card is played
     console.log('Card played event received:', data);
     if (data && data.card) {
-        showCardSplash(data.card, data.playerName);
+        queueCardSplash(data.card, data.playerName);
     }
 });
 
@@ -2105,11 +2101,8 @@ function selectCard(card, cardElement) {
         }
     }
     
-    // Show splash based on config (show if not silent and not in chain, or if hideCard)
-    const splashBehavior = getSplashBehavior(card.id);
-    if ((splashBehavior === 'show' && !isInChain) || (card.id === 'hideCard' && !isInChain)) {
-    showCardSplash(card, 'You');
-    }
+    // Don't show splash here - server will emit 'cardPlayed' event which will queue the splash
+    // This prevents double splashes (client-side + server-side)
     
     // If a modifier card was selected, wait for server to allow another card selection
     // Otherwise, hide card selection and show game board
@@ -2332,38 +2325,38 @@ function displayGuess(guess, feedback, row) {
             const cell = document.getElementById(`cell-${row}-${i}`);
             if (cell) {
             setTimeout(() => {
-                if (typeof soundManager !== 'undefined') {
+                // Add the class to start the flip animation
                 if (feedback[i] === 'correct') {
                     cell.classList.add('correct');
-                        if (!allCorrect) { // Only play individual sound if not all correct
-                            soundManager.playCorrectLetter();
-                        }
                 } else if (feedback[i] === 'present') {
                     cell.classList.add('present');
-                        soundManager.playPresentLetter();
                 } else {
                     cell.classList.add('absent');
-                        soundManager.playWrongLetter();
-                    }
-                } else {
-                    // No sound manager, just add classes
-                    if (feedback[i] === 'correct') {
-                        cell.classList.add('correct');
-                    } else if (feedback[i] === 'present') {
-                        cell.classList.add('present');
-                    } else {
-                        cell.classList.add('absent');
-                    }
+                }
+                
+                // Play sound at midpoint of flip when color becomes visible (300ms = 50% of 600ms animation)
+                if (typeof soundManager !== 'undefined') {
+                    setTimeout(() => {
+                        if (feedback[i] === 'correct') {
+                            if (!allCorrect) { // Only play individual sound if not all correct
+                                soundManager.playCorrectLetter();
+                            }
+                        } else if (feedback[i] === 'present') {
+                            soundManager.playPresentLetter();
+                        } else {
+                            soundManager.playWrongLetter();
+                        }
+                    }, 300); // Play when flip reveals color (midpoint of 600ms animation)
                 }
             }, i * 150); // Stagger the animations
         }
         }
         
-        // Play win sound if all correct (after last letter animation)
+        // Play win sound if all correct (after last letter sound)
         if (allCorrect && typeof soundManager !== 'undefined') {
             setTimeout(() => {
                 soundManager.playCorrectWord();
-            }, 5 * 150 + 200);
+            }, 4 * 150 + 300 + 200); // After last letter sound (900ms) + 200ms delay
         }
         
         // Update scroll buttons after animation
@@ -2518,7 +2511,37 @@ function showGameMessage(icon, title, text, autoClose = 0) {
     };
 }
 
-function showCardSplash(card, playerName) {
+// Splash queue system to handle multiple card splashes sequentially
+let splashQueue = [];
+let isShowingSplash = false;
+
+function queueCardSplash(card, playerName) {
+    splashQueue.push({ card, playerName });
+    processSplashQueue();
+}
+
+function processSplashQueue() {
+    // If already showing a splash or queue is empty, do nothing
+    if (isShowingSplash || splashQueue.length === 0) {
+        return;
+    }
+    
+    // Mark as showing and get the next splash
+    isShowingSplash = true;
+    const { card, playerName } = splashQueue.shift();
+    
+    // Show the splash
+    showCardSplash(card, playerName, () => {
+        // Callback when splash completes
+        isShowingSplash = false;
+        // Process next splash in queue after a short delay
+        setTimeout(() => {
+            processSplashQueue();
+        }, 100);
+    });
+}
+
+function showCardSplash(card, playerName, onComplete) {
     const splash = document.getElementById('cardSplash');
     const splashTitle = document.getElementById('splashCardTitle');
     const splashDescription = document.getElementById('splashCardDescription');
@@ -2526,11 +2549,13 @@ function showCardSplash(card, playerName) {
     
     if (!splash || !splashTitle || !splashDescription || !splashPlayer) {
         console.error('Splash elements not found');
+        if (onComplete) onComplete();
         return;
     }
     
     if (!card) {
         console.error('Card data is missing');
+        if (onComplete) onComplete();
         return;
     }
     
@@ -2554,6 +2579,7 @@ function showCardSplash(card, playerName) {
         // Remove from DOM after animation completes
         setTimeout(() => {
             splash.classList.remove('show', 'hiding');
+            if (onComplete) onComplete();
         }, 500);
     }, 2500);
 }

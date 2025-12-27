@@ -1189,16 +1189,43 @@ function processBotTurn(gameId) {
                 botData.botHand.push(newCard);
             }
             
+            // Track the last played card for this bot
+            if (!currentGame.lastPlayedCards) {
+                currentGame.lastPlayedCards = new Map();
+            }
+            
+            // If Card Mirror, store what card it's actually mirroring (opponent's last card at this moment)
+            const opponent = currentGame.players.find(p => p.id !== botId);
+            if (selectedCard.id === 'cardMirror' && opponent) {
+                if (!currentGame.mirroredCards) {
+                    currentGame.mirroredCards = new Map();
+                }
+                const opponentLastCard = currentGame.lastPlayedCards.get(opponent.id);
+                if (opponentLastCard) {
+                    currentGame.mirroredCards.set(botId, opponentLastCard);
+                }
+            }
+            currentGame.lastPlayedCards.set(botId, selectedCard);
+            
             // Emit card played event for human to see
             const botPlayerForCard = currentGame.players.find(p => p.id === botId);
             if (botPlayerForCard) {
                 const humanSocket = io.sockets.sockets.get(currentGame.players.find(p => p.id !== botId).id);
                 if (humanSocket) {
-                    // Show card to opponent (might be fake if phonyCard was used)
+                    // Show card to opponent (might be fake if phonyCard was used, or resolved if mirror card)
                     const splashBehavior = getSplashBehavior(selectedCard.id);
                     if (splashBehavior === 'show') {
+                        // If cardMirror, show the opponent's last card instead (following Card Mirror chains)
+                        let cardToShow = selectedCard;
+                        if (selectedCard.id === 'cardMirror' && opponent) {
+                            const resolvedCard = resolveMirroredCard(currentGame, opponent.id);
+                            if (resolvedCard) {
+                                cardToShow = resolvedCard;
+                            }
+                        }
+                        
                         humanSocket.emit('cardPlayed', {
-                            card: selectedCard,
+                            card: cardToShow,
                             playerName: botPlayerForCard.name,
                             playerId: botId
                         });
@@ -1207,30 +1234,45 @@ function processBotTurn(gameId) {
             }
         }
         
-        // Make a word guess
-        let guess;
-        let extraThinkTime = 0;
+        // Now wait additional time for the bot to "think" about what word to guess
+        // This simulates the human behavior of thinking after selecting a card
+        const wordThinkTime = 3000 + Math.random() * 5000; // 3-8 seconds to think about the word
         
-        if (botPlayer.guesses.length === 0) {
-            // First guess: use a common starter word
-            const starterWords = ['APPLE', 'ARISE', 'AUDIO', 'EARTH', 'STARE', 'CRANE', 'SLATE', 'TRACE'];
-            guess = starterWords[Math.floor(Math.random() * starterWords.length)];
-        } else {
-            // Use solver to get best guess (now less optimal)
-            guess = botSolver.getBestGuess();
-            
-            // Occasionally add extra delay to "think harder" (seems more human)
-            if (Math.random() < 0.4 && currentGame.totalGuesses > 2) {
-                extraThinkTime = 2000 + Math.random() * 3000;
-            }
-        }
-        
-        // Submit the guess (with a delay after card selection + optional extra thinking)
-        // Add delay for card selection animation to be visible
-        const cardDelay = selectedCard ? 1200 : 0;
         setTimeout(() => {
-            submitBotGuess(gameId, botId, guess, selectedCard);
-        }, cardDelay + extraThinkTime);
+            // Check if game still exists and it's still bot's turn
+            const currentGameCheck = games.get(gameId);
+            if (!currentGameCheck || currentGameCheck.currentTurn !== botId || currentGameCheck.status !== 'playing') {
+                return;
+            }
+            
+            // Make a word guess
+            let guess;
+            let extraThinkTime = 0;
+            
+            if (botPlayer.guesses.length === 0) {
+                // First guess: use a common starter word
+                const starterWords = ['APPLE', 'ARISE', 'AUDIO', 'EARTH', 'STARE', 'CRANE', 'SLATE', 'TRACE'];
+                guess = starterWords[Math.floor(Math.random() * starterWords.length)];
+            } else {
+                // Use solver to get best guess (now less optimal)
+                guess = botSolver.getBestGuess();
+                
+                // Occasionally add extra delay to "think harder" (seems more human)
+                if (Math.random() < 0.4 && currentGameCheck.totalGuesses > 2) {
+                    extraThinkTime = 2000 + Math.random() * 3000;
+                }
+            }
+            
+            // Simulate typing time - humans take time to type out the word
+            // Typing delay: ~100-200ms per letter, plus some variation
+            const typingDelay = (guess.length * 100) + Math.random() * (guess.length * 100) + extraThinkTime;
+            
+            // Submit the guess after typing delay
+            setTimeout(() => {
+                submitBotGuess(gameId, botId, guess, selectedCard);
+            }, typingDelay);
+            
+        }, wordThinkTime);
         
     }, thinkTime);
 }
@@ -1298,13 +1340,54 @@ function submitBotGuess(gameId, botId, guess, card) {
     // Check for win
     if (guess === game.word) {
         game.status = 'finished';
-        const humanSocket = io.sockets.sockets.get(game.players.find(p => p.id !== botId).id);
-        if (humanSocket) {
+        
+        // Clean up bot game if it's a bot game
+        if (game.isBotGame) {
+            botGames.delete(gameId);
+        }
+        
+        // Find opponent (human)
+        const opponent = game.players.find(p => p.id !== botId);
+        if (!opponent) return;
+        
+        // First, send the winning guess so it displays on the board
+        // Then delay gameOver to allow the animation to complete
+        const opponentSocket = io.sockets.sockets.get(opponent.id);
+        if (opponentSocket) {
+            const shouldHideGuess = game.activeEffects.some(e => 
+                e.type === 'hiddenGuess' && e.target === botId && !e.used
+            );
+            const shouldHideFeedback = game.activeEffects.some(e => 
+                e.type === 'hiddenFeedback' && e.target === botId && !e.used
+            );
+            const falseFeedbackActive = game.activeEffects.some(e => 
+                e.type === 'falseFeedback' && e.target === botId && !e.used
+            );
+            
+            let opponentFeedback = shouldHideFeedback ? 
+                ['absent', 'absent', 'absent', 'absent', 'absent'] : realFeedback;
+            
+            if (falseFeedbackActive) {
+                opponentFeedback = applyCardEffect(realFeedback, { id: 'falseFeedback' }, true);
+            }
+            
+            // Send winning guess to human player
+            opponentSocket.emit('guessSubmitted', {
+                playerId: botId,
+                guess: shouldHideGuess ? null : guess,
+                feedback: opponentFeedback,
+                row: boardRow,
+                hidden: shouldHideGuess
+            });
+        }
+        
+        // Delay gameOver to allow the winning guess animation to complete (2 seconds)
+        setTimeout(() => {
             io.to(gameId).emit('gameOver', {
                 winner: botId,
                 word: game.word
             });
-        }
+        }, 2000);
         return;
     }
     
@@ -2274,10 +2357,76 @@ io.on('connection', (socket) => {
                 botGames.delete(data.gameId);
             }
             
-            io.to(data.gameId).emit('gameOver', {
-                winner: socket.id,
-                word: game.word
-            });
+            // First, send the winning guess so it displays on the board
+            // Then delay gameOver to allow the animation to complete
+            const shouldHideFromSelf = game.activeEffects.some(e => 
+                e.type === 'gamblerHide' && e.target === socket.id && !e.used
+            );
+            const shouldHideFromSelfBlind = game.activeEffects.some(e => 
+                e.type === 'blindGuess' && e.target === socket.id && !e.used
+            );
+            const greenToGreyActive = game.activeEffects.some(e => 
+                e.type === 'greenToGrey' && e.target === socket.id && !e.used
+            );
+            const wordScrambleActive = game.activeEffects.some(e => 
+                e.type === 'wordScramble' && e.target === socket.id && !e.used
+            );
+            
+            // Send winning guess to player
+            if (!shouldHideFromSelf && !shouldHideFromSelfBlind) {
+                const guesserFeedback = greenToGreyActive ? 
+                    applyCardEffect(realFeedback, { id: 'greenToGrey' }, false) : realFeedback;
+                let guesserGuess = guess;
+                let scrambledFeedback = guesserFeedback;
+                if (wordScrambleActive) {
+                    const scrambled = scrambleWordAndGetPermutation(guess);
+                    guesserGuess = scrambled.scrambledWord;
+                    scrambledFeedback = applyPermutationToArray(guesserFeedback, scrambled.permutation);
+                }
+                socket.emit('guessSubmitted', {
+                    playerId: socket.id,
+                    guess: guesserGuess,
+                    feedback: scrambledFeedback,
+                    row: boardRow,
+                    hidden: false
+                });
+            }
+            
+            // Send winning guess to opponent
+            const opponentSocket = io.sockets.sockets.get(opponent.id);
+            if (opponentSocket) {
+                const shouldHideGuess = game.activeEffects.some(e => 
+                    e.type === 'hiddenGuess' && e.target === socket.id && !e.used
+                );
+                const shouldHideFeedback = game.activeEffects.some(e => 
+                    e.type === 'hiddenFeedback' && e.target === socket.id && !e.used
+                );
+                const falseFeedbackActive = game.activeEffects.some(e => 
+                    e.type === 'falseFeedback' && e.target === socket.id && !e.used
+                );
+                
+                let opponentFeedback = shouldHideFeedback ? 
+                    ['absent', 'absent', 'absent', 'absent', 'absent'] : realFeedback;
+                if (falseFeedbackActive) {
+                    opponentFeedback = applyCardEffect(realFeedback, { id: 'falseFeedback' }, true);
+                }
+                
+                opponentSocket.emit('guessSubmitted', {
+                    playerId: socket.id,
+                    guess: shouldHideGuess ? null : guess,
+                    feedback: opponentFeedback,
+                    row: boardRow,
+                    hidden: shouldHideGuess
+                });
+            }
+            
+            // Delay gameOver to allow the winning guess animation to complete (2 seconds)
+            setTimeout(() => {
+                io.to(data.gameId).emit('gameOver', {
+                    winner: socket.id,
+                    word: game.word
+                });
+            }, 2000);
             return;
         }
         
