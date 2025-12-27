@@ -568,6 +568,15 @@ app.get('/', (req, res) => {
     res.send(html);
 });
 
+// Explicitly serve favicon (browsers often request /favicon.ico first)
+app.get('/favicon.ico', (req, res) => {
+    res.sendFile(path.join(__dirname, 'favicon.png'));
+});
+
+app.get('/favicon.png', (req, res) => {
+    res.sendFile(path.join(__dirname, 'favicon.png'));
+});
+
 // Serve static files (after route handlers)
 app.use(express.static(__dirname));
 
