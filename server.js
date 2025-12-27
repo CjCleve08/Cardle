@@ -903,6 +903,59 @@ io.on('connection', (socket) => {
         }
     });
     
+    socket.on('cancelPrivateGame', () => {
+        const playerData = players.get(socket.id);
+        if (!playerData) {
+            socket.emit('privateGameCancelled', { success: false, message: 'You are not in a game' });
+            return;
+        }
+        
+        const game = games.get(playerData.gameId);
+        if (!game) {
+            socket.emit('privateGameCancelled', { success: false, message: 'Game not found' });
+            players.delete(socket.id);
+            return;
+        }
+        
+        // Only allow cancellation if game hasn't started (status is 'waiting')
+        if (game.status !== 'waiting') {
+            socket.emit('privateGameCancelled', { success: false, message: 'Game has already started' });
+            return;
+        }
+        
+        // Remove player from game
+        game.players = game.players.filter(p => p.id !== socket.id);
+        players.delete(socket.id);
+        socket.leave(playerData.gameId);
+        
+        // If only one player left (or none), delete the game and notify remaining player
+        if (game.players.length <= 1) {
+            // Notify remaining player if there is one
+            if (game.players.length === 1) {
+                const remainingPlayer = game.players[0];
+                const remainingSocket = io.sockets.sockets.get(remainingPlayer.id);
+                if (remainingSocket) {
+                    remainingSocket.emit('playerLeftPrivateGame', { 
+                        message: 'Other player left the game',
+                        gameId: playerData.gameId
+                    });
+                }
+            }
+            
+            // Delete the game
+            games.delete(playerData.gameId);
+        } else {
+            // Notify other players that this player left
+            io.to(playerData.gameId).emit('playerLeft', { 
+                playerId: socket.id,
+                players: game.players
+            });
+        }
+        
+        socket.emit('privateGameCancelled', { success: true, message: 'Game cancelled successfully' });
+        console.log(`Player ${socket.id} cancelled private game ${playerData.gameId}`);
+    });
+    
     socket.on('selectCard', (data) => {
         const game = games.get(data.gameId);
         if (!game || game.currentTurn !== socket.id) return;

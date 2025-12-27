@@ -886,6 +886,58 @@ socket.on('playerJoined', (data) => {
     }
 });
 
+socket.on('privateGameCancelled', (data) => {
+    if (data.success) {
+        // Hide game ID displays
+        const gameIdDisplay = document.getElementById('gameIdDisplay');
+        const gameIdDisplayWaiting = document.getElementById('gameIdDisplayWaiting');
+        if (gameIdDisplay) gameIdDisplay.style.display = 'none';
+        if (gameIdDisplayWaiting) gameIdDisplayWaiting.style.display = 'none';
+        
+        // Reset waiting message
+        const waitingMessage = document.getElementById('waitingMessage');
+        if (waitingMessage) waitingMessage.textContent = 'Waiting for another player to join...';
+        
+        // Clear players list
+        const p1Name = document.getElementById('p1Name');
+        const p2Name = document.getElementById('p2Name');
+        if (p1Name) p1Name.textContent = '-';
+        if (p2Name) p2Name.textContent = '-';
+        
+        // Return to lobby
+        ScreenManager.show('lobby');
+        
+        // Play cancel sound
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playClickSound();
+        }
+    } else {
+        console.error('Failed to cancel private game:', data.message);
+        alert('Failed to cancel game: ' + data.message);
+    }
+});
+
+socket.on('playerLeftPrivateGame', (data) => {
+    // Other player left, return to lobby
+    const gameIdDisplay = document.getElementById('gameIdDisplay');
+    const gameIdDisplayWaiting = document.getElementById('gameIdDisplayWaiting');
+    if (gameIdDisplay) gameIdDisplay.style.display = 'none';
+    if (gameIdDisplayWaiting) gameIdDisplayWaiting.style.display = 'none';
+    
+    // Reset waiting message
+    const waitingMessage = document.getElementById('waitingMessage');
+    if (waitingMessage) waitingMessage.textContent = 'Waiting for another player to join...';
+    
+    // Clear players list
+    const p1Name = document.getElementById('p1Name');
+    const p2Name = document.getElementById('p2Name');
+    if (p1Name) p1Name.textContent = '-';
+    if (p2Name) p2Name.textContent = '-';
+    
+    // Return to lobby
+    ScreenManager.show('lobby');
+});
+
 socket.on('gameStarted', (data) => {
     console.log('Game started event received:', data);
     
@@ -3198,6 +3250,14 @@ document.getElementById('joinWithIdBtn').addEventListener('click', () => {
     } else {
         alert('Please sign in and enter a game ID');
     }
+});
+
+// Cancel private game button
+document.getElementById('cancelPrivateGameBtn').addEventListener('click', () => {
+    if (typeof soundManager !== 'undefined') {
+        soundManager.playButtonClick();
+    }
+    socket.emit('cancelPrivateGame');
 });
 
 document.getElementById('submitBtn').addEventListener('click', submitGuess);
