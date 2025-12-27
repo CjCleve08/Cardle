@@ -569,12 +569,47 @@ app.get('/', (req, res) => {
 });
 
 // Explicitly serve favicon (browsers often request /favicon.ico first)
+// Place these routes BEFORE static middleware to ensure they're matched first
 app.get('/favicon.ico', (req, res) => {
-    res.sendFile(path.join(__dirname, 'favicon.png'));
+    const faviconPath = path.join(__dirname, 'favicon.png');
+    console.log('Favicon request received. Path:', faviconPath);
+    console.log('File exists:', fs.existsSync(faviconPath));
+    if (fs.existsSync(faviconPath)) {
+        res.type('image/png');
+        res.sendFile(faviconPath, (err) => {
+            if (err) {
+                console.error('Error sending favicon:', err);
+                res.status(500).send('Error serving favicon');
+            }
+        });
+    } else {
+        // Fallback to images folder
+        const fallbackPath = path.join(__dirname, 'images', 'CardleLogo.png');
+        console.log('Trying fallback path:', fallbackPath);
+        if (fs.existsSync(fallbackPath)) {
+            res.type('image/png');
+            res.sendFile(fallbackPath);
+        } else {
+            console.error('Favicon not found at either location');
+            res.status(404).send('Favicon not found');
+        }
+    }
 });
 
 app.get('/favicon.png', (req, res) => {
-    res.sendFile(path.join(__dirname, 'favicon.png'));
+    const faviconPath = path.join(__dirname, 'favicon.png');
+    if (fs.existsSync(faviconPath)) {
+        res.type('image/png');
+        res.sendFile(faviconPath);
+    } else {
+        const fallbackPath = path.join(__dirname, 'images', 'CardleLogo.png');
+        if (fs.existsSync(fallbackPath)) {
+            res.type('image/png');
+            res.sendFile(fallbackPath);
+        } else {
+            res.status(404).send('Favicon not found');
+        }
+    }
 });
 
 // Serve static files (after route handlers)
