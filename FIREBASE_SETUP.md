@@ -112,6 +112,11 @@ service cloud.firestore {
       allow create: if request.auth != null && 
         request.auth.uid == request.resource.data.senderId;
     }
+    
+    // Decks collection - users can only read/write their own decks
+    match /decks/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
   }
 }
 ```

@@ -74,6 +74,7 @@ function initializeAuth() {
         guestName = savedGuestName;
         // Clear stats cache for guest mode
         clearStatsCache();
+        clearDecksCache();
         if (ScreenManager.show('lobby')) {
             updateLobbyUserInfo();
             // Load and display guest stats
@@ -93,6 +94,7 @@ function initializeAuth() {
                 console.log('User signed in:', user.email);
                 // Clear stats cache when user changes
                 clearStatsCache();
+        clearDecksCache();
                 // User is signed in - show lobby
                 if (ScreenManager.show('lobby')) {
                     updateLobbyUserInfo();
@@ -108,6 +110,7 @@ function initializeAuth() {
                 console.log('User signed out');
                 // Clear stats cache on logout
                 clearStatsCache();
+        clearDecksCache();
                 // User is signed out - show login
                 ScreenManager.show('login');
             }
@@ -316,6 +319,7 @@ async function handleLogout() {
         guestName = null;
         sessionStorage.removeItem('guestName');
         clearStatsCache();
+        clearDecksCache();
         ScreenManager.show('login');
         return;
     }
@@ -669,25 +673,100 @@ function clearStatsCache() {
     cachedStats = null;
 }
 
+// Clear cached decks when user changes (login/logout)
+function clearDecksCache() {
+    cachedDecks = null;
+}
+
+// Cache for current decks to avoid repeated Firestore reads
+let cachedDecks = null;
+
 // Get all decks (returns object with slot numbers as keys)
-function getAllDecks() {
+async function getAllDecks() {
+    // For guests, use localStorage as fallback
+    if (isGuestMode || !currentUser) {
     const stored = localStorage.getItem(DECK_STORAGE_KEY);
     if (stored) {
         try {
-            const decks = JSON.parse(stored);
-            // Validate all decks - ensure all cards still exist
+                const decks = JSON.parse(stored);
+                // Validate all decks - ensure all cards still exist
             const allCardIds = getAllCards().map(c => c.id);
-            const validatedDecks = {};
-            for (let slot = 1; slot <= NUMBER_OF_DECK_SLOTS; slot++) {
-                if (decks[slot]) {
-                    validatedDecks[slot] = decks[slot].filter(cardId => allCardIds.includes(cardId));
+                const validatedDecks = {};
+                for (let slot = 1; slot <= NUMBER_OF_DECK_SLOTS; slot++) {
+                    if (decks[slot]) {
+                        validatedDecks[slot] = decks[slot].filter(cardId => allCardIds.includes(cardId));
+                    }
                 }
-            }
-            return validatedDecks;
+                return validatedDecks;
         } catch (e) {
-            console.error('Error loading decks:', e);
+                console.error('Error loading decks from localStorage:', e);
+            }
+        }
+        return {};
+    }
+    
+    // For authenticated users, use Firestore
+    if (!window.firebaseDb || !currentUser || !currentUser.uid) {
+        console.warn('Firebase not available or user not authenticated, using localStorage');
+        const stored = localStorage.getItem(DECK_STORAGE_KEY);
+        if (stored) {
+            try {
+                return JSON.parse(stored);
+            } catch (e) {
+                console.error('Error loading decks from localStorage:', e);
+            }
+        }
+        return {};
+    }
+    
+    // Return cached decks if available
+    if (cachedDecks !== null) {
+        return cachedDecks;
+    }
+    
+    try {
+        const decksDoc = await window.firebaseDb.collection('decks').doc(currentUser.uid).get();
+        if (decksDoc.exists) {
+            cachedDecks = decksDoc.data();
+            return cachedDecks;
+        } else {
+            // No decks yet, return empty
+            cachedDecks = {};
+            return cachedDecks;
+        }
+    } catch (error) {
+        console.error('Error loading decks from Firestore:', error);
+        // Fallback to localStorage
+        const stored = localStorage.getItem(DECK_STORAGE_KEY);
+        if (stored) {
+            try {
+                return JSON.parse(stored);
+            } catch (e) {
+                console.error('Error loading decks from localStorage fallback:', e);
+            }
+        }
+        return {};
+    }
+}
+
+// Synchronous version for backwards compatibility (returns cached or localStorage)
+function getAllDecksSync() {
+    if (cachedDecks !== null) {
+        return cachedDecks;
+    }
+    
+    // For guests or when not authenticated, use localStorage
+    if (isGuestMode || !currentUser) {
+        const stored = localStorage.getItem(DECK_STORAGE_KEY);
+        if (stored) {
+            try {
+                return JSON.parse(stored);
+            } catch (e) {
+                console.error('Error loading decks from localStorage:', e);
+            }
         }
     }
+    
     return {};
 }
 
@@ -714,30 +793,134 @@ function setCurrentDeckSlot(slot) {
 }
 
 // Get player deck from current slot
-function getPlayerDeck() {
-    const decks = getAllDecks();
+async function getPlayerDeck() {
+    const decks = await getAllDecks();
     const slot = getCurrentDeckSlot();
     
-    if (decks[slot] && Array.isArray(decks[slot])) {
+    if (decks[slot] && Array.isArray(decks[slot]) && decks[slot].length > 0) {
         return decks[slot];
     }
     
-    // Default deck: first 6 cards (or all if less than 6)
-    const defaultDeck = getAllCards().slice(0, Math.min(DECK_SIZE, getAllCards().length));
-    return defaultDeck.map(c => c.id);
+    // Default to premade deck for slot 1, empty for others
+    if (slot === 1) {
+        const premadeDeck = createPremadeDeck().filter(id => id !== null);
+        if (premadeDeck.length > 0) {
+            return premadeDeck;
+        }
+    }
+    
+    // Fallback: empty deck
+    return [];
 }
 
-// Save player deck to current slot
-function savePlayerDeck(deck) {
-    const decks = getAllDecks();
+// Synchronous version for backwards compatibility
+function getPlayerDeckSync() {
+    const decks = getAllDecksSync();
     const slot = getCurrentDeckSlot();
-    decks[slot] = deck;
-    localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+    
+    if (decks[slot] && Array.isArray(decks[slot]) && decks[slot].length > 0) {
+        return decks[slot];
+    }
+    
+    // Default to premade deck for slot 1, empty for others
+    if (slot === 1) {
+        const premadeDeck = createPremadeDeck().filter(id => id !== null);
+        if (premadeDeck.length > 0) {
+            return premadeDeck;
+        }
+    }
+    
+    // Fallback: empty deck
+    return [];
+}
+
+// Create a premade deck following special card rules
+function createPremadeDeck() {
+    const allCards = getAllCards();
+    if (allCards.length === 0) {
+        return [];
+    }
+    
+    // Separate cards into special and regular
+    const specialCards = allCards.filter(card => isSpecialCard(card.id));
+    const regularCards = allCards.filter(card => !isSpecialCard(card.id));
+    
+    // Create deck: 2 special cards + 4 regular cards
+    const deck = [];
+    
+    // Add 2 special cards (or as many as available, max 2)
+    const specialsToAdd = Math.min(SPECIAL_CARD_SLOTS, specialCards.length);
+    for (let i = 0; i < specialsToAdd; i++) {
+        deck.push(specialCards[i].id);
+    }
+    
+    // Fill remaining slots with regular cards (up to 4, or fill remaining slots)
+    const regularsToAdd = Math.min(DECK_SIZE - deck.length, regularCards.length);
+    for (let i = 0; i < regularsToAdd; i++) {
+        deck.push(regularCards[i].id);
+    }
+    
+    // Pad with nulls if needed to reach DECK_SIZE
+    while (deck.length < DECK_SIZE) {
+        deck.push(null);
+    }
+    
+    return deck;
+}
+
+// Save player deck to current slot (auto-save)
+async function savePlayerDeck(deck) {
+    const decks = await getAllDecks();
+    const slot = getCurrentDeckSlot();
+    decks[slot] = deck.filter(id => id !== null); // Remove nulls before saving
+    
+    // For guests, use localStorage
+    if (isGuestMode || !currentUser) {
+        localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+        return;
+    }
+    
+    // For authenticated users, save to Firestore
+    if (!window.firebaseDb || !currentUser || !currentUser.uid) {
+        console.warn('Firebase not available or user not authenticated, using localStorage');
+        localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+        return;
+    }
+    
+    try {
+        await window.firebaseDb.collection('decks').doc(currentUser.uid).set(decks, { merge: true });
+        cachedDecks = decks; // Update cache
+        // Also save to localStorage as backup
+        localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+    } catch (error) {
+        console.error('Error saving decks to Firestore:', error);
+        // Fallback to localStorage
+        localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+    }
+}
+
+// Auto-save deck when it changes
+async function autoSaveDeck() {
+    const filledSlots = currentDeckSelection.filter(id => id !== null);
+    
+    // Validate: Check that special cards are only in special slots
+    for (let i = 0; i < DECK_SIZE; i++) {
+        const cardId = currentDeckSelection[i];
+        if (cardId && isSpecialCard(cardId) && i >= SPECIAL_CARD_SLOTS) {
+            // Invalid placement, but don't block auto-save - just log
+            console.warn('Invalid deck: special card in regular slot');
+        }
+    }
+    
+    // Only save if deck is complete or being edited
+    if (filledSlots.length === DECK_SIZE || filledSlots.length > 0) {
+        await savePlayerDeck(currentDeckSelection.filter(id => id !== null));
+    }
 }
 
 // Get deck for a specific slot
 function getDeckForSlot(slot) {
-    const decks = getAllDecks();
+    const decks = getAllDecksSync();
     if (decks[slot] && Array.isArray(decks[slot])) {
         return decks[slot];
     }
@@ -745,16 +928,39 @@ function getDeckForSlot(slot) {
 }
 
 // Save deck for a specific slot
-function saveDeckForSlot(slot, deck) {
+async function saveDeckForSlot(slot, deck) {
     if (slot >= 1 && slot <= NUMBER_OF_DECK_SLOTS) {
-        const decks = getAllDecks();
+        const decks = await getAllDecks();
         decks[slot] = deck;
-        localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+        
+        // For guests, use localStorage
+        if (isGuestMode || !currentUser) {
+            localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+            return;
+        }
+        
+        // For authenticated users, save to Firestore
+        if (!window.firebaseDb || !currentUser || !currentUser.uid) {
+            console.warn('Firebase not available or user not authenticated, using localStorage');
+            localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+            return;
+        }
+        
+        try {
+            await window.firebaseDb.collection('decks').doc(currentUser.uid).set(decks, { merge: true });
+            cachedDecks = decks; // Update cache
+            // Also save to localStorage as backup
+            localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+        } catch (error) {
+            console.error('Error saving decks to Firestore:', error);
+            // Fallback to localStorage
+            localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+        }
     }
 }
 
 function getDeckCards() {
-    const deckIds = getPlayerDeck();
+    const deckIds = getPlayerDeckSync();
     const allCards = getAllCards();
     return deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
 }
@@ -1288,16 +1494,16 @@ socket.on('gameStarted', (data) => {
             }
             if (findMatchBtn) {
                 findMatchBtn.disabled = false;
-            }
-            
-            if (ScreenManager.show('game')) {
+    }
+    
+    if (ScreenManager.show('game')) {
                 // Start background music when game starts
                 if (typeof soundManager !== 'undefined') {
                     soundManager.playBackgroundMusic('GameSoundTrack.mp4');
                 }
-                initializeGame(gameState);
-            } else {
-                console.error('Failed to show game screen!');
+    initializeGame(gameState);
+    } else {
+        console.error('Failed to show game screen!');
             }
         }, 3000);
     } else {
@@ -2695,21 +2901,21 @@ function selectCard(card, cardElement) {
             }
         }
     } else {
-        // Remove the selected card from hand and cycle it to the back of deck pool
-        // Then draw the next card from the front of the deck pool
-        if (window.playerCardHand) {
-            const cardIndex = window.playerCardHand.findIndex(c => c.id === card.id);
-            if (cardIndex !== -1) {
-                const selectedCardObj = window.playerCardHand[cardIndex];
-                window.playerCardHand.splice(cardIndex, 1);
-                
-                // Ensure deck pool is initialized
-                if (!window.deckPool || window.deckPool.length === 0) {
-                    initializeDeckPool();
-                }
-                
-                // Put the selected card at the BACK of the deck pool (end of cycle)
-                window.deckPool.push(selectedCardObj);
+    // Remove the selected card from hand and cycle it to the back of deck pool
+    // Then draw the next card from the front of the deck pool
+    if (window.playerCardHand) {
+        const cardIndex = window.playerCardHand.findIndex(c => c.id === card.id);
+        if (cardIndex !== -1) {
+            const selectedCardObj = window.playerCardHand[cardIndex];
+            window.playerCardHand.splice(cardIndex, 1);
+            
+            // Ensure deck pool is initialized
+            if (!window.deckPool || window.deckPool.length === 0) {
+                initializeDeckPool();
+            }
+            
+            // Put the selected card at the BACK of the deck pool (end of cycle)
+            window.deckPool.push(selectedCardObj);
             
             // Draw the next card from the FRONT of the deck pool
             let newCard = null;
@@ -2760,8 +2966,8 @@ function selectCard(card, cardElement) {
             
             // Update hand panel after card is selected and replaced
             updateHandPanel();
-            }
         }
+    }
     }
     
     // Don't show splash here - server will emit 'cardPlayed' event which will queue the splash
@@ -2835,7 +3041,7 @@ function startTurnTimer(preserveTimeRemaining = false) {
     
     // Only reset time remaining if we're not preserving it (e.g., when Counter clears timeRush)
     if (!preserveTimeRemaining) {
-        turnTimeRemaining = timeLimit;
+    turnTimeRemaining = timeLimit;
     } else {
         // If preserving, make sure it doesn't exceed the new limit
         if (turnTimeRemaining > timeLimit) {
@@ -3413,7 +3619,6 @@ function createDeckSlots() {
 
 function updateDeckSlots() {
     updateDeckCount();
-    updateSaveButton();
     const slots = document.querySelectorAll('.deck-slot');
     slots.forEach((slot, index) => {
         const cardId = currentDeckSelection[index];
@@ -3438,7 +3643,6 @@ function updateDeckSlots() {
     });
     
     updateAvailableCards();
-    updateSaveButton();
 }
 
 function createDeckSlotCard(card, slotIndex) {
@@ -3487,7 +3691,7 @@ function createDeckSlotCard(card, slotIndex) {
     return cardElement;
 }
 
-function renderDeckBuilder() {
+async function renderDeckBuilder() {
     const deckCardsGrid = document.getElementById('deckCardsGrid');
     const deckSlots = document.getElementById('deckSlots');
     
@@ -3497,7 +3701,7 @@ function renderDeckBuilder() {
     }
     
     const allCards = getAllCards();
-    const currentDeck = getPlayerDeck();
+    const currentDeck = await getPlayerDeck();
     
     // Initialize deck selection (pad with nulls if needed)
     currentDeckSelection = [...currentDeck];
@@ -3683,6 +3887,7 @@ function renderAvailableCards() {
             if (targetSlot !== -1) {
                 currentDeckSelection[targetSlot] = card.id;
                 updateDeckSlots();
+                autoSaveDeck(); // Auto-save when deck changes
             } else if (isSpecial) {
                 showGameMessage('No Special Slot Available', 'Special card slots are full! Remove a card from a special slot (★) first.', '⚠️');
             }
@@ -3847,17 +4052,12 @@ function handleDropOnSlot(slotIndex) {
 function removeCardFromSlot(slotIndex) {
     currentDeckSelection[slotIndex] = null;
     updateDeckSlots();
+    autoSaveDeck(); // Auto-save when deck changes
 }
 
-function updateSaveButton() {
-    const saveBtn = document.getElementById('saveDeckBtn');
-    if (saveBtn) {
-        const filledSlots = currentDeckSelection.filter(id => id !== null).length;
-        saveBtn.disabled = filledSlots !== DECK_SIZE;
-    }
-}
+// Save button removed - no longer needed
 
-function saveDeck() {
+async function saveDeck() {
     const filledSlots = currentDeckSelection.filter(id => id !== null);
     if (filledSlots.length !== DECK_SIZE) {
         alert(`Please fill all ${DECK_SIZE} deck slots.`);
@@ -3880,16 +4080,17 @@ function saveDeck() {
         return;
     }
     
-    savePlayerDeck(filledSlots);
-    showGameMessage('Deck Saved', 'Your deck has been saved successfully!', '💾');
-    // Update slots to reflect saved deck
-    renderDeckBuilder();
+    await savePlayerDeck(filledSlots);
+        showGameMessage('Deck Saved', 'Your deck has been saved successfully!', '💾');
+        // Update slots to reflect saved deck
+    await renderDeckBuilder();
 }
 
 function clearDeck() {
     if (confirm('Are you sure you want to clear your deck?')) {
         currentDeckSelection = new Array(DECK_SIZE).fill(null);
         updateDeckSlots();
+        autoSaveDeck(); // Auto-save when deck is cleared
     }
 }
 
@@ -3899,9 +4100,9 @@ function openDeckBuilder() {
     switchTab('deck');
 }
 
-function closeDeckBuilder() {
+async function closeDeckBuilder() {
     // Reset to saved deck when leaving
-    const savedDeck = getPlayerDeck();
+    const savedDeck = await getPlayerDeck();
     currentDeckSelection = [...savedDeck];
     while (currentDeckSelection.length < DECK_SIZE) {
         currentDeckSelection.push(null);
@@ -3912,9 +4113,9 @@ function closeDeckBuilder() {
 function initializeDeckSlotSelector() {
     const slotButtons = document.querySelectorAll('.deck-slot-btn');
     slotButtons.forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             const slot = parseInt(btn.dataset.slot);
-            switchDeckSlot(slot);
+            await switchDeckSlot(slot);
         });
     });
     updateDeckSlotSelector();
@@ -3934,7 +4135,7 @@ function updateDeckSlotSelector() {
 }
 
 // Switch to a different deck slot
-function switchDeckSlot(slot) {
+async function switchDeckSlot(slot) {
     if (slot === currentDeckSlot) return;
     
     // Save current deck selection if it was modified
@@ -3943,7 +4144,7 @@ function switchDeckSlot(slot) {
     // Switch to new slot
     if (setCurrentDeckSlot(slot)) {
         // Reload deck builder with new slot's deck
-        renderDeckBuilder();
+        await renderDeckBuilder();
     }
 }
 
@@ -3953,7 +4154,7 @@ document.addEventListener('DOMContentLoaded', () => {
     currentDeckSlot = getCurrentDeckSlot();
     
     // Wait a bit for CARD_CONFIG to be injected by server
-    setTimeout(() => {
+    setTimeout(async () => {
         // Ensure valid decks exist for all slots
         const allCards = getAllCards();
         if (allCards.length === 0) {
@@ -3961,26 +4162,55 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
-        const decks = getAllDecks();
-        const defaultDeck = allCards.slice(0, Math.min(DECK_SIZE, allCards.length)).map(c => c.id);
+        const decks = await getAllDecks();
+        const premadeDeck = createPremadeDeck().filter(id => id !== null);
+        
+        // Migration: Reset all accounts to have premade deck in slot 1, empty slots 2-3
+        const MIGRATION_KEY = 'cardle_deck_migration_v1';
+        const hasMigrated = localStorage.getItem(MIGRATION_KEY);
+        
+        if (!hasMigrated) {
+            // Reset all decks: slot 1 gets premade deck, slots 2-3 are empty
+            await saveDeckForSlot(1, premadeDeck);
+            await saveDeckForSlot(2, []);
+            await saveDeckForSlot(3, []);
+            
+            // Mark migration as complete
+            localStorage.setItem(MIGRATION_KEY, 'true');
+            console.log('Deck migration completed: All decks reset to premade deck in slot 1');
+            // Reload decks after migration
+            cachedDecks = null;
+            const updatedDecks = await getAllDecks();
+            Object.assign(decks, updatedDecks);
+        }
         
         // Initialize all slots if needed
         for (let slot = 1; slot <= NUMBER_OF_DECK_SLOTS; slot++) {
             let deck = decks[slot];
             
             if (!deck || !Array.isArray(deck)) {
-                // No deck for this slot, create default
-                saveDeckForSlot(slot, defaultDeck);
+                // No deck for this slot
+                if (slot === 1) {
+                    // Slot 1 gets premade deck
+                    await saveDeckForSlot(slot, premadeDeck);
+                } else {
+                    // Slots 2-3 are empty
+                    await saveDeckForSlot(slot, []);
+                }
             } else {
-                // Validate deck - remove any cards that no longer exist
-                const validDeck = deck.filter(cardId => allCards.some(c => c.id === cardId));
-                
-                if (validDeck.length === 0 || validDeck.length > DECK_SIZE) {
-                    // Invalid deck, reset to default
-                    saveDeckForSlot(slot, defaultDeck);
-                } else if (validDeck.length !== deck.length) {
-                    // Some cards were removed, save the valid deck
-                    saveDeckForSlot(slot, validDeck);
+        // Validate deck - remove any cards that no longer exist
+        const validDeck = deck.filter(cardId => allCards.some(c => c.id === cardId));
+        
+                if (validDeck.length > DECK_SIZE) {
+                    // Invalid deck (too many cards), reset based on slot
+                    if (slot === 1) {
+                        await saveDeckForSlot(slot, premadeDeck);
+                    } else {
+                        await saveDeckForSlot(slot, []);
+                    }
+        } else if (validDeck.length !== deck.length) {
+            // Some cards were removed, save the valid deck
+                    await saveDeckForSlot(slot, validDeck);
                 }
             }
         }
@@ -4105,14 +4335,49 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+// Validate deck before starting a game
+function validateDeckForGame() {
+    const deck = getPlayerDeckSync();
+    
+    // Check if deck is complete (has exactly DECK_SIZE cards)
+    if (!deck || deck.length !== DECK_SIZE) {
+        return { valid: false, message: `Your deck must have exactly ${DECK_SIZE} cards to play!` };
+    }
+    
+    // Check if deck has any null values
+    if (deck.some(id => id === null || id === undefined)) {
+        return { valid: false, message: `Your deck must have exactly ${DECK_SIZE} cards to play!` };
+    }
+    
+    // Validate: Check that special cards are only in special slots
+    for (let i = 0; i < DECK_SIZE; i++) {
+        const cardId = deck[i];
+        if (cardId && isSpecialCard(cardId) && i >= SPECIAL_CARD_SLOTS) {
+            return { valid: false, message: 'Invalid deck: Special cards can only be in special card slots!' };
+        }
+    }
+    
+    return { valid: true };
+}
+
 document.getElementById('findMatchBtn').addEventListener('click', () => {
     const name = getPlayerName();
-    if (name) {
-        const firebaseUid = currentUser ? currentUser.uid : null;
-        socket.emit('findMatch', { playerName: name, firebaseUid: firebaseUid });
-    } else {
+    if (!name) {
         alert('Please enter your name');
+        return;
     }
+    
+    // Validate deck before starting matchmaking
+    const validation = validateDeckForGame();
+    if (!validation.valid) {
+        alert(validation.message);
+        // Switch to deck tab so user can fix their deck
+        switchTab('deck');
+        return;
+    }
+    
+    const firebaseUid = currentUser ? currentUser.uid : null;
+    socket.emit('findMatch', { playerName: name, firebaseUid: firebaseUid });
 });
 
 document.getElementById('cancelMatchmakingBtn').addEventListener('click', () => {
@@ -4156,8 +4421,9 @@ function switchTab(tabName) {
     
     // If switching to deck tab, initialize deck builder
     if (tabName === 'deck') {
-        renderDeckBuilder();
+        renderDeckBuilder().then(() => {
         updateDeckCount();
+        });
     }
     
     // If switching to profile tab, update stats display
@@ -5020,9 +5286,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-document.getElementById('saveDeckBtn').addEventListener('click', () => {
-    saveDeck();
-});
+// Save button removed - deck now auto-saves
 
 document.getElementById('clearDeckBtn').addEventListener('click', () => {
     clearDeck();
@@ -5212,13 +5476,13 @@ function displayChatMessage(playerName, message, timestamp, isOwnMessage, isSyst
             <div class="chat-message-text">${escapeHtml(message)}</div>
         `;
     } else {
-        messageDiv.innerHTML = `
-            <div class="chat-message-header">
-                <span class="chat-message-name">${escapeHtml(playerName)}</span>
-                <span class="chat-message-time">${timeStr}</span>
-            </div>
-            <div class="chat-message-text">${escapeHtml(message)}</div>
-        `;
+    messageDiv.innerHTML = `
+        <div class="chat-message-header">
+            <span class="chat-message-name">${escapeHtml(playerName)}</span>
+            <span class="chat-message-time">${timeStr}</span>
+        </div>
+        <div class="chat-message-text">${escapeHtml(message)}</div>
+    `;
     }
     
     chatMessages.appendChild(messageDiv);
