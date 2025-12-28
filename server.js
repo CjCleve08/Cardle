@@ -512,6 +512,35 @@ const CARD_CONFIG = {
                 }
             }
         }
+    },
+    'hiddenKeyboard': {
+        metadata: {
+            id: 'hiddenKeyboard',
+            title: 'Carde Blanche',
+            description: 'Your opponent\'s keyboard letters will be hidden on their next turn',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                // Find the opponent
+                const opponent = game.players.find(p => p.id !== playerId);
+                if (opponent) {
+                    // Add keyboard hide effect targeting the opponent
+                    game.activeEffects.push({
+                        type: 'hiddenKeyboard',
+                        target: opponent.id,
+                        description: 'Your keyboard letters will be hidden on your next turn',
+                        used: false
+                    });
+                }
+            }
+        }
     }
 };
 
@@ -1652,12 +1681,35 @@ function submitBotGuess(gameId, botId, guess, card) {
             e.type === 'hiddenFeedback' || 
             e.type === 'falseFeedback' ||
             e.type === 'extraGuess' ||
-            e.type === 'cardLock'
+            e.type === 'cardLock' ||
+            e.type === 'gamblerHide' ||
+            e.type === 'gamblerReveal' ||
+            e.type === 'blindGuess' ||
+            e.type === 'remJobHide' ||
+            e.type === 'greenToGrey' ||
+            e.type === 'timeRush' ||
+            e.type === 'wordScramble' ||
+            e.type === 'hiddenKeyboard'
         )) {
             return false;
         }
         return true;
     });
+    
+    // Clear blocked card after bot uses a card/makes a guess
+    if (game.blockedCards && game.blockedCards.has(botId)) {
+        game.blockedCards.delete(botId);
+        console.log(`Cleared blocked card for bot ${botId} after their turn`);
+        // Notify human player that bot's card is unblocked (for bot games)
+        const opponent = game.players.find(p => p.id !== botId);
+        if (opponent && !opponent.isBot) {
+            const opponentSocket = io.sockets.sockets.get(opponent.id);
+            if (opponentSocket) {
+                // Bot's card is unblocked, but this doesn't affect the human player's UI
+                // Only needed if we want to track it, but for now we'll just log
+            }
+        }
+    }
     
     // Switch turns
     if (!isExtraGuess) {
@@ -3425,7 +3477,7 @@ io.on('connection', (socket) => {
         
         // Remove used effects (mark as used and remove)
         game.activeEffects = game.activeEffects.filter(e => {
-            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, remJobHide, greenToGrey, timeRush, and wordScramble after they've been used on this guess
+            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, remJobHide, greenToGrey, timeRush, wordScramble, and hiddenKeyboard after they've been used on this guess
             if (e.target === socket.id && (
                 e.type === 'hiddenGuess' || 
                 e.type === 'hiddenFeedback' || 
@@ -3436,7 +3488,8 @@ io.on('connection', (socket) => {
                 e.type === 'remJobHide' ||
                 e.type === 'greenToGrey' ||
                 e.type === 'timeRush' ||
-                e.type === 'wordScramble'
+                e.type === 'wordScramble' ||
+                e.type === 'hiddenKeyboard'
             )) {
                 if (e.type === 'falseFeedback') {
                     console.log('Removing falseFeedback effect after it was applied to player:', socket.id);
@@ -3448,6 +3501,14 @@ io.on('connection', (socket) => {
             }
             return true;
         });
+        
+        // Clear blocked card after opponent uses a card/makes a guess
+        if (game.blockedCards && game.blockedCards.has(socket.id)) {
+            game.blockedCards.delete(socket.id);
+            console.log(`Cleared blocked card for player ${socket.id} after their turn`);
+            // Notify client that the card is unblocked
+            socket.emit('cardUnblocked', {});
+        }
         
         // Emit turn change to all players in the game (don't send the word)
         // Send personalized turnChanged events to each player with their own ID

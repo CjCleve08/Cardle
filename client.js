@@ -490,7 +490,8 @@ function getCardImagePath(cardId) {
         'wordScramble': 'Undertrick.png',
         'cardMirror': 'FollowSuit.png',
         'snackTime': 'SnackTime.png',
-        'remJob': 'RemJob.png'
+        'remJob': 'RemJob.png',
+        'hiddenKeyboard': 'CardeBlanche.png'
     };
     
     const imageName = cardImageMap[cardId] || 'Blank.png';
@@ -1613,6 +1614,9 @@ socket.on('activeEffectsUpdated', (data) => {
         gameState.activeEffects = data.activeEffects;
         console.log('Active effects updated:', data.activeEffects);
         
+        // Update keyboard visibility if hiddenKeyboard effect changed
+        updateKeyboardVisibility();
+        
         // Check if timeRush is active now
         const hasTimeRushAfter = gameState.activeEffects && gameState.activeEffects.some(e => 
             e.type === 'timeRush' && e.target === currentTurnPlayerId && !e.used
@@ -1715,6 +1719,7 @@ socket.on('turnChanged', (data) => {
     // Update turn indicator and start timer (both players track the timer)
     updateTurnIndicator();
     updatePlayerStatus();
+    updateKeyboardVisibility(); // Update keyboard visibility when turn changes
     
     // Always show game board so players can see previous guesses
     showGameBoard();
@@ -1936,6 +1941,13 @@ socket.on('cardBlocked', (data) => {
     // A card in our hand has been blocked
     window.blockedCardId = data.blockedCardId;
     // Update hand panel to show blocked card (no message shown to keep it secret)
+    updateHandPanel();
+});
+
+socket.on('cardUnblocked', (data) => {
+    // The blocked card is now unblocked (after our turn)
+    window.blockedCardId = null;
+    // Update hand panel to show cards are no longer blocked
     updateHandPanel();
 });
 
@@ -2315,6 +2327,7 @@ async function initializeGame(data) {
     await initializeDeckPool();
     createBoard();
     createKeyboard();
+    updateKeyboardVisibility(); // Update keyboard visibility based on active effects
     stopTurnTimer(); // Reset timer for new game
     updateTurnIndicator();
     updatePlayerStatus();
@@ -2566,6 +2579,9 @@ function createKeyboard() {
         keyboard.appendChild(row);
     });
     
+    // Check if keyboard should be hidden and apply styling
+    updateKeyboardVisibility();
+    
     // Rescale after keyboard is created (if on game screen)
     const gameScreen = document.getElementById('game');
     if (gameScreen && gameScreen.classList.contains('active')) {
@@ -2573,6 +2589,29 @@ function createKeyboard() {
             scaleGameBoard();
         }, 10);
     }
+}
+
+function updateKeyboardVisibility() {
+    // Check if hiddenKeyboard effect is active for the current player
+    if (!gameState || !currentPlayer) {
+        // Game not initialized yet, don't hide keyboard
+        return;
+    }
+    
+    const isKeyboardHidden = gameState.activeEffects && gameState.activeEffects.some(e => 
+        e.type === 'hiddenKeyboard' && e.target === currentPlayer && !e.used
+    );
+    
+    const keys = document.querySelectorAll('.key');
+    keys.forEach(key => {
+        if (isKeyboardHidden) {
+            key.classList.add('keyboard-hidden');
+            // Also hide feedback colors (correct/present/absent)
+            key.classList.remove('correct', 'present', 'absent');
+        } else {
+            key.classList.remove('keyboard-hidden');
+        }
+    });
 }
 
 function showCardSelection() {
@@ -3149,7 +3188,7 @@ function startTurnTimer(preserveTimeRemaining = false) {
     
     // Only reset time remaining if we're not preserving it (e.g., when Counter clears timeRush)
     if (!preserveTimeRemaining) {
-        turnTimeRemaining = timeLimit;
+    turnTimeRemaining = timeLimit;
     } else {
         // If preserving, make sure it doesn't exceed the new limit
         if (turnTimeRemaining > timeLimit) {
@@ -3449,6 +3488,14 @@ function displayOpponentGuessHidden(row) {
 function updateKeyboard(feedbackData) {
     // feedbackData contains { guess, feedback } from server
     if (!feedbackData || !feedbackData.guess || !feedbackData.feedback) return;
+    
+    // Don't update keyboard colors if hiddenKeyboard effect is active
+    const isKeyboardHidden = gameState && gameState.activeEffects && gameState.activeEffects.some(e => 
+        e.type === 'hiddenKeyboard' && e.target === currentPlayer && !e.used
+    );
+    if (isKeyboardHidden) {
+        return; // Skip updating keyboard colors when hidden
+    }
     
     const guess = feedbackData.guess;
     const feedback = feedbackData.feedback;
@@ -4447,8 +4494,8 @@ async function saveDeck() {
 }
 
 async function clearDeck() {
-    currentDeckSelection = new Array(DECK_SIZE).fill(null);
-    updateDeckSlots();
+        currentDeckSelection = new Array(DECK_SIZE).fill(null);
+        updateDeckSlots();
     // Save empty deck directly
     await savePlayerDeck([]);
 }

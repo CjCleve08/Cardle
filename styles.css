@@ -4056,6 +4056,11 @@ header h1 {
     color: white;
 }
 
+.key.keyboard-hidden {
+    color: transparent;
+    text-shadow: none;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     header h1 {
