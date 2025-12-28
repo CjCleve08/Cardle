@@ -489,7 +489,8 @@ function getCardImagePath(cardId) {
         'timeRush': 'QuickDeal.png',
         'wordScramble': 'Undertrick.png',
         'cardMirror': 'FollowSuit.png',
-        'snackTime': 'SnackTime.png'
+        'snackTime': 'SnackTime.png',
+        'remJob': 'RemJob.png'
     };
     
     const imageName = cardImageMap[cardId] || 'Blank.png';
@@ -533,7 +534,7 @@ const ALL_CARDS = getAllCards();
 // Deck Management
 const DECK_STORAGE_KEY = 'cardle_player_decks';
 const DECK_SLOT_KEY = 'cardle_current_deck_slot';
-const DECK_SIZE = 6;
+const DECK_SIZE = 7;
 const NUMBER_OF_DECK_SLOTS = 3;
 const SPECIAL_CARD_SLOTS = 2; // First 2 slots are special card slots
 const SPECIAL_CARD_SLOT_START = 0;
@@ -1789,9 +1790,9 @@ socket.on('guessSubmitted', (data) => {
     } else if (data.playerId === currentPlayer) {
         // This is my guess
         if (data.hidden || !data.guess || !data.feedback) {
-            // Guess is hidden from player (Gambler's Card bad luck)
+            // Guess is hidden from player (Gambler's Card, Rem-Job, or Blind Guess effect)
             displayOpponentGuessHidden(data.row);
-            console.log('Your guess was hidden by Gambler\'s Card!');
+            console.log('Your guess was hidden!');
         } else {
             // Normal display
         displayGuess(data.guess, data.feedback, data.row);
@@ -3732,10 +3733,10 @@ function createDeckSlots() {
             slot.classList.remove('drag-over');
         });
         
-        slot.addEventListener('drop', (e) => {
+        slot.addEventListener('drop', async (e) => {
             e.preventDefault();
             slot.classList.remove('drag-over');
-            handleDropOnSlot(i);
+            await handleDropOnSlot(i);
         });
         
         deckSlots.appendChild(slot);
@@ -3905,14 +3906,16 @@ async function renderDeckBuilder() {
             }
         });
         
-        deckCardsGrid.addEventListener('drop', (e) => {
+        deckCardsGrid.addEventListener('drop', async (e) => {
             e.preventDefault();
             deckCardsGrid.style.borderColor = '#3a3a3c';
             deckCardsGrid.style.backgroundColor = '#121213';
             
             // If card was dragged from a deck slot, remove it from deck
-            if (draggedSlotIndex !== null && draggedCard) {
-                removeCardFromSlot(draggedSlotIndex);
+            // Capture slot index before dragend clears it
+            const slotIndexToRemove = draggedSlotIndex;
+            if (slotIndexToRemove !== null && draggedCard) {
+                await removeCardFromSlot(slotIndexToRemove);
             }
         });
         
@@ -4131,7 +4134,7 @@ function stopAutoScroll() {
     }
 }
 
-function handleDropOnSlot(slotIndex) {
+async function handleDropOnSlot(slotIndex) {
     if (!draggedCard) return;
     
     // Stop auto-scroll
@@ -4168,12 +4171,13 @@ function handleDropOnSlot(slotIndex) {
     currentDeckSelection[slotIndex] = draggedCard;
     
     updateDeckSlots();
+    await autoSaveDeck(); // Auto-save when deck changes
 }
 
-function removeCardFromSlot(slotIndex) {
+async function removeCardFromSlot(slotIndex) {
     currentDeckSelection[slotIndex] = null;
     updateDeckSlots();
-    autoSaveDeck(); // Auto-save when deck changes
+    await autoSaveDeck(); // Auto-save when deck changes
 }
 
 // Dropdown menu for deck builder cards
@@ -4442,12 +4446,11 @@ async function saveDeck() {
     await renderDeckBuilder();
 }
 
-function clearDeck() {
-    if (confirm('Are you sure you want to clear your deck?')) {
-        currentDeckSelection = new Array(DECK_SIZE).fill(null);
-        updateDeckSlots();
-        autoSaveDeck(); // Auto-save when deck is cleared
-    }
+async function clearDeck() {
+    currentDeckSelection = new Array(DECK_SIZE).fill(null);
+    updateDeckSlots();
+    // Save empty deck directly
+    await savePlayerDeck([]);
 }
 
 // Deck builder is now in a tab, so these functions are simplified

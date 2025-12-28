@@ -481,6 +481,37 @@ const CARD_CONFIG = {
         effects: {
             // Snack Time is handled in selectCard, not onGuess
         }
+    },
+    'remJob': {
+        metadata: {
+            id: 'remJob',
+            title: 'Rem-Job',
+            description: '99% chance to hide your next guess from you, 1% chance to instantly win',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                // 1% chance to instantly win the game
+                if (Math.random() < 0.01) {
+                    // Set flag to trigger instant win in submitGuess handler
+                    game.remJobInstantWin = playerId;
+                } else {
+                    // 99% chance: hide next guess from player themselves
+                    game.activeEffects.push({
+                        type: 'remJobHide',
+                        target: playerId,
+                        description: 'Your next guess will be hidden from you',
+                        used: false
+                    });
+                }
+            }
+        }
     }
 };
 
@@ -1480,6 +1511,13 @@ function submitBotGuess(gameId, botId, guess, card) {
         }
     }
     
+    // Check for Rem-Job instant win (1% chance)
+    if (game.remJobInstantWin === botId) {
+        // Rem-Job triggered instant win - treat this guess as the winning word
+        game.word = guess;
+        game.remJobInstantWin = null; // Clear flag
+    }
+    
     // Track last played card
     if (!game.lastPlayedCards) {
         game.lastPlayedCards = new Map();
@@ -1508,6 +1546,9 @@ function submitBotGuess(gameId, botId, guess, card) {
             );
             const shouldHideFeedback = game.activeEffects.some(e => 
                 e.type === 'hiddenFeedback' && e.target === botId && !e.used
+            );
+            const shouldHideFromSelfRemJob = game.activeEffects.some(e => 
+                e.type === 'remJobHide' && e.target === botId && !e.used
             );
             const falseFeedbackActive = game.activeEffects.some(e => 
                 e.type === 'falseFeedback' && e.target === botId && !e.used
@@ -3107,6 +3148,13 @@ io.on('connection', (socket) => {
             console.log('Warning: Card not found in CARD_CONFIG:', actualCard.id);
         }
         
+        // Check for Rem-Job instant win (1% chance)
+        if (game.remJobInstantWin === socket.id) {
+            // Rem-Job triggered instant win - treat this guess as the winning word
+            game.word = guess;
+            game.remJobInstantWin = null; // Clear flag
+        }
+        
         // Check for win
         if (guess === game.word) {
             game.status = 'finished';
@@ -3124,6 +3172,9 @@ io.on('connection', (socket) => {
             const shouldHideFromSelfBlind = game.activeEffects.some(e => 
                 e.type === 'blindGuess' && e.target === socket.id && !e.used
             );
+            const shouldHideFromSelfRemJob = game.activeEffects.some(e => 
+                e.type === 'remJobHide' && e.target === socket.id && !e.used
+            );
             const greenToGreyActive = game.activeEffects.some(e => 
                 e.type === 'greenToGrey' && e.target === socket.id && !e.used
             );
@@ -3132,7 +3183,7 @@ io.on('connection', (socket) => {
             );
             
             // Send winning guess to player
-            if (!shouldHideFromSelf && !shouldHideFromSelfBlind) {
+            if (!shouldHideFromSelf && !shouldHideFromSelfBlind && !shouldHideFromSelfRemJob) {
                 const guesserFeedback = greenToGreyActive ? 
                     applyCardEffect(realFeedback, { id: 'greenToGrey' }, false) : realFeedback;
                 let guesserGuess = guess;
@@ -3216,6 +3267,11 @@ io.on('connection', (socket) => {
             e.type === 'blindGuess' && e.target === socket.id && !e.used
         );
         
+        // Check if remJobHide is active (hides guess from player themselves - Rem-Job 99% effect)
+        const shouldHideFromSelfRemJob = game.activeEffects.some(e => 
+            e.type === 'remJobHide' && e.target === socket.id && !e.used
+        );
+        
         // Check if gamblerReveal is active (reveals a letter)
         const gamblerReveal = game.activeEffects.find(e => 
             e.type === 'gamblerReveal' && e.target === socket.id && !e.used
@@ -3256,8 +3312,8 @@ io.on('connection', (socket) => {
             console.log('Green to grey feedback calculated. Real:', realFeedback, 'Modified:', greenToGreyFeedback);
         }
         
-        // Send to guesser (hide if gamblerHide or blindGuess is active, otherwise show normally)
-        if (shouldHideFromSelf || shouldHideFromSelfBlind) {
+        // Send to guesser (hide if gamblerHide, blindGuess, or remJobHide is active, otherwise show normally)
+        if (shouldHideFromSelf || shouldHideFromSelfBlind || shouldHideFromSelfRemJob) {
             // Hide guess from player themselves (gambler's card bad luck or blind guess card)
             socket.emit('guessSubmitted', {
                 playerId: socket.id,
@@ -3297,9 +3353,9 @@ io.on('connection', (socket) => {
         }
         
             // Send to opponent and spectators
-            const opponentSocket = io.sockets.sockets.get(opponent.id);
-            if (opponentSocket) {
-                let opponentFeedback = null;
+        const opponentSocket = io.sockets.sockets.get(opponent.id);
+        if (opponentSocket) {
+            let opponentFeedback = null;
             if (shouldHideFeedback) {
                 // Hidden feedback: show all grey (absent) for opponent, but guess is visible
                 opponentFeedback = ['absent', 'absent', 'absent', 'absent', 'absent'];
@@ -3369,7 +3425,7 @@ io.on('connection', (socket) => {
         
         // Remove used effects (mark as used and remove)
         game.activeEffects = game.activeEffects.filter(e => {
-            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, greenToGrey, timeRush, and wordScramble after they've been used on this guess
+            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, remJobHide, greenToGrey, timeRush, and wordScramble after they've been used on this guess
             if (e.target === socket.id && (
                 e.type === 'hiddenGuess' || 
                 e.type === 'hiddenFeedback' || 
@@ -3377,6 +3433,7 @@ io.on('connection', (socket) => {
                 e.type === 'gamblerHide' ||
                 e.type === 'gamblerReveal' ||
                 e.type === 'blindGuess' ||
+                e.type === 'remJobHide' ||
                 e.type === 'greenToGrey' ||
                 e.type === 'timeRush' ||
                 e.type === 'wordScramble'
