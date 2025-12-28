@@ -493,7 +493,7 @@ function getCardImagePath(cardId) {
     };
     
     const imageName = cardImageMap[cardId] || 'Blank.png';
-    return `images/card images/${imageName}`;
+    return `images/Card Images/${imageName}`;
 }
 
 function isModifierCard(cardId) {
