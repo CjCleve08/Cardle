@@ -464,6 +464,23 @@ const CARD_CONFIG = {
                 }
             }
         }
+    },
+    'snackTime': {
+        metadata: {
+            id: 'snackTime',
+            title: 'Snack Time',
+            description: 'Put all cards from your deck into your hand and pick from all available cards',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            // Snack Time is handled in selectCard, not onGuess
+        }
     }
 };
 
@@ -2400,6 +2417,50 @@ io.on('connection', (socket) => {
         
         // Get or initialize the card chain for this player
         let cardChain = game.cardChains.get(socket.id) || [];
+        
+        // Check if player is in snack time mode - if so, this is the card they selected from all deck cards
+        if (game.snackTimeMode && game.snackTimeMode.get(socket.id)) {
+            // Clear snack time mode - process this card normally
+            game.snackTimeMode.delete(socket.id);
+            // Continue with normal processing below
+        }
+        
+        // Check if this is a snack time card - trigger it immediately
+        if (data.card.id === 'snackTime') {
+            // Initialize snack time mode tracking if needed
+            if (!game.snackTimeMode) {
+                game.snackTimeMode = new Map();
+            }
+            game.snackTimeMode.set(socket.id, true);
+            
+            // Emit event to client to trigger snack time selection mode
+            socket.emit('snackTimeTriggered', {
+                gameId: data.gameId
+            });
+            
+            // Show splash for snack time card
+            const splashBehavior = getSplashBehavior(data.card.id);
+            if (splashBehavior === 'show') {
+                io.to(data.gameId).emit('cardPlayed', {
+                    card: data.card,
+                    playerName: player ? player.name : 'Player',
+                    playerId: socket.id
+                });
+                
+                // Send system notification to chat
+                const cardName = getCardDisplayName(data.card);
+                sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`);
+            }
+            
+            // Notify the player they can select another card from all available cards
+            socket.emit('cardSelected', {
+                playerId: socket.id,
+                card: data.card,
+                allowSecondCard: true,
+                snackTimeMode: true
+            });
+            return;
+        }
         
         // Check if this card is a modifier card using config
         const cardIsModifier = isModifierCard(data.card.id);

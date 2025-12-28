@@ -504,7 +504,33 @@ const DECK_STORAGE_KEY = 'cardle_player_decks';
 const DECK_SLOT_KEY = 'cardle_current_deck_slot';
 const DECK_SIZE = 6;
 const NUMBER_OF_DECK_SLOTS = 3;
+const SPECIAL_CARD_SLOTS = 2; // First 2 slots are special card slots
+const SPECIAL_CARD_SLOT_START = 0;
+const REGULAR_SLOT_START = 2; // Regular cards start at index 2
 let currentDeckSlot = 1; // Current deck slot (1, 2, or 3)
+
+// Check if a card is special (chainable cards)
+// Special cards are: modifier cards and cards that allow additional selections/turns
+// Modifier cards can be chained with another card (like phonyCard, hideCard)
+// Other chainable cards allow selecting additional cards or turns (like snackTime, extraGuess, cardSteal, handReveal)
+function isSpecialCard(cardId) {
+    // Check if it's a modifier card (can be chained with another card)
+    if (isModifierCard(cardId)) {
+        return true;
+    }
+    
+    // Check if it allows additional card selections or turns
+    // These cards enable chaining behavior:
+    // - snackTime: allows selecting from all deck cards
+    // - extraGuess (Hit Me): gives extra turn (allows chaining across turns)
+    // - cardSteal (Finesse): allows selecting opponent's card
+    const chainableCards = ['snackTime', 'extraGuess', 'cardSteal'];
+    if (chainableCards.includes(cardId)) {
+        return true;
+    }
+    
+    return false;
+}
 
 // Statistics Management
 // Cache for current stats to avoid repeated Firestore reads
@@ -1287,6 +1313,28 @@ socket.on('gameStarted', (data) => {
     }
 });
 
+socket.on('snackTimeTriggered', (data) => {
+    // Skip if spectator
+    if (window.isSpectator) return;
+    
+    if (data.gameId === gameState?.gameId) {
+        // Put all deck cards into hand (excluding snackTime)
+        const deckCards = getDeckCards();
+        const allCards = deckCards.filter(card => card.id !== 'snackTime');
+        
+        // Set snack time mode flag
+        window.snackTimeMode = true;
+        
+        // Put all cards into hand
+        window.playerCardHand = [...allCards];
+        
+        // Show card selection from all available cards
+        setTimeout(() => {
+            showCardSelection();
+        }, 100);
+    }
+});
+
 socket.on('cardSelected', (data) => {
     // Skip if spectator
     if (window.isSpectator) return;
@@ -1307,6 +1355,7 @@ socket.on('cardSelected', (data) => {
         } else {
             // Final card in chain - hide selection and show board
             cardChainActive = false; // Clear flag
+            window.snackTimeMode = false; // Clear snack time mode
         hideCardSelection();
         showGameBoard();
         }
@@ -2454,6 +2503,54 @@ function generateCards() {
         }
     }
     
+    // Check if we're in snack time mode - show all deck cards (excluding snackTime)
+    if (window.snackTimeMode) {
+        // Add class to container to indicate snack time mode
+        container.classList.add('snack-time-mode');
+        
+        // In snack time mode, show all cards from hand except snackTime
+        let availableCards = window.playerCardHand.filter(c => c.id !== 'snackTime');
+        
+        // Show all available cards (excluding blocked card)
+        const selectedCards = availableCards.filter(c => c.id !== window.blockedCardId);
+        
+        selectedCards.forEach((card, index) => {
+            const cardElement = document.createElement('div');
+            const isBlocked = window.blockedCardId === card.id;
+            cardElement.className = 'card';
+            if (isBlocked) {
+                cardElement.classList.add('blocked');
+                cardElement.style.opacity = '0.4';
+                cardElement.style.filter = 'grayscale(100%)';
+                cardElement.style.cursor = 'not-allowed';
+                cardElement.style.pointerEvents = 'none';
+            }
+            cardElement.innerHTML = `
+                <div class="card-title">${card.title}</div>
+                <div class="card-description">${card.description}</div>
+            `;
+            if (!isBlocked) {
+                cardElement.onclick = () => selectCard(card, cardElement);
+            }
+            
+            // Add hover sound to card
+            cardElement.addEventListener('mouseenter', () => {
+                if (typeof soundManager !== 'undefined' && !isBlocked) {
+                    soundManager.playCardHover();
+                }
+            });
+            
+            container.appendChild(cardElement);
+        });
+        
+        // Update hand panel after cards are generated
+        updateHandPanel();
+        return;
+    } else {
+        // Remove snack time mode class if not in snack time mode
+        container.classList.remove('snack-time-mode');
+    }
+    
     // If we're in a card chain, filter out modifier cards that are already in the chain
     let availableCards = window.playerCardHand.slice(0, 3);
     if (cardChainActive) {
@@ -2559,21 +2656,60 @@ function selectCard(card, cardElement) {
         hidden: isInChain // Mark as hidden if we're in a chain
     });
     
-    // Remove the selected card from hand and cycle it to the back of deck pool
-    // Then draw the next card from the front of the deck pool
-    if (window.playerCardHand) {
-        const cardIndex = window.playerCardHand.findIndex(c => c.id === card.id);
-        if (cardIndex !== -1) {
-            const selectedCardObj = window.playerCardHand[cardIndex];
-            window.playerCardHand.splice(cardIndex, 1);
-            
-            // Ensure deck pool is initialized
-            if (!window.deckPool || window.deckPool.length === 0) {
-                initializeDeckPool();
+    // Handle snack time mode differently
+    if (window.snackTimeMode) {
+        // Remove the selected card from hand
+        if (window.playerCardHand) {
+            const cardIndex = window.playerCardHand.findIndex(c => c.id === card.id);
+            if (cardIndex !== -1) {
+                const selectedCardObj = window.playerCardHand[cardIndex];
+                window.playerCardHand.splice(cardIndex, 1);
+                
+                // Ensure deck pool is initialized
+                if (!window.deckPool || window.deckPool.length === 0) {
+                    initializeDeckPool();
+                }
+                
+                // Put the selected card at the BACK of the deck pool
+                window.deckPool.push(selectedCardObj);
+                
+                // Put all remaining cards from hand back into deck pool
+                window.playerCardHand.forEach(remainingCard => {
+                    if (remainingCard.id !== 'snackTime') {
+                        window.deckPool.push(remainingCard);
+                    }
+                });
+                
+                // Restore normal hand (draw 3 cards)
+                window.playerCardHand = [];
+                while (window.playerCardHand.length < 3 && window.deckPool.length > 0) {
+                    const newCard = drawCardFromDeck();
+                    window.playerCardHand.push(newCard);
+                }
+                
+                // Clear snack time mode
+                window.snackTimeMode = false;
+                
+                // Update hand panel
+                updateHandPanel();
             }
-            
-            // Put the selected card at the BACK of the deck pool (end of cycle)
-            window.deckPool.push(selectedCardObj);
+        }
+    } else {
+        // Remove the selected card from hand and cycle it to the back of deck pool
+        // Then draw the next card from the front of the deck pool
+        if (window.playerCardHand) {
+            const cardIndex = window.playerCardHand.findIndex(c => c.id === card.id);
+            if (cardIndex !== -1) {
+                const selectedCardObj = window.playerCardHand[cardIndex];
+                window.playerCardHand.splice(cardIndex, 1);
+                
+                // Ensure deck pool is initialized
+                if (!window.deckPool || window.deckPool.length === 0) {
+                    initializeDeckPool();
+                }
+                
+                // Put the selected card at the BACK of the deck pool (end of cycle)
+                window.deckPool.push(selectedCardObj);
             
             // Draw the next card from the FRONT of the deck pool
             let newCard = null;
@@ -2624,6 +2760,7 @@ function selectCard(card, cardElement) {
             
             // Update hand panel after card is selected and replaced
             updateHandPanel();
+            }
         }
     }
     
@@ -2631,10 +2768,15 @@ function selectCard(card, cardElement) {
     // This prevents double splashes (client-side + server-side)
     
     // If a modifier card was selected, wait for server to allow another card selection
+    // If in snack time mode, wait for server confirmation
     // Otherwise, hide card selection and show game board
     if (cardIsModifier) {
         // cardChainActive will be set by the cardSelected event handler
         // Don't hide selection yet - wait for next card
+    } else if (window.snackTimeMode) {
+        // In snack time mode, wait for server to confirm before hiding
+        // The server will emit cardSelected with allowSecondCard: false
+        cardChainActive = false;
     } else {
         // Final card in chain - clear flag and proceed
         cardChainActive = false;
@@ -3240,12 +3382,12 @@ function createDeckSlots() {
     for (let i = 0; i < DECK_SIZE; i++) {
         const slot = document.createElement('div');
         slot.className = 'deck-slot';
+        if (i < SPECIAL_CARD_SLOTS) {
+            slot.classList.add('special-card-slot');
+        }
         slot.dataset.slotIndex = i;
         
-        const slotNumber = document.createElement('div');
-        slotNumber.className = 'deck-slot-number';
-        slotNumber.textContent = i + 1;
-        slot.appendChild(slotNumber);
+        // Removed slot numbers and stars as per user request
         
         // Add drag and drop event listeners
         slot.addEventListener('dragover', (e) => {
@@ -3302,6 +3444,9 @@ function updateDeckSlots() {
 function createDeckSlotCard(card, slotIndex) {
     const cardElement = document.createElement('div');
     cardElement.className = 'deck-slot-card';
+    if (isSpecialCard(card.id)) {
+        cardElement.classList.add('special-card');
+    }
     cardElement.draggable = true;
     cardElement.dataset.cardId = card.id;
     cardElement.dataset.slotIndex = slotIndex;
@@ -3360,6 +3505,41 @@ function renderDeckBuilder() {
         currentDeckSelection.push(null);
     }
     
+    // Validate and fix: Move special cards to special slots if they're in wrong slots
+    const specialCardsInDeck = [];
+    const regularCardsInDeck = [];
+    
+    for (let i = 0; i < currentDeckSelection.length; i++) {
+        const cardId = currentDeckSelection[i];
+        if (cardId) {
+            if (isSpecialCard(cardId)) {
+                specialCardsInDeck.push({ cardId, index: i });
+            } else {
+                regularCardsInDeck.push({ cardId, index: i });
+            }
+        }
+    }
+    
+    // Fix special cards in wrong slots
+    let specialSlotIndex = 0;
+    for (const { cardId, index } of specialCardsInDeck) {
+        if (index >= SPECIAL_CARD_SLOTS) {
+            // Special card is in wrong slot, move to first available special slot
+            if (specialSlotIndex < SPECIAL_CARD_SLOTS) {
+                // Check if target slot is empty or has a regular card
+                if (!currentDeckSelection[specialSlotIndex] || !isSpecialCard(currentDeckSelection[specialSlotIndex])) {
+                    // Swap: move regular card (if any) to the old slot, move special card to special slot
+                    const oldCardInSpecialSlot = currentDeckSelection[specialSlotIndex];
+                    currentDeckSelection[specialSlotIndex] = cardId;
+                    currentDeckSelection[index] = oldCardInSpecialSlot;
+                }
+                specialSlotIndex++;
+            }
+        } else {
+            specialSlotIndex++;
+        }
+    }
+    
     // Update deck slot selector UI
     updateDeckSlotSelector();
     
@@ -3405,13 +3585,29 @@ function renderAvailableCards() {
     const allCards = getAllCards();
     
     // Filter out cards that are in the deck
-    const availableCards = allCards.filter(card => !currentDeckSelection.includes(card.id));
+    let availableCards = allCards.filter(card => !currentDeckSelection.includes(card.id));
+    
+    // Sort cards: special cards at the end
+    availableCards.sort((a, b) => {
+        const aIsSpecial = isSpecialCard(a.id);
+        const bIsSpecial = isSpecialCard(b.id);
+        
+        // If one is special and the other isn't, special comes last
+        if (aIsSpecial && !bIsSpecial) return 1;
+        if (!aIsSpecial && bIsSpecial) return -1;
+        
+        // If both are special or both are normal, maintain original order (or sort alphabetically)
+        return a.title.localeCompare(b.title);
+    });
     
     deckCardsGrid.innerHTML = '';
     
     availableCards.forEach(card => {
         const cardElement = document.createElement('div');
         cardElement.className = 'deck-card-item';
+        if (isSpecialCard(card.id)) {
+            cardElement.classList.add('special-card');
+        }
         cardElement.dataset.cardId = card.id;
         
         cardElement.innerHTML = `
@@ -3465,17 +3661,30 @@ function renderAvailableCards() {
                 return;
             }
             
-            // Find first open slot
-            const firstOpenSlot = currentDeckSelection.findIndex(slot => slot === null);
-            if (firstOpenSlot !== -1) {
-                // Check if card is already in deck
-                if (currentDeckSelection.includes(card.id)) {
-                    return; // Card already in deck
-                }
-                
-                // Add card to first open slot
-                currentDeckSelection[firstOpenSlot] = card.id;
+            // Check if card is already in deck
+            if (currentDeckSelection.includes(card.id)) {
+                return; // Card already in deck
+            }
+            
+            const isSpecial = isSpecialCard(card.id);
+            
+            // Find appropriate open slot
+            let targetSlot = -1;
+            if (isSpecial) {
+                // Special cards must go in special slots (0-1)
+                targetSlot = currentDeckSelection.findIndex((slot, index) => 
+                    slot === null && index < SPECIAL_CARD_SLOTS
+                );
+            } else {
+                // Normal cards can go in any slot
+                targetSlot = currentDeckSelection.findIndex(slot => slot === null);
+            }
+            
+            if (targetSlot !== -1) {
+                currentDeckSelection[targetSlot] = card.id;
                 updateDeckSlots();
+            } else if (isSpecial) {
+                showGameMessage('No Special Slot Available', 'Special card slots are full! Remove a card from a special slot (★) first.', '⚠️');
             }
         });
         
@@ -3606,6 +3815,15 @@ function handleDropOnSlot(slotIndex) {
     const card = allCards.find(c => c.id === draggedCard);
     if (!card) return;
     
+    // Validate: Special cards can only go in special slots (0-1)
+    const isSpecial = isSpecialCard(draggedCard);
+    const isSpecialSlot = slotIndex < SPECIAL_CARD_SLOTS;
+    
+    if (isSpecial && !isSpecialSlot) {
+        showGameMessage('Invalid Slot', 'Special cards can only be placed in special card slots (★)!', '⚠️');
+        return;
+    }
+    
     // If dragging from another slot, remove it from that slot first
     if (draggedSlotIndex !== null && draggedSlotIndex !== slotIndex) {
         const oldCardId = currentDeckSelection[slotIndex];
@@ -3641,14 +3859,31 @@ function updateSaveButton() {
 
 function saveDeck() {
     const filledSlots = currentDeckSelection.filter(id => id !== null);
-    if (filledSlots.length === DECK_SIZE) {
-        savePlayerDeck(filledSlots);
-        showGameMessage('Deck Saved', 'Your deck has been saved successfully!', '💾');
-        // Update slots to reflect saved deck
-        renderDeckBuilder();
-    } else {
+    if (filledSlots.length !== DECK_SIZE) {
         alert(`Please fill all ${DECK_SIZE} deck slots.`);
+        return;
     }
+    
+    // Validate: Check that special cards are only in special slots
+    for (let i = 0; i < DECK_SIZE; i++) {
+        const cardId = currentDeckSelection[i];
+        if (cardId && isSpecialCard(cardId) && i >= SPECIAL_CARD_SLOTS) {
+            alert('Special cards can only be placed in special card slots (★)!');
+            return;
+        }
+    }
+    
+    // Validate: Count special cards (should be max 2, but that's enforced by slots)
+    const specialCardCount = currentDeckSelection.filter(id => id && isSpecialCard(id)).length;
+    if (specialCardCount > SPECIAL_CARD_SLOTS) {
+        alert(`You can only have ${SPECIAL_CARD_SLOTS} special cards in your deck!`);
+        return;
+    }
+    
+    savePlayerDeck(filledSlots);
+    showGameMessage('Deck Saved', 'Your deck has been saved successfully!', '💾');
+    // Update slots to reflect saved deck
+    renderDeckBuilder();
 }
 
 function clearDeck() {
