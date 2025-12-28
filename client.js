@@ -469,6 +469,33 @@ function getCardConfig() {
     return window.CARD_CONFIG;
 }
 
+// Map card IDs to image filenames
+function getCardImagePath(cardId) {
+    const cardImageMap = {
+        'falseFeedback': 'Bluff.png',
+        'hiddenFeedback': 'PockerFace.png',
+        'hiddenGuess': 'Blank.png',
+        'extraGuess': 'HitMe.png',
+        'hideCard': 'SneakySet.png',
+        'phonyCard': 'DummyHand.png',
+        'gamblersCard': 'BustSpecial.png',
+        'cardLock': 'ForcedMiss.png',
+        'handReveal': 'DeadHand.png',
+        'blindGuess': 'Null.png',
+        'cardSteal': 'Finesse.png',
+        'greenToGrey': 'FalseShuffle.png',
+        'cardBlock': 'OppresiveFold.png',
+        'effectClear': 'Counter.png',
+        'timeRush': 'QuickDeal.png',
+        'wordScramble': 'Undertrick.png',
+        'cardMirror': 'FollowSuit.png',
+        'snackTime': 'SnackTime.png'
+    };
+    
+    const imageName = cardImageMap[cardId] || 'Blank.png';
+    return `images/card images/${imageName}`;
+}
+
 function isModifierCard(cardId) {
     const config = getCardConfig();
     return config[cardId]?.modifier?.isModifier === true;
@@ -2614,19 +2641,13 @@ function updateHandPanel() {
                 cardElement.style.filter = 'grayscale(100%)';
             }
             
-            const title = document.createElement('div');
-            title.className = 'hand-card-title';
-            title.textContent = card.title || 'Unknown Card';
-            if (isBlocked) {
-                title.textContent += ' (Blocked)';
-            }
+            // Create image element for the card
+            const cardImage = document.createElement('img');
+            cardImage.src = getCardImagePath(card.id);
+            cardImage.alt = card.title || 'Unknown Card';
+            cardImage.className = 'hand-card-image';
+            cardElement.appendChild(cardImage);
             
-            const description = document.createElement('div');
-            description.className = 'hand-card-description';
-            description.textContent = card.description || '';
-            
-            cardElement.appendChild(title);
-            cardElement.appendChild(description);
             handCardsContainer.appendChild(cardElement);
         });
     } else {
@@ -2643,17 +2664,15 @@ function updateHandPanel() {
     if (window.deckPool && window.deckPool.length > 0) {
         const nextCard = window.deckPool[0];
         const nextCardElement = document.createElement('div');
+        nextCardElement.className = 'next-card-item';
         
-        const title = document.createElement('div');
-        title.className = 'next-card-title';
-        title.textContent = nextCard.title || 'Unknown Card';
+        // Create image element for the card
+        const cardImage = document.createElement('img');
+        cardImage.src = getCardImagePath(nextCard.id);
+        cardImage.alt = nextCard.title || 'Unknown Card';
+        cardImage.className = 'next-card-image';
+        nextCardElement.appendChild(cardImage);
         
-        const description = document.createElement('div');
-        description.className = 'next-card-description';
-        description.textContent = nextCard.description || '';
-        
-        nextCardElement.appendChild(title);
-        nextCardElement.appendChild(description);
         nextCardContainer.appendChild(nextCardElement);
     } else {
         // Deck is empty or will be reshuffled
@@ -2731,10 +2750,14 @@ function generateCards() {
                 cardElement.style.cursor = 'not-allowed';
                 cardElement.style.pointerEvents = 'none';
             }
-            cardElement.innerHTML = `
-                <div class="card-title">${card.title}</div>
-                <div class="card-description">${card.description}</div>
-            `;
+            
+            // Create image element for the card
+            const cardImage = document.createElement('img');
+            cardImage.src = getCardImagePath(card.id);
+            cardImage.alt = card.title;
+            cardImage.className = 'card-image';
+            cardElement.appendChild(cardImage);
+            
             if (!isBlocked) {
                 cardElement.onclick = () => selectCard(card, cardElement);
             }
@@ -2797,12 +2820,16 @@ function generateCards() {
             cardElement.style.cursor = 'not-allowed';
             cardElement.style.pointerEvents = 'none';
         }
-        cardElement.innerHTML = `
-            <div class="card-title">${card.title}</div>
-            <div class="card-description">${card.description}</div>
-        `;
+        
+        // Create image element for the card
+        const cardImage = document.createElement('img');
+        cardImage.src = getCardImagePath(card.id);
+        cardImage.alt = card.title;
+        cardImage.className = 'card-image';
+        cardElement.appendChild(cardImage);
+        
         if (!isBlocked) {
-        cardElement.onclick = () => selectCard(card, cardElement);
+            cardElement.onclick = () => selectCard(card, cardElement);
         }
         
         // Add hover sound to card
@@ -3655,9 +3682,12 @@ function createDeckSlotCard(card, slotIndex) {
     cardElement.dataset.cardId = card.id;
     cardElement.dataset.slotIndex = slotIndex;
     
-    cardElement.innerHTML = `
-        <div class="deck-slot-card-title">${card.title}</div>
-    `;
+    // Create image element for the card
+    const cardImage = document.createElement('img');
+    cardImage.src = getCardImagePath(card.id);
+    cardImage.alt = card.title;
+    cardImage.className = 'deck-slot-card-image';
+    cardElement.appendChild(cardImage);
     
     cardElement.addEventListener('dragstart', (e) => {
         draggedCard = card.id;
@@ -3814,12 +3844,14 @@ function renderAvailableCards() {
         }
         cardElement.dataset.cardId = card.id;
         
-        cardElement.innerHTML = `
-            <div class="deck-card-title">${card.title}</div>
-            <div class="deck-card-description">${card.description}</div>
-        `;
+        // Create image element for the card
+        const cardImage = document.createElement('img');
+        cardImage.src = getCardImagePath(card.id);
+        cardImage.alt = card.title;
+        cardImage.className = 'deck-card-image';
+        cardElement.appendChild(cardImage);
         
-        // Set draggable after innerHTML to ensure it sticks
+        // Set draggable
         cardElement.setAttribute('draggable', 'true');
         
         // Set up drag events
@@ -3895,6 +3927,12 @@ function renderAvailableCards() {
         
         deckCardsGrid.appendChild(cardElement);
     });
+    
+    // Add informational text at the bottom explaining yellow cards
+    const infoText = document.createElement('div');
+    infoText.className = 'deck-cards-info-text';
+    infoText.textContent = 'Yellow cards are special cards and can only be placed in special slots';
+    deckCardsGrid.appendChild(infoText);
 }
 
 function updateAvailableCards() {

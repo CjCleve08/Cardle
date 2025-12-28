@@ -1,5 +1,7 @@
 the 20 seconds gets applied to opponent sometiems even without picked the card
 
-new card that lets you pick throughout all 6 of your cards called snack time
+Bug where snack time does not rotate out of hand after using it
 
-bot game error
+only show opponents guesses when specating not the person you are spectating
+
+add a tutorial system for new players
