@@ -488,8 +488,11 @@ function getAllCards() {
 const ALL_CARDS = getAllCards();
 
 // Deck Management
-const DECK_STORAGE_KEY = 'cardle_player_deck';
+const DECK_STORAGE_KEY = 'cardle_player_decks';
+const DECK_SLOT_KEY = 'cardle_current_deck_slot';
 const DECK_SIZE = 6;
+const NUMBER_OF_DECK_SLOTS = 3;
+let currentDeckSlot = 1; // Current deck slot (1, 2, or 3)
 
 // Statistics Management
 // Cache for current stats to avoid repeated Firestore reads
@@ -628,25 +631,88 @@ function clearStatsCache() {
     cachedStats = null;
 }
 
-function getPlayerDeck() {
+// Get all decks (returns object with slot numbers as keys)
+function getAllDecks() {
     const stored = localStorage.getItem(DECK_STORAGE_KEY);
     if (stored) {
         try {
-            const deck = JSON.parse(stored);
-            // Validate deck - ensure all cards still exist
+            const decks = JSON.parse(stored);
+            // Validate all decks - ensure all cards still exist
             const allCardIds = getAllCards().map(c => c.id);
-            return deck.filter(cardId => allCardIds.includes(cardId));
+            const validatedDecks = {};
+            for (let slot = 1; slot <= NUMBER_OF_DECK_SLOTS; slot++) {
+                if (decks[slot]) {
+                    validatedDecks[slot] = decks[slot].filter(cardId => allCardIds.includes(cardId));
+                }
+            }
+            return validatedDecks;
         } catch (e) {
-            console.error('Error loading deck:', e);
+            console.error('Error loading decks:', e);
         }
     }
+    return {};
+}
+
+// Get current deck slot
+function getCurrentDeckSlot() {
+    const stored = localStorage.getItem(DECK_SLOT_KEY);
+    if (stored) {
+        const slot = parseInt(stored);
+        if (slot >= 1 && slot <= NUMBER_OF_DECK_SLOTS) {
+            return slot;
+        }
+    }
+    return 1; // Default to slot 1
+}
+
+// Set current deck slot
+function setCurrentDeckSlot(slot) {
+    if (slot >= 1 && slot <= NUMBER_OF_DECK_SLOTS) {
+        currentDeckSlot = slot;
+        localStorage.setItem(DECK_SLOT_KEY, slot.toString());
+        return true;
+    }
+    return false;
+}
+
+// Get player deck from current slot
+function getPlayerDeck() {
+    const decks = getAllDecks();
+    const slot = getCurrentDeckSlot();
+    
+    if (decks[slot] && Array.isArray(decks[slot])) {
+        return decks[slot];
+    }
+    
     // Default deck: first 6 cards (or all if less than 6)
     const defaultDeck = getAllCards().slice(0, Math.min(DECK_SIZE, getAllCards().length));
     return defaultDeck.map(c => c.id);
 }
 
+// Save player deck to current slot
 function savePlayerDeck(deck) {
-    localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(deck));
+    const decks = getAllDecks();
+    const slot = getCurrentDeckSlot();
+    decks[slot] = deck;
+    localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+}
+
+// Get deck for a specific slot
+function getDeckForSlot(slot) {
+    const decks = getAllDecks();
+    if (decks[slot] && Array.isArray(decks[slot])) {
+        return decks[slot];
+    }
+    return null;
+}
+
+// Save deck for a specific slot
+function saveDeckForSlot(slot, deck) {
+    if (slot >= 1 && slot <= NUMBER_OF_DECK_SLOTS) {
+        const decks = getAllDecks();
+        decks[slot] = deck;
+        localStorage.setItem(DECK_STORAGE_KEY, JSON.stringify(decks));
+    }
 }
 
 function getDeckCards() {
@@ -745,7 +811,7 @@ const ScreenManager = {
     
     // Initialize all screens
     init() {
-        const screenIds = ['login', 'signup', 'guestName', 'lobby', 'waiting', 'game', 'gameOver'];
+        const screenIds = ['login', 'signup', 'guestName', 'lobby', 'waiting', 'vs', 'game', 'gameOver'];
         screenIds.forEach(id => {
             const element = document.getElementById(id);
             if (!element) {
@@ -791,8 +857,8 @@ const ScreenManager = {
             }
         }
         
-        // Stop lobby music if leaving lobby (but not if going to game, game has its own music)
-        if (this.currentScreen === 'lobby' && screenName !== 'lobby' && screenName !== 'game') {
+        // Stop lobby music if leaving lobby (but not if going to game or vs, game/vs will handle their own music)
+        if (this.currentScreen === 'lobby' && screenName !== 'lobby' && screenName !== 'game' && screenName !== 'vs') {
             if (typeof soundManager !== 'undefined') {
                 soundManager.stopBackgroundMusic();
             }
@@ -816,6 +882,49 @@ const ScreenManager = {
             if (typeof soundManager !== 'undefined') {
                 soundManager.playLobbyMusic('LobbySoundTrack.mp4');
             }
+        }
+        
+        // Reset VS screen animations when showing
+        if (screenName === 'vs') {
+            // Reset any animation styles that might be present
+            const vsPlayer1 = document.querySelector('.vs-player-left');
+            const vsPlayer2 = document.querySelector('.vs-player-right');
+            const vsText = document.querySelector('.vs-vs-text');
+            const vsAvatars = document.querySelectorAll('.vs-player-avatar');
+            const vsStats = document.querySelectorAll('.vs-player-stat');
+            
+            // Force reflow to reset animations
+            if (vsPlayer1) {
+                vsPlayer1.style.animation = 'none';
+                vsPlayer1.style.opacity = '0';
+                void vsPlayer1.offsetWidth; // Force reflow
+                vsPlayer1.style.animation = '';
+            }
+            if (vsPlayer2) {
+                vsPlayer2.style.animation = 'none';
+                vsPlayer2.style.opacity = '0';
+                void vsPlayer2.offsetWidth; // Force reflow
+                vsPlayer2.style.animation = '';
+            }
+            if (vsText) {
+                vsText.style.animation = 'none';
+                vsText.style.opacity = '0';
+                vsText.style.transform = 'scale(0)';
+                void vsText.offsetWidth; // Force reflow
+                vsText.style.animation = '';
+            }
+            vsAvatars.forEach(avatar => {
+                avatar.style.animation = 'none';
+                avatar.style.opacity = '0';
+                void avatar.offsetWidth;
+                avatar.style.animation = '';
+            });
+            vsStats.forEach(stat => {
+                stat.style.animation = 'none';
+                stat.style.opacity = '0';
+                void stat.offsetWidth;
+                stat.style.animation = '';
+            });
         }
         
         console.log(`Screen changed to: ${screenName}`);
@@ -941,21 +1050,6 @@ socket.on('playerLeftPrivateGame', (data) => {
 socket.on('gameStarted', (data) => {
     console.log('Game started event received:', data);
     
-    // Play game start sound
-    if (typeof soundManager !== 'undefined') {
-        soundManager.playGameStart();
-    }
-    
-    // Hide matchmaking status if visible
-    const matchmakingStatus = document.getElementById('matchmakingStatus');
-    const findMatchBtn = document.getElementById('findMatchBtn');
-    if (matchmakingStatus) {
-        matchmakingStatus.style.display = 'none';
-    }
-    if (findMatchBtn) {
-        findMatchBtn.disabled = false;
-    }
-    
     // Set currentPlayer from the event if not already set
     if (data.yourPlayerId) {
         currentPlayer = data.yourPlayerId;
@@ -973,14 +1067,147 @@ socket.on('gameStarted', (data) => {
         gameState.gameId = data.gameId;
     }
     
-    if (ScreenManager.show('game')) {
-        // Start background music when game starts
-        if (typeof soundManager !== 'undefined') {
-            soundManager.playBackgroundMusic('GameSoundTrack.mp4');
+    // Find player names and data for VS screen
+    let player1Name = 'You';
+    let player2Name = 'Opponent';
+    let myPlayerData = null;
+    let opponentData = null;
+    
+    if (data.players && Array.isArray(data.players)) {
+        myPlayerData = data.players.find(p => p.id === currentPlayer);
+        opponentData = data.players.find(p => p.id !== currentPlayer);
+        
+        if (myPlayerData) {
+            player1Name = myPlayerData.name || 'You';
         }
-    initializeGame(gameState);
+        if (opponentData) {
+            player2Name = opponentData.name || 'Opponent';
+        }
+    }
+    
+    // Show VS screen first
+    if (ScreenManager.show('vs')) {
+        // Update VS screen with player names
+        const vsPlayer1Name = document.getElementById('vsPlayer1Name');
+        const vsPlayer2Name = document.getElementById('vsPlayer2Name');
+        const vsPlayer1Avatar = document.getElementById('vsPlayer1Avatar');
+        const vsPlayer2Avatar = document.getElementById('vsPlayer2Avatar');
+        const vsPlayer1Stat = document.getElementById('vsPlayer1Stat');
+        const vsPlayer2Stat = document.getElementById('vsPlayer2Stat');
+        
+        console.log('Setting VS screen names:', player1Name, 'vs', player2Name);
+        
+        // Update player 1 (me) name
+        if (vsPlayer1Name) {
+            vsPlayer1Name.textContent = player1Name;
+        }
+        
+        // Update player 1 avatar
+        if (vsPlayer1Avatar) {
+            if (currentUser && currentUser.photoURL) {
+                vsPlayer1Avatar.style.backgroundImage = `url(${currentUser.photoURL})`;
+                vsPlayer1Avatar.style.backgroundSize = 'cover';
+                vsPlayer1Avatar.style.backgroundPosition = 'center';
+                vsPlayer1Avatar.textContent = '';
+            } else {
+                vsPlayer1Avatar.style.backgroundImage = '';
+                vsPlayer1Avatar.style.backgroundSize = '';
+                vsPlayer1Avatar.style.backgroundPosition = '';
+                const initial = player1Name.charAt(0).toUpperCase();
+                vsPlayer1Avatar.textContent = initial || '👤';
+            }
+        }
+        
+        // Update player 1 stats (my stats)
+        if (vsPlayer1Stat) {
+            getPlayerStats().then(stats => {
+                vsPlayer1Stat.textContent = `Games Played: ${stats.gamesPlayed || 0}`;
+            }).catch(() => {
+                vsPlayer1Stat.textContent = 'Games Played: -';
+            });
+        }
+        
+        // Update player 2 (opponent) name
+        if (vsPlayer2Name) {
+            vsPlayer2Name.textContent = player2Name;
+        }
+        
+        // Update player 2 avatar
+        if (vsPlayer2Avatar) {
+            // For opponent, we might not have photoURL in the data
+            // If opponent has a user ID and we can fetch their profile, we could do that
+            // For now, just use first letter or emoji
+            vsPlayer2Avatar.style.backgroundImage = '';
+            vsPlayer2Avatar.style.backgroundSize = '';
+            vsPlayer2Avatar.style.backgroundPosition = '';
+            const initial = player2Name.charAt(0).toUpperCase();
+            vsPlayer2Avatar.textContent = initial || '👤';
+        }
+        
+        // Update player 2 stats (opponent stats)
+        if (vsPlayer2Stat) {
+            // Try to fetch opponent stats if they have a Firebase UID
+            if (opponentData && opponentData.firebaseUid && window.firebaseDb) {
+                // Fetch opponent stats from Firestore
+                window.firebaseDb.collection('stats').doc(opponentData.firebaseUid).get()
+                    .then(statsDoc => {
+                        if (statsDoc.exists) {
+                            const opponentStats = statsDoc.data();
+                            vsPlayer2Stat.textContent = `Games Played: ${opponentStats.gamesPlayed || 0}`;
+                        } else {
+                            vsPlayer2Stat.textContent = 'Games Played: 0';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching opponent stats:', error);
+                        vsPlayer2Stat.textContent = 'Games Played: -';
+                    });
+            } else if (opponentData && opponentData.isBot) {
+                // Bot - show "-" or "Bot"
+                vsPlayer2Stat.textContent = 'Games Played: -';
+            } else {
+                // No Firebase UID available (guest player)
+                vsPlayer2Stat.textContent = 'Games Played: -';
+            }
+        }
+        
+        // After 5 seconds, transition to game screen
+        setTimeout(() => {
+            // Play game start sound when transitioning to game
+            if (typeof soundManager !== 'undefined') {
+                soundManager.playGameStart();
+            }
+            
+            // Hide matchmaking status if visible
+            const matchmakingStatus = document.getElementById('matchmakingStatus');
+            const findMatchBtn = document.getElementById('findMatchBtn');
+            if (matchmakingStatus) {
+                matchmakingStatus.style.display = 'none';
+            }
+            if (findMatchBtn) {
+                findMatchBtn.disabled = false;
+            }
+            
+            if (ScreenManager.show('game')) {
+                // Start background music when game starts
+                if (typeof soundManager !== 'undefined') {
+                    soundManager.playBackgroundMusic('GameSoundTrack.mp4');
+                }
+                initializeGame(gameState);
+            } else {
+                console.error('Failed to show game screen!');
+            }
+        }, 3000);
     } else {
-        console.error('Failed to show game screen!');
+        // Fallback: if VS screen fails, go directly to game
+        console.error('Failed to show vs screen, going directly to game');
+        if (ScreenManager.show('game')) {
+            if (typeof soundManager !== 'undefined') {
+                soundManager.playGameStart();
+                soundManager.playBackgroundMusic('GameSoundTrack.mp4');
+            }
+            initializeGame(gameState);
+        }
     }
 });
 
@@ -1522,20 +1749,22 @@ socket.on('cardPlayed', (data) => {
     }
 });
 
+
 socket.on('chatMessage', (data) => {
     // Receive and display chat message
-    displayChatMessage(data.playerName, data.message, data.timestamp, data.playerId === currentPlayer);
+    const isSystemMessage = data.isSystem || data.playerId === 'system';
+    displayChatMessage(data.playerName, data.message, data.timestamp, data.playerId === currentPlayer, isSystemMessage);
     
-    // Play chat message sound (only for messages from others)
-    if (typeof soundManager !== 'undefined' && data.playerId !== currentPlayer) {
+    // Play chat message sound (only for messages from others, not system messages)
+    if (typeof soundManager !== 'undefined' && data.playerId !== currentPlayer && !isSystemMessage) {
         soundManager.playChatMessage();
     }
     
-    // Flash the show chat button if chat is hidden and it's not your own message
+    // Flash the show chat button if chat is hidden and it's not your own message or a system message
     const chatContainer = document.getElementById('chatContainer');
     const chatShowBtn = document.getElementById('chatShowBtn');
     
-    if (chatContainer && chatShowBtn && chatContainer.classList.contains('hidden') && data.playerId !== currentPlayer) {
+    if (chatContainer && chatShowBtn && chatContainer.classList.contains('hidden') && data.playerId !== currentPlayer && !isSystemMessage) {
         // Remove any existing flash class
         chatShowBtn.classList.remove('flash');
         
@@ -2514,6 +2743,8 @@ function showGameMessage(icon, title, text, autoClose = 0) {
 // Splash queue system to handle multiple card splashes sequentially
 let splashQueue = [];
 let isShowingSplash = false;
+let splashTimeouts = { hideTimeout: null, removeTimeout: null };
+let currentSplashComplete = null;
 
 function queueCardSplash(card, playerName) {
     splashQueue.push({ card, playerName });
@@ -2559,8 +2790,22 @@ function showCardSplash(card, playerName, onComplete) {
         return;
     }
     
-    // Remove any existing classes
+    // Clear any existing timeouts
+    if (splashTimeouts.hideTimeout) {
+        clearTimeout(splashTimeouts.hideTimeout);
+        splashTimeouts.hideTimeout = null;
+    }
+    if (splashTimeouts.removeTimeout) {
+        clearTimeout(splashTimeouts.removeTimeout);
+        splashTimeouts.removeTimeout = null;
+    }
+    
+    // Store the complete callback
+    currentSplashComplete = onComplete;
+    
+    // Remove any existing classes and click handlers
     splash.classList.remove('show', 'hiding');
+    splash.onclick = null;
     
     // Set content
     splashTitle.textContent = card.title || 'Card';
@@ -2573,13 +2818,42 @@ function showCardSplash(card, playerName, onComplete) {
     // Show with fly-in animation
     splash.classList.add('show');
     
+    // Add click handler to skip animation
+    splash.onclick = () => {
+        // Clear timeouts
+        if (splashTimeouts.hideTimeout) {
+            clearTimeout(splashTimeouts.hideTimeout);
+            splashTimeouts.hideTimeout = null;
+        }
+        if (splashTimeouts.removeTimeout) {
+            clearTimeout(splashTimeouts.removeTimeout);
+            splashTimeouts.removeTimeout = null;
+        }
+        
+        // Immediately hide and remove
+        splash.classList.remove('show', 'hiding');
+        splash.onclick = null;
+        
+        // Call completion callback immediately
+        if (currentSplashComplete) {
+            const callback = currentSplashComplete;
+            currentSplashComplete = null;
+            callback();
+        }
+    };
+    
     // After 2.5 seconds, start fly-out animation
-    setTimeout(() => {
+    splashTimeouts.hideTimeout = setTimeout(() => {
         splash.classList.add('hiding');
         // Remove from DOM after animation completes
-        setTimeout(() => {
+        splashTimeouts.removeTimeout = setTimeout(() => {
             splash.classList.remove('show', 'hiding');
-            if (onComplete) onComplete();
+            splash.onclick = null;
+            if (currentSplashComplete) {
+                const callback = currentSplashComplete;
+                currentSplashComplete = null;
+                callback();
+            }
         }, 500);
     }, 2500);
 }
@@ -2589,6 +2863,8 @@ function showCardSplash(card, playerName, onComplete) {
 let currentDeckSelection = []; // Array of card IDs in deck slots (index = slot number)
 let draggedCard = null;
 let draggedSlotIndex = null;
+let autoScrollInterval = null;
+let mouseTracker = null; // Mouse position tracker function
 
 // Helper function to create a custom drag image that doesn't get cut off
 function createDragImage(element) {
@@ -2767,6 +3043,9 @@ function renderDeckBuilder() {
         currentDeckSelection.push(null);
     }
     
+    // Update deck slot selector UI
+    updateDeckSlotSelector();
+    
     createDeckSlots();
     updateDeckSlots();
     renderAvailableCards();
@@ -2834,6 +3113,9 @@ function renderAvailableCards() {
             e.dataTransfer.effectAllowed = 'copy';
             e.dataTransfer.setData('text/plain', card.id);
             
+            // Store initial mouse position
+            window.mouseY = e.clientY || 0;
+            
             // Create custom drag image to prevent edge clipping
             const dragImage = createDragImage(cardElement);
             e.dataTransfer.setDragImage(dragImage, 0, 0);
@@ -2844,12 +3126,40 @@ function renderAvailableCards() {
                     document.body.removeChild(dragImage);
                 }
             }, 0);
+            
+            // Start auto-scroll when dragging (with a small delay to ensure mouse tracking is set up)
+            setTimeout(() => {
+                startAutoScroll();
+            }, 50);
         });
         
         cardElement.addEventListener('dragend', (e) => {
             cardElement.classList.remove('dragging');
             draggedCard = null;
             draggedSlotIndex = null;
+            // Stop auto-scroll
+            stopAutoScroll();
+        });
+        
+        // Add click handler to add card to first open slot
+        cardElement.addEventListener('click', (e) => {
+            // Don't trigger click if it was part of a drag
+            if (cardElement.classList.contains('dragging')) {
+                return;
+            }
+            
+            // Find first open slot
+            const firstOpenSlot = currentDeckSelection.findIndex(slot => slot === null);
+            if (firstOpenSlot !== -1) {
+                // Check if card is already in deck
+                if (currentDeckSelection.includes(card.id)) {
+                    return; // Card already in deck
+                }
+                
+                // Add card to first open slot
+                currentDeckSelection[firstOpenSlot] = card.id;
+                updateDeckSlots();
+            }
         });
         
         deckCardsGrid.appendChild(cardElement);
@@ -2861,8 +3171,119 @@ function updateAvailableCards() {
     renderAvailableCards();
 }
 
+// Auto-scroll functionality for dragging cards
+function startAutoScroll() {
+    // Clear any existing interval
+    stopAutoScroll();
+    
+    const deckSlotsContainer = document.querySelector('.deck-slots-container');
+    const deckCardsGrid = document.getElementById('deckCardsGrid');
+    
+    if (!deckSlotsContainer || !deckCardsGrid) return;
+    
+    // Find the scrollable container - check multiple possible containers
+    let scrollContainer = null;
+    
+    // Try to find .lobby-tab-content first (the main scrollable area)
+    const lobbyTabContent = document.querySelector('.lobby-tab-content');
+    if (lobbyTabContent && lobbyTabContent.scrollHeight > lobbyTabContent.clientHeight) {
+        scrollContainer = lobbyTabContent;
+    } else {
+        // Fall back to finding the scrollable parent
+        let element = deckSlotsContainer.parentElement;
+        while (element && element !== document.body) {
+            const style = getComputedStyle(element);
+            const hasScroll = element.scrollHeight > element.clientHeight;
+            if ((style.overflowY === 'auto' || style.overflowY === 'scroll' || hasScroll) && hasScroll) {
+                scrollContainer = element;
+                break;
+            }
+            element = element.parentElement;
+        }
+    }
+    
+    // If no scrollable container found, use window
+    if (!scrollContainer) {
+        scrollContainer = window;
+    }
+    
+    // Track mouse position globally immediately
+    mouseTracker = (e) => {
+        window.mouseY = e.clientY || 0;
+    };
+    document.addEventListener('dragover', mouseTracker, { passive: true });
+    document.addEventListener('drag', mouseTracker, { passive: true });
+    
+    autoScrollInterval = setInterval(() => {
+        if (!draggedCard || draggedSlotIndex !== null) {
+            // Only auto-scroll when dragging from available cards (not from deck slots)
+            stopAutoScroll();
+            return;
+        }
+        
+        // Get mouse position (default to viewport center if not set)
+        const mouseY = window.mouseY !== undefined ? window.mouseY : window.innerHeight / 2;
+        const viewportHeight = window.innerHeight;
+        const deckSlotsRect = deckSlotsContainer.getBoundingClientRect();
+        
+        // Calculate scroll direction and speed
+        let scrollAmount = 0;
+        const scrollSpeed = 25; // pixels per interval
+        const scrollZone = 120; // pixels from top/bottom to trigger scroll
+        
+        // Get current scroll position
+        const currentScrollTop = scrollContainer === window ? 
+            window.pageYOffset || document.documentElement.scrollTop : 
+            scrollContainer.scrollTop;
+        
+        // Calculate if we should scroll up (toward deck slots)
+        // Scroll up if:
+        // 1. Mouse is in upper portion of viewport AND deck slots are above current view
+        // 2. Mouse is above deck slots (even if they're visible)
+        const mouseAboveDeckSlots = mouseY < deckSlotsRect.bottom;
+        const deckSlotsAboveViewport = deckSlotsRect.top < -50;
+        const mouseInUpperZone = mouseY < scrollZone;
+        
+        if ((mouseAboveDeckSlots || mouseInUpperZone) && (deckSlotsRect.top > -200 || currentScrollTop > 0)) {
+            scrollAmount = -scrollSpeed;
+        }
+        // Scroll down if mouse is in lower portion of viewport
+        else if (mouseY > viewportHeight - scrollZone) {
+            scrollAmount = scrollSpeed;
+        }
+        
+        if (scrollAmount !== 0) {
+            try {
+                if (scrollContainer === window) {
+                    window.scrollBy(0, scrollAmount);
+                } else {
+                    scrollContainer.scrollTop += scrollAmount;
+                }
+            } catch (e) {
+                console.error('Scroll error:', e);
+            }
+        }
+    }, 16); // ~60fps
+}
+
+function stopAutoScroll() {
+    if (autoScrollInterval) {
+        clearInterval(autoScrollInterval);
+        autoScrollInterval = null;
+    }
+    // Remove all mouse tracking listeners
+    if (mouseTracker) {
+        document.removeEventListener('dragover', mouseTracker);
+        document.removeEventListener('drag', mouseTracker);
+        mouseTracker = null;
+    }
+}
+
 function handleDropOnSlot(slotIndex) {
     if (!draggedCard) return;
+    
+    // Stop auto-scroll
+    stopAutoScroll();
     
     const allCards = getAllCards();
     const card = allCards.find(c => c.id === draggedCard);
@@ -2935,29 +3356,87 @@ function closeDeckBuilder() {
     }
 }
 
+// Initialize deck slot selector
+function initializeDeckSlotSelector() {
+    const slotButtons = document.querySelectorAll('.deck-slot-btn');
+    slotButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
+            switchDeckSlot(slot);
+        });
+    });
+    updateDeckSlotSelector();
+}
+
+// Update deck slot selector UI
+function updateDeckSlotSelector() {
+    const slotButtons = document.querySelectorAll('.deck-slot-btn');
+    slotButtons.forEach(btn => {
+        const slot = parseInt(btn.dataset.slot);
+        if (slot === currentDeckSlot) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+}
+
+// Switch to a different deck slot
+function switchDeckSlot(slot) {
+    if (slot === currentDeckSlot) return;
+    
+    // Save current deck selection if it was modified
+    // (optional: could add a check for unsaved changes)
+    
+    // Switch to new slot
+    if (setCurrentDeckSlot(slot)) {
+        // Reload deck builder with new slot's deck
+        renderDeckBuilder();
+    }
+}
+
 // Initialize deck builder on page load
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialize current deck slot
+    currentDeckSlot = getCurrentDeckSlot();
+    
     // Wait a bit for CARD_CONFIG to be injected by server
     setTimeout(() => {
-        // Ensure a valid deck exists
+        // Ensure valid decks exist for all slots
         const allCards = getAllCards();
         if (allCards.length === 0) {
-            console.warn('No cards available yet, deck will be initialized when cards load');
+            console.warn('No cards available yet, decks will be initialized when cards load');
             return;
         }
         
-        const deck = getPlayerDeck();
-        // Validate deck - remove any cards that no longer exist
-        const validDeck = deck.filter(cardId => allCards.some(c => c.id === cardId));
+        const decks = getAllDecks();
+        const defaultDeck = allCards.slice(0, Math.min(DECK_SIZE, allCards.length)).map(c => c.id);
         
-        if (validDeck.length === 0 || validDeck.length > DECK_SIZE) {
-            // Create default deck
-            const defaultDeck = allCards.slice(0, Math.min(DECK_SIZE, allCards.length));
-            savePlayerDeck(defaultDeck.map(c => c.id));
-        } else if (validDeck.length !== deck.length) {
-            // Some cards were removed, save the valid deck
-            savePlayerDeck(validDeck);
+        // Initialize all slots if needed
+        for (let slot = 1; slot <= NUMBER_OF_DECK_SLOTS; slot++) {
+            let deck = decks[slot];
+            
+            if (!deck || !Array.isArray(deck)) {
+                // No deck for this slot, create default
+                saveDeckForSlot(slot, defaultDeck);
+            } else {
+                // Validate deck - remove any cards that no longer exist
+                const validDeck = deck.filter(cardId => allCards.some(c => c.id === cardId));
+                
+                if (validDeck.length === 0 || validDeck.length > DECK_SIZE) {
+                    // Invalid deck, reset to default
+                    saveDeckForSlot(slot, defaultDeck);
+                } else if (validDeck.length !== deck.length) {
+                    // Some cards were removed, save the valid deck
+                    saveDeckForSlot(slot, validDeck);
+                }
+            }
         }
+        
+        // Initialize deck slot selector UI
+        setTimeout(() => {
+            initializeDeckSlotSelector();
+        }, 150);
     }, 100);
     
     // Initialize stats display
@@ -3077,7 +3556,8 @@ document.addEventListener('DOMContentLoaded', () => {
 document.getElementById('findMatchBtn').addEventListener('click', () => {
     const name = getPlayerName();
     if (name) {
-        socket.emit('findMatch', { playerName: name });
+        const firebaseUid = currentUser ? currentUser.uid : null;
+        socket.emit('findMatch', { playerName: name, firebaseUid: firebaseUid });
     } else {
         alert('Please enter your name');
     }
@@ -3092,7 +3572,8 @@ document.getElementById('createGameBtn').addEventListener('click', () => {
     if (name) {
         // Cancel matchmaking if active
         socket.emit('cancelMatchmaking');
-        socket.emit('createGame', { playerName: name });
+        const firebaseUid = currentUser ? currentUser.uid : null;
+        socket.emit('createGame', { playerName: name, firebaseUid: firebaseUid });
     } else {
         alert('Please sign in to create a game');
     }
@@ -3272,7 +3753,8 @@ document.getElementById('joinWithIdBtn').addEventListener('click', () => {
     if (name && gameId) {
         // Cancel matchmaking if active
         socket.emit('cancelMatchmaking');
-        socket.emit('joinGame', { playerName: name, gameId: gameId });
+        const firebaseUid = currentUser ? currentUser.uid : null;
+        socket.emit('joinGame', { playerName: name, gameId: gameId, firebaseUid: firebaseUid });
     } else {
         alert('Please sign in and enter a game ID');
     }
@@ -3316,23 +3798,36 @@ document.getElementById('playAgainBtn').addEventListener('click', () => {
 });
 
 // Chat Functions
-function displayChatMessage(playerName, message, timestamp, isOwnMessage) {
+function displayChatMessage(playerName, message, timestamp, isOwnMessage, isSystemMessage = false) {
     const chatMessages = document.getElementById('chatMessages');
     if (!chatMessages) return;
     
     const messageDiv = document.createElement('div');
-    messageDiv.className = 'chat-message' + (isOwnMessage ? ' own-message' : '');
+    let className = 'chat-message';
+    if (isSystemMessage) {
+        className += ' system-message';
+    } else if (isOwnMessage) {
+        className += ' own-message';
+    }
+    messageDiv.className = className;
     
     const time = new Date(timestamp);
     const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     
-    messageDiv.innerHTML = `
-        <div class="chat-message-header">
-            <span class="chat-message-name">${escapeHtml(playerName)}</span>
-            <span class="chat-message-time">${timeStr}</span>
-        </div>
-        <div class="chat-message-text">${escapeHtml(message)}</div>
-    `;
+    if (isSystemMessage) {
+        // System messages don't show player name or timestamp
+        messageDiv.innerHTML = `
+            <div class="chat-message-text">${escapeHtml(message)}</div>
+        `;
+    } else {
+        messageDiv.innerHTML = `
+            <div class="chat-message-header">
+                <span class="chat-message-name">${escapeHtml(playerName)}</span>
+                <span class="chat-message-time">${timeStr}</span>
+            </div>
+            <div class="chat-message-text">${escapeHtml(message)}</div>
+        `;
+    }
     
     chatMessages.appendChild(messageDiv);
     

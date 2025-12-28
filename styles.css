@@ -536,6 +536,368 @@ header h1 {
     flex-direction: column;
 }
 
+/* VS Screen Styles */
+#vs.screen {
+    display: none;
+    background: #121213;
+    justify-content: center;
+    align-items: center;
+    padding: 0;
+    overflow: hidden;
+}
+
+#vs.screen.active {
+    display: flex !important;
+    animation: vsScreenFadeIn 0.5s ease-out;
+    opacity: 1;
+    visibility: visible;
+}
+
+@keyframes vsScreenFadeIn {
+    from {
+        opacity: 0;
+        background: #121213;
+    }
+    to {
+        opacity: 1;
+        background: #121213;
+    }
+}
+
+.vs-content {
+    width: 100%;
+    max-width: 900px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 40px 20px;
+    opacity: 1;
+    visibility: visible;
+}
+
+.vs-player-container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 60px;
+    position: relative;
+}
+
+.vs-player {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+}
+
+.vs-player-left {
+    opacity: 0;
+    animation: playerSlideInLeft 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s forwards;
+}
+
+.vs-player-right {
+    opacity: 0;
+    animation: playerSlideInRight 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.4s forwards;
+}
+
+/* Fallback: ensure content is visible after animations should complete */
+#vs.screen.active .vs-player-left {
+    animation: playerSlideInLeft 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s forwards,
+               ensureVisible 0s linear 1.5s forwards;
+}
+
+#vs.screen.active .vs-player-right {
+    animation: playerSlideInRight 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.4s forwards,
+               ensureVisible 0s linear 1.5s forwards;
+}
+
+@keyframes ensureVisible {
+    to {
+        opacity: 1;
+        visibility: visible;
+    }
+}
+
+@keyframes playerSlideInLeft {
+    0% {
+        opacity: 0;
+        transform: translateX(-100px) scale(0.8);
+    }
+    60% {
+        transform: translateX(0) scale(1.05);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+}
+
+@keyframes playerSlideInRight {
+    0% {
+        opacity: 0;
+        transform: translateX(100px) scale(0.8);
+    }
+    60% {
+        transform: translateX(0) scale(1.05);
+    }
+    100% {
+        opacity: 1;
+        transform: translateX(0) scale(1);
+    }
+}
+
+.vs-player-avatar {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3a3a3c, #2a2a2b);
+    border: 4px solid #6aaa64;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    overflow: hidden;
+    position: relative;
+    margin-bottom: 20px;
+    box-shadow: 0 8px 24px rgba(106, 170, 100, 0.3);
+    opacity: 0;
+    animation: avatarFadeIn 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.vs-player-left .vs-player-avatar {
+    animation-delay: 0.3s;
+}
+
+.vs-player-right .vs-player-avatar {
+    animation-delay: 0.5s;
+}
+
+@keyframes avatarFadeIn {
+    0% {
+        opacity: 0;
+        transform: scale(0) rotate(-180deg);
+    }
+    60% {
+        transform: scale(1.1) rotate(10deg);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1) rotate(0deg);
+    }
+}
+
+.vs-player-avatar .avatar-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.vs-player-name {
+    font-size: 3.5rem;
+    font-weight: 700;
+    color: #ffffff;
+    text-align: center;
+    letter-spacing: -0.02em;
+    text-shadow: 0 4px 20px rgba(106, 170, 100, 0.3);
+    line-height: 1.2;
+    word-break: break-word;
+    max-width: 100%;
+    margin-bottom: 8px;
+}
+
+.vs-player-label {
+    font-size: 1rem;
+    color: #818384;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    opacity: 0;
+    animation: labelFadeIn 0.6s ease-out forwards;
+    margin-bottom: 12px;
+}
+
+.vs-player-stat {
+    font-size: 0.9rem;
+    color: #c9b458;
+    font-weight: 500;
+    text-align: center;
+    opacity: 0;
+    animation: statFadeIn 0.6s ease-out forwards;
+    margin-top: 8px;
+}
+
+.vs-player-left .vs-player-stat {
+    animation-delay: 0.8s;
+}
+
+.vs-player-right .vs-player-stat {
+    animation-delay: 1s;
+}
+
+@keyframes statFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.vs-player-left .vs-player-label {
+    animation-delay: 0.6s;
+}
+
+.vs-player-right .vs-player-label {
+    animation-delay: 0.8s;
+}
+
+@keyframes labelFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.vs-vs-text {
+    font-size: 4.5rem;
+    font-weight: 900;
+    color: #6aaa64;
+    text-shadow: 0 0 30px rgba(106, 170, 100, 0.5),
+                 0 4px 20px rgba(106, 170, 100, 0.3);
+    letter-spacing: 0.1em;
+    opacity: 0;
+    transform: scale(0);
+    animation: vsTextPop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.6s forwards,
+               vsTextPulse 2s ease-in-out 1.2s infinite;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+}
+
+/* Fallback: ensure VS text is visible */
+#vs.screen.active .vs-vs-text {
+    animation: vsTextPop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.6s forwards,
+               vsTextPulse 2s ease-in-out 1.2s infinite,
+               ensureVisibleText 0s linear 1.5s forwards;
+}
+
+@keyframes ensureVisibleText {
+    to {
+        opacity: 1;
+        visibility: visible;
+        transform: scale(1);
+    }
+}
+
+@keyframes vsTextPop {
+    0% {
+        opacity: 0;
+        transform: scale(0) rotate(-10deg);
+    }
+    50% {
+        transform: scale(1.1) rotate(5deg);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1) rotate(0deg);
+    }
+}
+
+@keyframes vsTextPulse {
+    0%, 100% {
+        transform: scale(1);
+        filter: brightness(1);
+    }
+    50% {
+        transform: scale(1.05);
+        filter: brightness(1.2);
+    }
+}
+
+/* Responsive design for VS screen */
+@media (max-width: 768px) {
+    .vs-player-container {
+        flex-direction: column;
+        gap: 40px;
+    }
+    
+    .vs-vs-text {
+        font-size: 3rem;
+        order: -1;
+        margin: -20px 0;
+    }
+    
+    .vs-player-name {
+        font-size: 2.5rem;
+    }
+    
+    .vs-player-avatar {
+        width: 100px;
+        height: 100px;
+        font-size: 2.5rem;
+        margin-bottom: 16px;
+    }
+    
+    .vs-player-left {
+        animation-name: playerSlideUp;
+        animation-delay: 0.2s;
+    }
+    
+    .vs-player-right {
+        animation-name: playerSlideUp;
+        animation-delay: 0.3s;
+    }
+}
+
+@keyframes playerSlideUp {
+    0% {
+        opacity: 0;
+        transform: translateY(50px) scale(0.8);
+    }
+    60% {
+        transform: translateY(0) scale(1.05);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@media (max-width: 480px) {
+    .vs-player-name {
+        font-size: 2rem;
+    }
+    
+    .vs-vs-text {
+        font-size: 2.5rem;
+    }
+    
+    .vs-player-container {
+        gap: 30px;
+    }
+    
+    .vs-player-avatar {
+        width: 80px;
+        height: 80px;
+        font-size: 2rem;
+        margin-bottom: 12px;
+    }
+    
+    .vs-player-stat {
+        font-size: 0.8rem;
+    }
+}
+
 /* Play Tab Styles */
 .play-actions {
     display: flex;
@@ -661,36 +1023,63 @@ header h1 {
 
 .deck-header-section {
     flex-shrink: 0;
-    margin-bottom: 20px;
-}
-
-.deck-header-top {
+    margin-bottom: 24px;
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
+    gap: 16px;
     align-items: center;
-    margin-bottom: 12px;
 }
 
-.deck-header-top .tab-panel-title {
-    margin-bottom: 0;
-    text-align: left;
+.deck-slot-selector {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
+
+.deck-slot-buttons {
+    display: flex;
+    gap: 12px;
 }
 
 .deck-actions-header {
     display: flex;
-    gap: 8px;
+    gap: 12px;
+    justify-content: center;
 }
 
 .deck-actions-header .btn-small {
-    padding: 8px 16px;
+    padding: 10px 20px;
     font-size: 0.875rem;
     min-height: auto;
 }
 
-.deck-count {
-    font-size: 0.9375rem;
-    color: #818384;
-    font-weight: 500;
+.deck-slot-btn {
+    width: 40px;
+    height: 40px;
+    border: 2px solid #3a3a3c;
+    background: linear-gradient(135deg, #1a1a1b, #2a2a2b);
+    color: #d7dadc;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.deck-slot-btn:hover {
+    border-color: #6aaa64;
+    background: linear-gradient(135deg, #2a2a2b, #1a1a1b);
+    transform: translateY(-2px);
+}
+
+.deck-slot-btn.active {
+    border-color: #6aaa64;
+    background: linear-gradient(135deg, #6aaa64, #5a9a54);
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(106, 170, 100, 0.4);
 }
 
 .deck-slots-container {
@@ -703,16 +1092,28 @@ header h1 {
 }
 
 .deck-slots-label {
-    font-size: 1rem;
+    font-size: 1.125rem;
     font-weight: 600;
     color: #6aaa64;
     margin-bottom: 16px;
     text-align: center;
 }
 
+.deck-cards-section {
+    margin-top: 32px;
+}
+
+.deck-cards-section-label {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #d7dadc;
+    margin-bottom: 16px;
+    text-align: center;
+}
+
 .deck-cards-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(95px, 1fr));
+    grid-template-columns: repeat(7, 1fr);
     gap: 16px;
     padding: 0 4px 20px 4px;
     align-content: start;
@@ -1667,7 +2068,8 @@ header h1 {
     display: none;
     justify-content: center;
     align-items: center;
-    z-index: 1000;
+    cursor: pointer;
+    z-index: 10000;
     animation: splashFadeIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -2511,6 +2913,20 @@ header h1 {
 
 .chat-message.own-message .chat-message-name {
     color: #c9b458;
+}
+
+.chat-message.system-message {
+    align-items: center;
+    margin: 8px 0;
+    padding: 6px 0;
+}
+
+.chat-message.system-message .chat-message-text {
+    font-size: 0.85rem;
+    color: #818384;
+    font-style: italic;
+    text-align: center;
+    opacity: 0.8;
 }
 
 .chat-input-container {
@@ -3461,27 +3877,18 @@ header h1 {
         padding: 20px 16px 90px 16px;
     }
     
-    .deck-header-top {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 12px;
-    }
-    
-    .deck-header-top .tab-panel-title {
-        text-align: left;
-    }
-    
     .deck-actions-header {
         width: 100%;
-        justify-content: flex-start;
+        justify-content: center;
     }
     
     .deck-actions-header .btn-small {
         flex: 1;
+        max-width: 200px;
     }
     
     .deck-cards-grid {
-        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+        grid-template-columns: repeat(4, 1fr);
         gap: 12px;
     }
     

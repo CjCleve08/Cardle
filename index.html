@@ -221,29 +221,35 @@
                     <div id="deckTab" class="tab-panel">
                         <div class="tab-panel-inner deck-tab-inner">
                             <div class="deck-header-section">
-                                <div class="deck-header-top">
-                                    <h2 class="tab-panel-title">Build Your Deck</h2>
-                                    <div class="deck-actions-header">
-                                        <button id="saveDeckBtn" class="btn btn-primary btn-small" disabled>
-                                            <span class="btn-icon">💾</span>
-                                            <span>Save</span>
-                                        </button>
-                                        <button id="clearDeckBtn" class="btn btn-secondary btn-small">
-                                            <span class="btn-icon">🗑️</span>
-                                            <span>Clear</span>
-                                        </button>
+                                <div class="deck-slot-selector">
+                                    <div class="deck-slot-buttons" id="deckSlotButtons">
+                                        <button class="deck-slot-btn active" data-slot="1">1</button>
+                                        <button class="deck-slot-btn" data-slot="2">2</button>
+                                        <button class="deck-slot-btn" data-slot="3">3</button>
                                     </div>
                                 </div>
-                                <div class="deck-count">Deck: <span id="deckCount">0</span>/6 cards</div>
+                                <div class="deck-actions-header">
+                                    <button id="saveDeckBtn" class="btn btn-primary btn-small" disabled>
+                                        <span class="btn-icon">💾</span>
+                                        <span>Save</span>
+                                    </button>
+                                    <button id="clearDeckBtn" class="btn btn-secondary btn-small">
+                                        <span class="btn-icon">🗑️</span>
+                                        <span>Clear</span>
+                                    </button>
+                                </div>
                             </div>
                             <div class="deck-slots-container">
-                                <div class="deck-slots-label">Your Deck (6 cards)</div>
+                                <div class="deck-slots-label">Your Deck</div>
                                 <div class="deck-slots" id="deckSlots">
                                     <!-- Deck slots will be created here -->
                                 </div>
                             </div>
-                            <div class="deck-cards-grid" id="deckCardsGrid">
-                                <!-- All available cards will be displayed here -->
+                            <div class="deck-cards-section">
+                                <div class="deck-cards-section-label">Available Cards</div>
+                                <div class="deck-cards-grid" id="deckCardsGrid">
+                                    <!-- All available cards will be displayed here -->
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -475,6 +481,31 @@
                 <button id="cancelPrivateGameBtn" class="btn btn-cancel" style="margin-top: 20px;">
                     <span>Cancel Game</span>
                 </button>
+            </div>
+        </div>
+
+        <!-- VS Screen -->
+        <div id="vs" class="screen">
+            <div class="vs-content">
+                <div class="vs-player-container">
+                    <div class="vs-player vs-player-left">
+                        <div class="vs-player-avatar" id="vsPlayer1Avatar">
+                            <div class="avatar-placeholder">👤</div>
+                        </div>
+                        <div class="vs-player-name" id="vsPlayer1Name">You</div>
+                        <div class="vs-player-label">Player 1</div>
+                        <div class="vs-player-stat" id="vsPlayer1Stat">Games Played: -</div>
+                    </div>
+                    <div class="vs-vs-text">VS</div>
+                    <div class="vs-player vs-player-right">
+                        <div class="vs-player-avatar" id="vsPlayer2Avatar">
+                            <div class="avatar-placeholder">👤</div>
+                        </div>
+                        <div class="vs-player-name" id="vsPlayer2Name">Opponent</div>
+                        <div class="vs-player-label">Player 2</div>
+                        <div class="vs-player-stat" id="vsPlayer2Stat">Games Played: -</div>
+                    </div>
+                </div>
             </div>
         </div>
 

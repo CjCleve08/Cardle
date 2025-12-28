@@ -15,7 +15,7 @@ const CARD_CONFIG = {
     'falseFeedback': {
         metadata: {
             id: 'falseFeedback',
-            title: 'False Feedback',
+            title: 'Bluff',
             description: 'Next word your opponent guesses will show incorrect feedback',
             type: 'hurt'
         },
@@ -50,7 +50,7 @@ const CARD_CONFIG = {
     'hiddenFeedback': {
         metadata: {
             id: 'hiddenFeedback',
-            title: 'Hidden Feedback',
+            title: 'Poker Face',
             description: 'Next word you guess will only show feedback to you',
             type: 'help'
         },
@@ -74,7 +74,7 @@ const CARD_CONFIG = {
     'hiddenGuess': {
         metadata: {
             id: 'hiddenGuess',
-            title: 'Hidden Guess',
+            title: 'Blank',
             description: 'Your next guess will be hidden from your opponent',
             type: 'help'
         },
@@ -98,7 +98,7 @@ const CARD_CONFIG = {
     'extraGuess': {
         metadata: {
             id: 'extraGuess',
-            title: 'Extra Turn',
+            title: 'Hit Me',
             description: 'Get an additional turn immediately after this one',
             type: 'help'
         },
@@ -122,7 +122,7 @@ const CARD_CONFIG = {
     'hideCard': {
         metadata: {
             id: 'hideCard',
-            title: 'Hide Card',
+            title: 'Sneaky Set',
             description: 'Play another card secretly - your opponent won\'t know which one',
             type: 'help'
         },
@@ -137,7 +137,7 @@ const CARD_CONFIG = {
     'phonyCard': {
         metadata: {
             id: 'phonyCard',
-            title: 'Phony Card',
+            title: 'Dummy Hand',
             description: 'Play a card that shows a fake card to your opponent',
             type: 'hurt'
         },
@@ -152,7 +152,7 @@ const CARD_CONFIG = {
     'gamblersCard': {
         metadata: {
             id: 'gamblersCard',
-            title: 'Gambler\'s Card',
+            title: 'Bust Special',
             description: '60% chance to reveal a letter, 40% chance to hide your next guess from yourself',
             type: 'help'
         },
@@ -197,7 +197,7 @@ const CARD_CONFIG = {
     'cardLock': {
         metadata: {
             id: 'cardLock',
-            title: 'Card Lock',
+            title: 'Forced Miss',
             description: 'Prevents your opponent from using a card on their next turn',
             type: 'hurt'
         },
@@ -226,7 +226,7 @@ const CARD_CONFIG = {
     'handReveal': {
         metadata: {
             id: 'handReveal',
-            title: 'Hand Reveal',
+            title: 'Dead Hand',
             description: 'Reveal your opponent\'s current hand of cards',
             type: 'help'
         },
@@ -243,7 +243,7 @@ const CARD_CONFIG = {
     'blindGuess': {
         metadata: {
             id: 'blindGuess',
-            title: 'Blind Guess',
+            title: 'Null',
             description: 'Your opponent\'s next guess will be hidden from them',
             type: 'hurt'
         },
@@ -272,7 +272,7 @@ const CARD_CONFIG = {
     'cardSteal': {
         metadata: {
             id: 'cardSteal',
-            title: 'Card Steal',
+            title: 'Finesse',
             description: 'Pick a card from your opponent\'s hand to play as your own',
             type: 'help'
         },
@@ -289,7 +289,7 @@ const CARD_CONFIG = {
     'greenToGrey': {
         metadata: {
             id: 'greenToGrey',
-            title: 'Green to Grey',
+            title: 'False Shuffle',
             description: 'Your opponent\'s next green letters will show as grey',
             type: 'hurt'
         },
@@ -331,7 +331,7 @@ const CARD_CONFIG = {
     'cardBlock': {
         metadata: {
             id: 'cardBlock',
-            title: 'Card Block',
+            title: 'Oppressive Fold',
             description: 'A random card in your opponent\'s hand is blocked and cannot be used',
             type: 'hurt'
         },
@@ -345,10 +345,27 @@ const CARD_CONFIG = {
             // Card block is handled in selectCard, not onGuess
         }
     },
+    'effectClear': {
+        metadata: {
+            id: 'effectClear',
+            title: 'Counter',
+            description: 'Cancels all negative effects currently affecting you',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            // Effect clear is handled in selectCard, not onGuess
+        }
+    },
     'timeRush': {
         metadata: {
             id: 'timeRush',
-            title: 'Time Rush',
+            title: 'Quick Deal',
             description: 'Your opponent\'s next turn will only have 20 seconds',
             type: 'hurt'
         },
@@ -377,7 +394,7 @@ const CARD_CONFIG = {
     'wordScramble': {
         metadata: {
             id: 'wordScramble',
-            title: 'Word Scramble',
+            title: 'Undertrick',
             description: 'Your opponent\'s next guess letters will appear in random order',
             type: 'hurt'
         },
@@ -406,7 +423,7 @@ const CARD_CONFIG = {
     'cardMirror': {
         metadata: {
             id: 'cardMirror',
-            title: 'Card Mirror',
+            title: 'Follow Suit',
             description: 'Copy and play the last card your opponent used',
             type: 'help'
         },
@@ -465,6 +482,24 @@ function getChainBehavior(cardId) {
 
 function needsRealCardStorage(cardId) {
     return CARD_CONFIG[cardId]?.modifier?.needsRealCardStorage === true;
+}
+
+// Helper function to send system chat messages
+function sendSystemChatMessage(gameId, message) {
+    io.to(gameId).emit('chatMessage', {
+        playerId: 'system',
+        playerName: 'System',
+        message: message,
+        timestamp: Date.now(),
+        isSystem: true
+    });
+}
+
+// Helper function to get card display name
+function getCardDisplayName(card) {
+    if (!card || !card.id) return 'Unknown Card';
+    const config = CARD_CONFIG[card.id];
+    return config?.metadata?.title || card.title || 'Unknown Card';
 }
 
 // Helper function to resolve Card Mirror chains recursively
@@ -986,6 +1021,36 @@ function botSelectCard(game, botId, botHand) {
         return null; // Can't play cards when locked
     }
     
+    // Filter available cards (remove blocked ones if any)
+    let availableCards = botHand;
+    if (game.blockedCards && game.blockedCards.has(botId)) {
+        const blockedCardId = game.blockedCards.get(botId);
+        availableCards = botHand.filter(card => card.id !== blockedCardId);
+    }
+    
+    // Check if bot has negative effects - prioritize effectClear if available
+    const hasNegativeEffects = game.activeEffects.some(e => 
+        e.target === botId && !e.used && (
+            e.type === 'timeRush' ||
+            e.type === 'blindGuess' ||
+            e.type === 'greenToGrey' ||
+            e.type === 'falseFeedback' ||
+            e.type === 'wordScramble' ||
+            e.type === 'cardLock'
+        )
+    );
+    
+    // If bot has negative effects, prioritize effectClear if available
+    if (hasNegativeEffects) {
+        const effectClearCard = availableCards.find(card => card.id === 'effectClear');
+        if (effectClearCard) {
+            // 80% chance to use effectClear if available and has negative effects
+            if (Math.random() < 0.8) {
+                return effectClearCard;
+            }
+        }
+    }
+    
     // ALWAYS play a card - no random skipping
     // Prefer offensive cards if opponent is ahead, defensive if bot is ahead
     const botPlayer = game.players.find(p => p.id === botId);
@@ -993,13 +1058,6 @@ function botSelectCard(game, botId, botHand) {
     const botGuesses = botPlayer ? botPlayer.guesses.length : 0;
     const opponentGuesses = opponent ? opponent.guesses.length : 0;
     const isAhead = botGuesses < opponentGuesses;
-    
-    // Filter available cards (remove blocked ones if any)
-    let availableCards = botHand;
-    if (game.blockedCards && game.blockedCards.has(botId)) {
-        const blockedCardId = game.blockedCards.get(botId);
-        availableCards = botHand.filter(card => card.id !== blockedCardId);
-    }
     
     if (availableCards.length === 0) {
         // All cards blocked - draw a new one
@@ -1014,7 +1072,7 @@ function botSelectCard(game, botId, botHand) {
     if (isAhead) {
         // Bot is ahead - prefer defensive/helpful cards, but will use any if needed
         const helpfulCards = availableCards.filter(c => 
-            ['hiddenFeedback', 'hiddenGuess', 'extraGuess', 'gamblersCard'].includes(c.id)
+            ['hiddenFeedback', 'hiddenGuess', 'extraGuess', 'gamblersCard', 'effectClear'].includes(c.id)
         );
         if (helpfulCards.length > 0) {
             return helpfulCards[Math.floor(Math.random() * helpfulCards.length)];
@@ -1034,7 +1092,7 @@ function botSelectCard(game, botId, botHand) {
 }
 
 // Create a bot game
-function createBotGame(humanSocket, humanName) {
+function createBotGame(humanSocket, humanName, firebaseUid = null) {
     const botId = 'BOT_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
     const botName = getRandomBotName();
     const gameId = generateGameId();
@@ -1048,6 +1106,7 @@ function createBotGame(humanSocket, humanName) {
             {
                 id: humanSocket.id,
                 name: humanName,
+                firebaseUid: firebaseUid || null,
                 guesses: [],
                 row: 0
             },
@@ -1207,6 +1266,52 @@ function processBotTurn(gameId) {
             }
             currentGame.lastPlayedCards.set(botId, selectedCard);
             
+            // Check if this is an effect clear card - remove all active effects on the bot
+            if (selectedCard.id === 'effectClear') {
+                // Count effects before clearing (log them for debugging)
+                const effectsBefore = currentGame.activeEffects.filter(e => e.target === botId && !e.used);
+                const effectTypes = effectsBefore.map(e => e.type);
+                
+                console.log(`Effect Clear (Bot): Bot ${botId} playing Purge. Current active effects targeting them:`, effectTypes);
+                
+                // Remove all active effects targeting this bot
+                const effectsAfter = currentGame.activeEffects.filter(e => {
+                    // Keep effects that don't target this bot, or are already used
+                    if (e.target !== botId || e.used) {
+                        return true;
+                    }
+                    // Remove all effects targeting this bot
+                    console.log(`Effect Clear (Bot): Removing effect ${e.type} from bot ${botId}`);
+                    return false;
+                });
+                
+                currentGame.activeEffects = effectsAfter;
+                
+                // Also clear blocked card if any
+                if (currentGame.blockedCards && currentGame.blockedCards.has(botId)) {
+                    currentGame.blockedCards.delete(botId);
+                    console.log(`Effect Clear (Bot): Cleared blocked card for bot ${botId}`);
+                }
+                
+                // Notify if effects were cleared
+                if (effectsBefore.length > 0) {
+                    console.log(`Effect Clear (Bot): Successfully removed ${effectsBefore.length} active effect(s) from bot ${botId}`);
+                    
+                    // Notify human opponent
+                    if (opponent) {
+                        const humanSocket = io.sockets.sockets.get(opponent.id);
+                        if (humanSocket) {
+                            humanSocket.emit('opponentEffectsCleared', {
+                                playerName: botPlayerForCard.name,
+                                count: effectsBefore.length
+                            });
+                        }
+                    }
+                } else {
+                    console.log(`Effect Clear (Bot): No active effects to clear for bot ${botId}`);
+                }
+            }
+            
             // Emit card played event for human to see
             const botPlayerForCard = currentGame.players.find(p => p.id === botId);
             if (botPlayerForCard) {
@@ -1229,6 +1334,10 @@ function processBotTurn(gameId) {
                             playerName: botPlayerForCard.name,
                             playerId: botId
                         });
+                        
+                        // Send system notification to chat
+                        const cardName = getCardDisplayName(cardToShow);
+                        sendSystemChatMessage(currentGame.gameId, `${botPlayerForCard.name} played ${cardName}`);
                     }
                 }
             }
@@ -1506,7 +1615,8 @@ io.on('connection', (socket) => {
         // Add player to queue
         const player = {
             id: socket.id,
-            name: data.playerName
+            name: data.playerName,
+            firebaseUid: data.firebaseUid || null
         };
         
         matchmakingQueue.push(player);
@@ -1519,11 +1629,12 @@ io.on('connection', (socket) => {
             const queueIndex = matchmakingQueue.findIndex(p => p.id === socket.id);
             if (queueIndex === -1) return; // Already matched
             
+            const queuedPlayer = matchmakingQueue[queueIndex];
             matchmakingQueue.splice(queueIndex, 1);
             matchmakingTimeouts.delete(socket.id);
             
             console.log(`No match found for ${data.playerName}, creating bot game...`);
-            createBotGame(socket, data.playerName);
+            createBotGame(socket, data.playerName, queuedPlayer.firebaseUid || null);
         }, 20000); // 20 second timeout
         
         matchmakingTimeouts.set(socket.id, botTimeout);
@@ -1557,12 +1668,14 @@ io.on('connection', (socket) => {
                     {
                         id: player1.id,
                         name: player1.name,
+                        firebaseUid: player1.firebaseUid || null,
                         guesses: [],
                         row: 0
                     },
                     {
                         id: player2.id,
                         name: player2.name,
+                        firebaseUid: player2.firebaseUid || null,
                         guesses: [],
                         row: 0
                     }
@@ -1651,6 +1764,7 @@ io.on('connection', (socket) => {
             players: [{
                 id: socket.id,
                 name: data.playerName,
+                firebaseUid: data.firebaseUid || null,
                 guesses: [],
                 row: 0
             }],
@@ -1686,6 +1800,7 @@ io.on('connection', (socket) => {
         game.players.push({
             id: socket.id,
             name: data.playerName,
+            firebaseUid: data.firebaseUid || null,
             guesses: [],
             row: 0
         });
@@ -1825,6 +1940,10 @@ io.on('connection', (socket) => {
                     playerName: player ? player.name : 'Player',
                     playerId: socket.id
                 });
+                
+                // Send system notification to chat
+                const cardName = getCardDisplayName(data.card);
+                sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`);
             }
             // 'silent' or 'custom' behaviors don't emit splash here
             
@@ -1965,6 +2084,59 @@ io.on('connection', (socket) => {
             }
         }
         
+        // Check if this is an effect clear card - remove all active effects on the player
+        // Do this IMMEDIATELY when the card is selected, before guess submission
+        if (realCard.id === 'effectClear') {
+            // Count effects before clearing (log them for debugging)
+            const effectsBefore = game.activeEffects.filter(e => e.target === socket.id && !e.used);
+            const effectTypes = effectsBefore.map(e => e.type);
+            
+            console.log(`Effect Clear: Player ${socket.id} playing Purge. Current active effects targeting them:`, effectTypes);
+            
+            // Remove all active effects targeting this player
+            const effectsAfter = game.activeEffects.filter(e => {
+                // Keep effects that don't target this player, or are already used
+                if (e.target !== socket.id || e.used) {
+                    return true;
+                }
+                // Remove all effects targeting this player
+                console.log(`Effect Clear: Removing effect ${e.type} from player ${socket.id}`);
+                return false;
+            });
+            
+            game.activeEffects = effectsAfter;
+            
+            // Also clear blocked card if any
+            if (game.blockedCards && game.blockedCards.has(socket.id)) {
+                game.blockedCards.delete(socket.id);
+                console.log(`Effect Clear: Cleared blocked card for player ${socket.id}`);
+            }
+            
+            // Notify the player if effects were cleared
+            if (effectsBefore.length > 0) {
+                console.log(`Effect Clear: Successfully removed ${effectsBefore.length} active effect(s) from player ${socket.id}`);
+                // Send notification to client that effects were cleared
+                socket.emit('effectsCleared', {
+                    count: effectsBefore.length,
+                    gameId: data.gameId,
+                    effectTypes: effectTypes
+                });
+                
+                // Also notify opponent
+                if (opponent) {
+                    const opponentSocket = io.sockets.sockets.get(opponent.id);
+                    if (opponentSocket) {
+                        opponentSocket.emit('opponentEffectsCleared', {
+                            playerName: player ? player.name : 'Player',
+                            count: effectsBefore.length
+                        });
+                    }
+                }
+            } else {
+                console.log(`Effect Clear: No active effects to clear for player ${socket.id}`);
+            }
+        }
+        
         // Notify the player with the real card
         socket.emit('cardSelected', {
             playerId: socket.id,
@@ -1992,6 +2164,12 @@ io.on('connection', (socket) => {
             playerId: socket.id
         });
             }
+        }
+        
+        // Send system notification to chat (only once, for visible cards)
+        if (!shouldHideFromOpponent && splashBehavior === 'show') {
+            const cardName = getCardDisplayName(cardToShowOpponentForSplash);
+            sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`);
         }
         
         // Clear the card chain and track the last played card
@@ -2455,9 +2633,12 @@ io.on('connection', (socket) => {
         );
         
         // Check if falseFeedback was applied to THIS guess (by the current player using the card)
+        // Note: If player played Purge (effectClear) before submitting, this effect should be gone
         const falseFeedbackActive = game.activeEffects.some(e => 
             e.type === 'falseFeedback' && e.target === socket.id && !e.used
         );
+        console.log(`SubmitGuess: Player ${socket.id} submitting guess. falseFeedback active: ${falseFeedbackActive}. Active effects:`, 
+            game.activeEffects.filter(e => e.target === socket.id && !e.used).map(e => e.type));
         
         // Check if greenToGrey is active (targets the opponent making the guess)
         const greenToGreyActive = game.activeEffects.some(e => 
@@ -2475,6 +2656,8 @@ io.on('connection', (socket) => {
             // Apply false feedback - this will be shown to the opponent
             falseFeedback = applyCardEffect(realFeedback, { id: 'falseFeedback' }, true);
             console.log('False feedback calculated. Real:', realFeedback, 'False:', falseFeedback);
+        } else {
+            console.log('False feedback NOT active - player will see correct feedback to opponent (may have used Purge)');
         }
         
         // Calculate greenToGrey feedback if active (converts green to grey for the player making the guess)
