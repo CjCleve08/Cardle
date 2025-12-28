@@ -404,6 +404,12 @@ function updateLobbyUserInfo() {
                 profileAvatar.textContent = displayName.charAt(0).toUpperCase();
             }
         }
+        
+        // Show edit button for authenticated users
+        const editUsernameBtn = document.getElementById('editUsernameBtn');
+        if (editUsernameBtn) {
+            editUsernameBtn.style.display = 'inline-flex';
+        }
     } else {
         // Not signed in
         if (userInfoHeader) {
@@ -411,6 +417,12 @@ function updateLobbyUserInfo() {
         }
         if (logoutBtn) {
             logoutBtn.style.display = 'none';
+        }
+        
+        // Hide username change section for non-authenticated users
+        const usernameSection = document.getElementById('profileUsernameSection');
+        if (usernameSection) {
+            usernameSection.style.display = 'none';
         }
     }
 }
@@ -1049,6 +1061,7 @@ socket.on('playerLeftPrivateGame', (data) => {
 
 socket.on('gameStarted', (data) => {
     console.log('Game started event received:', data);
+    console.log('Players array:', data.players);
     
     // Set currentPlayer from the event if not already set
     if (data.yourPlayerId) {
@@ -1074,8 +1087,12 @@ socket.on('gameStarted', (data) => {
     let opponentData = null;
     
     if (data.players && Array.isArray(data.players)) {
+        console.log('Looking for my player data (id:', currentPlayer, ') in players:', data.players.map(p => ({ id: p.id, name: p.name, firebaseUid: p.firebaseUid })));
         myPlayerData = data.players.find(p => p.id === currentPlayer);
         opponentData = data.players.find(p => p.id !== currentPlayer);
+        
+        console.log('My player data:', myPlayerData);
+        console.log('Opponent data:', opponentData);
         
         if (myPlayerData) {
             player1Name = myPlayerData.name || 'You';
@@ -1093,9 +1110,12 @@ socket.on('gameStarted', (data) => {
         const vsPlayer1Avatar = document.getElementById('vsPlayer1Avatar');
         const vsPlayer2Avatar = document.getElementById('vsPlayer2Avatar');
         const vsPlayer1Stat = document.getElementById('vsPlayer1Stat');
+        const vsPlayer1StatWins = document.getElementById('vsPlayer1StatWins');
         const vsPlayer2Stat = document.getElementById('vsPlayer2Stat');
+        const vsPlayer2StatWins = document.getElementById('vsPlayer2StatWins');
         
         console.log('Setting VS screen names:', player1Name, 'vs', player2Name);
+        console.log('Opponent data:', opponentData);
         
         // Update player 1 (me) name
         if (vsPlayer1Name) {
@@ -1122,8 +1142,14 @@ socket.on('gameStarted', (data) => {
         if (vsPlayer1Stat) {
             getPlayerStats().then(stats => {
                 vsPlayer1Stat.textContent = `Games Played: ${stats.gamesPlayed || 0}`;
+                if (vsPlayer1StatWins) {
+                    vsPlayer1StatWins.textContent = `Games Won: ${stats.wins || 0}`;
+                }
             }).catch(() => {
                 vsPlayer1Stat.textContent = 'Games Played: -';
+                if (vsPlayer1StatWins) {
+                    vsPlayer1StatWins.textContent = 'Games Won: -';
+                }
             });
         }
         
@@ -1147,27 +1173,77 @@ socket.on('gameStarted', (data) => {
         // Update player 2 stats (opponent stats)
         if (vsPlayer2Stat) {
             // Try to fetch opponent stats if they have a Firebase UID
+            console.log('Opponent data for stats:', opponentData);
             if (opponentData && opponentData.firebaseUid && window.firebaseDb) {
+                console.log('Fetching opponent stats for firebaseUid:', opponentData.firebaseUid);
+                console.log('Current user authenticated?', !!window.firebaseAuth?.currentUser);
+                console.log('Current user UID:', window.firebaseAuth?.currentUser?.uid);
+                
+                // Check if user is authenticated before trying to fetch
+                if (!window.firebaseAuth || !window.firebaseAuth.currentUser) {
+                    console.warn('User not authenticated, cannot fetch opponent stats');
+                    vsPlayer2Stat.textContent = 'Games Played: -';
+                    if (vsPlayer2StatWins) {
+                        vsPlayer2StatWins.textContent = 'Games Won: -';
+                    }
+                    return;
+                }
+                
                 // Fetch opponent stats from Firestore
                 window.firebaseDb.collection('stats').doc(opponentData.firebaseUid).get()
                     .then(statsDoc => {
+                        console.log('Opponent stats doc exists:', statsDoc.exists);
                         if (statsDoc.exists) {
                             const opponentStats = statsDoc.data();
-                            vsPlayer2Stat.textContent = `Games Played: ${opponentStats.gamesPlayed || 0}`;
+                            console.log('Opponent stats data:', opponentStats);
+                            console.log('Opponent gamesPlayed:', opponentStats.gamesPlayed);
+                            console.log('Opponent wins:', opponentStats.wins);
+                            
+                            const gamesPlayed = opponentStats.gamesPlayed || opponentStats.gamesPlayed === 0 ? opponentStats.gamesPlayed : 0;
+                            const wins = opponentStats.wins || opponentStats.wins === 0 ? opponentStats.wins : 0;
+                            
+                            vsPlayer2Stat.textContent = `Games Played: ${gamesPlayed}`;
+                            if (vsPlayer2StatWins) {
+                                vsPlayer2StatWins.textContent = `Games Won: ${wins}`;
+                            }
                         } else {
+                            console.log('Opponent stats doc does not exist for firebaseUid:', opponentData.firebaseUid);
                             vsPlayer2Stat.textContent = 'Games Played: 0';
+                            if (vsPlayer2StatWins) {
+                                vsPlayer2StatWins.textContent = 'Games Won: 0';
+                            }
                         }
                     })
                     .catch(error => {
                         console.error('Error fetching opponent stats:', error);
+                        console.error('Error details:', error.message, error.code);
+                        console.error('Full error:', error);
+                        
+                        // Check if it's a permission error
+                        if (error.code === 'permission-denied') {
+                            console.error('Permission denied - check Firestore security rules');
+                        }
+                        
                         vsPlayer2Stat.textContent = 'Games Played: -';
+                        if (vsPlayer2StatWins) {
+                            vsPlayer2StatWins.textContent = 'Games Won: -';
+                        }
                     });
             } else if (opponentData && opponentData.isBot) {
                 // Bot - show "-" or "Bot"
+                console.log('Opponent is a bot');
                 vsPlayer2Stat.textContent = 'Games Played: -';
+                if (vsPlayer2StatWins) {
+                    vsPlayer2StatWins.textContent = 'Games Won: -';
+                }
             } else {
                 // No Firebase UID available (guest player)
+                console.log('No firebaseUid for opponent. OpponentData:', opponentData);
+                console.log('Has firebaseDb?', !!window.firebaseDb);
                 vsPlayer2Stat.textContent = 'Games Played: -';
+                if (vsPlayer2StatWins) {
+                    vsPlayer2StatWins.textContent = 'Games Won: -';
+                }
             }
         }
         
@@ -1212,8 +1288,14 @@ socket.on('gameStarted', (data) => {
 });
 
 socket.on('cardSelected', (data) => {
+    // Skip if spectator
+    if (window.isSpectator) return;
+    
     if (data.playerId === currentPlayer) {
         selectedCard = data.card;
+        
+        // If Counter card was played, effects will be cleared server-side
+        // We'll receive activeEffectsUpdated event to update our gameState
         
         // If a modifier card was used, allow another card selection
         if (data.allowSecondCard) {
@@ -1227,6 +1309,60 @@ socket.on('cardSelected', (data) => {
             cardChainActive = false; // Clear flag
         hideCardSelection();
         showGameBoard();
+        }
+    }
+});
+
+socket.on('activeEffectsUpdated', (data) => {
+    // Update gameState with new active effects
+    if (gameState && gameState.gameId === data.gameId) {
+        // Check if timeRush was active before (to detect if it was cleared)
+        const currentTurnPlayerId = gameState.currentTurn;
+        const hadTimeRushBefore = gameState.activeEffects && gameState.activeEffects.some(e => 
+            e.type === 'timeRush' && e.target === currentTurnPlayerId && !e.used
+        );
+        const oldTimeLimit = hadTimeRushBefore ? 20 : TURN_TIME_LIMIT;
+        
+        // Update with new active effects
+        gameState.activeEffects = data.activeEffects;
+        console.log('Active effects updated:', data.activeEffects);
+        
+        // Check if timeRush is active now
+        const hasTimeRushAfter = gameState.activeEffects && gameState.activeEffects.some(e => 
+            e.type === 'timeRush' && e.target === currentTurnPlayerId && !e.used
+        );
+        const newTimeLimit = hasTimeRushAfter ? 20 : TURN_TIME_LIMIT;
+        
+        // If timer is running (for either player's turn), restart it to recalculate time limit
+        if (turnTimer) {
+            const timeRemainingBefore = turnTimeRemaining;
+            const isMyTurn = gameState.currentTurn === currentPlayer;
+            
+            stopTurnTimer();
+            
+            // If time limit changed (timeRush was cleared), adjust the remaining time
+            if (oldTimeLimit !== newTimeLimit) {
+                if (newTimeLimit > oldTimeLimit) {
+                    // Time limit increased (timeRush cleared) - reset to full time
+                    turnTimeRemaining = newTimeLimit;
+                    console.log(`Time limit increased from ${oldTimeLimit} to ${newTimeLimit} - resetting to full time (${isMyTurn ? 'my turn' : 'opponent turn'})`);
+                } else {
+                    // Time limit decreased - keep proportional time
+                    const percentageRemaining = timeRemainingBefore / oldTimeLimit;
+                    turnTimeRemaining = Math.max(1, Math.floor(newTimeLimit * percentageRemaining));
+                    console.log(`Time limit decreased from ${oldTimeLimit} to ${newTimeLimit} - adjusted time: ${turnTimeRemaining} (${isMyTurn ? 'my turn' : 'opponent turn'})`);
+                }
+            } else {
+                // Time limit didn't change, keep the same remaining time
+                turnTimeRemaining = timeRemainingBefore;
+            }
+            
+            // Restart timer with updated effects, preserving the adjusted time
+            startTurnTimer(true); // Pass true to preserve timeRemaining
+        } else {
+            // Timer not running yet, but will be started correctly when needed
+            // Just update the display
+            updateTimerDisplay();
         }
     }
 });
@@ -1650,11 +1786,22 @@ function displayOpponentHandForSteal(cards, opponentName, gameId) {
 }
 
 socket.on('gameOver', (data) => {
+    console.log('gameOver event received:', data);
     // Prepare UI elements first
     const titleEl = document.getElementById('gameOverTitle');
     const messageEl = document.getElementById('gameOverMessage');
     const iconEl = document.getElementById('gameOverIcon');
     const wordEl = document.getElementById('gameOverWord');
+    
+    // Store gameId for rematch functionality
+    if (data.gameId) {
+        if (gameState) {
+            gameState.gameId = data.gameId;
+        }
+        // Also store globally as backup
+        window.lastGameId = data.gameId;
+        console.log('Stored gameId for rematch:', data.gameId);
+    }
     
     const won = data.winner === currentPlayer;
     // Get guess count - use player's row (individual guess count) if available
@@ -1709,6 +1856,50 @@ socket.on('gameOver', (data) => {
     if (!ScreenManager.show('gameOver')) {
         console.error('Failed to show gameOver screen!');
         return;
+    }
+    
+    // Reset rematch button state
+    const rematchBtn = document.getElementById('rematchBtn');
+    if (rematchBtn) {
+        rematchBtn.disabled = false;
+        rematchBtn.textContent = 'Rematch';
+        rematchBtn.classList.remove('waiting', 'opponent-ready');
+    }
+});
+
+// Rematch functionality
+socket.on('rematchRequested', (data) => {
+    const rematchBtn = document.getElementById('rematchBtn');
+    if (rematchBtn) {
+        if (data.playerId === currentPlayer) {
+            // You requested rematch - show waiting state
+            rematchBtn.textContent = 'Waiting for opponent...';
+            rematchBtn.disabled = true;
+            rematchBtn.classList.add('waiting');
+        } else {
+            // Opponent requested rematch - show that they're ready
+            rematchBtn.textContent = 'Opponent wants rematch!';
+            rematchBtn.classList.add('opponent-ready');
+        }
+    }
+});
+
+socket.on('rematchAccepted', (data) => {
+    // Both players accepted rematch - new game is starting
+    const rematchBtn = document.getElementById('rematchBtn');
+    if (rematchBtn) {
+        rematchBtn.textContent = 'Starting rematch...';
+        rematchBtn.disabled = true;
+    }
+});
+
+socket.on('rematchCancelled', () => {
+    // Reset rematch button if opponent cancelled
+    const rematchBtn = document.getElementById('rematchBtn');
+    if (rematchBtn) {
+        rematchBtn.disabled = false;
+        rematchBtn.textContent = 'Rematch';
+        rematchBtn.classList.remove('waiting', 'opponent-ready');
     }
 });
 
@@ -1794,6 +1985,12 @@ function updatePlayersList(players) {
 }
 
 function initializeGame(data) {
+    // Skip normal initialization if spectator
+    if (window.isSpectator) {
+        console.log('Spectator mode: Skipping normal game initialization');
+        return;
+    }
+    
     currentRow = 0;
     // Reset card hand and initialize deck pool for new game
     window.playerCardHand = [];
@@ -1814,6 +2011,11 @@ function initializeGame(data) {
     // Update hand panel when game initializes
     updateHandPanel();
     
+    // Scale game board to fit available space (with a small delay to ensure layout is complete)
+    setTimeout(() => {
+        scaleGameBoard();
+    }, 50);
+    
     if (data.currentTurn === currentPlayer) {
         // It's my turn - show card selection and enable input
         showGameBoard();
@@ -1829,6 +2031,79 @@ function initializeGame(data) {
     }
 }
 
+function scaleGameBoard() {
+    const gameBoard = document.getElementById('gameBoard');
+    const scalingContainer = document.getElementById('gameBoardScalingContainer');
+    
+    if (!gameBoard || !scalingContainer) return;
+    
+    // Temporarily set transform to just centering (no scale) to measure natural size accurately
+    scalingContainer.style.transform = 'translate(-50%, -50%) scale(1)';
+    scalingContainer.style.webkitTransform = 'translate(-50%, -50%) scale(1)';
+    scalingContainer.style.msTransform = 'translate(-50%, -50%) scale(1)';
+    scalingContainer.style.width = 'auto';
+    scalingContainer.style.height = 'auto';
+    scalingContainer.style.minWidth = '0';
+    scalingContainer.style.minHeight = '0';
+    
+    // Force browser to recalculate layout
+    void scalingContainer.offsetWidth;
+    void scalingContainer.offsetHeight;
+    
+    // Get the natural (unscaled) dimensions of the content
+    const contentWidth = scalingContainer.scrollWidth;
+    const contentHeight = scalingContainer.scrollHeight;
+    
+    // Get available space from the parent container
+    // Use the actual client dimensions, accounting for any padding
+    const padding = 20; // Safety padding on all sides
+    const availableWidth = gameBoard.clientWidth - (padding * 2);
+    const availableHeight = gameBoard.clientHeight - (padding * 2);
+    
+    // Only proceed if we have valid dimensions
+    if (availableWidth <= 0 || availableHeight <= 0 || contentWidth <= 0 || contentHeight <= 0) {
+        return;
+    }
+    
+    // Calculate scale factors for both dimensions
+    const scaleX = availableWidth / contentWidth;
+    const scaleY = availableHeight / contentHeight;
+    
+    // Use the smaller scale to ensure everything fits in both dimensions
+    let scale = Math.min(scaleX, scaleY);
+    
+    // Apply a small safety margin (0.98) to prevent edge touching
+    scale = scale * 0.98;
+    
+    // Ensure minimum and maximum scale limits for usability
+    scale = Math.max(0.3, Math.min(scale, 2.0));
+    
+    // Calculate the scaled dimensions
+    const scaledWidth = contentWidth * scale;
+    const scaledHeight = contentHeight * scale;
+    
+    // Apply the transform with centering and scaling
+    // Use translate(-50%, -50%) for centering, then scale from center
+    scalingContainer.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    scalingContainer.style.webkitTransform = `translate(-50%, -50%) scale(${scale})`;
+    scalingContainer.style.msTransform = `translate(-50%, -50%) scale(${scale})`;
+    scalingContainer.style.transformOrigin = 'center center';
+    
+    console.log(`Game board scaled: ${(scale * 100).toFixed(1)}% (content: ${contentWidth}x${contentHeight}, available: ${availableWidth}x${availableHeight}, scaled: ${scaledWidth.toFixed(0)}x${scaledHeight.toFixed(0)})`);
+}
+
+// Scale game board on window resize (with debounce for performance)
+let resizeTimeout;
+window.addEventListener('resize', () => {
+    const gameScreen = document.getElementById('game');
+    if (gameScreen && gameScreen.classList.contains('active')) {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            scaleGameBoard();
+        }, 100);
+    }
+});
+
 function createBoard() {
     const container = document.getElementById('boardContainer');
     container.innerHTML = '';
@@ -1840,6 +2115,14 @@ function createBoard() {
     
     // Initialize scroll behavior
     setupScrollBehavior();
+    
+    // Rescale after board is created (if on game screen)
+    const gameScreen = document.getElementById('game');
+    if (gameScreen && gameScreen.classList.contains('active')) {
+        setTimeout(() => {
+            scaleGameBoard();
+        }, 10);
+    }
 }
 
 function createBoardRow(rowIndex) {
@@ -1965,9 +2248,23 @@ function createKeyboard() {
         
         keyboard.appendChild(row);
     });
+    
+    // Rescale after keyboard is created (if on game screen)
+    const gameScreen = document.getElementById('game');
+    if (gameScreen && gameScreen.classList.contains('active')) {
+        setTimeout(() => {
+            scaleGameBoard();
+        }, 10);
+    }
 }
 
 function showCardSelection() {
+    // Don't show card selection for spectators
+    if (window.isSpectator) {
+        console.log('Spectator mode: Skipping card selection');
+        return;
+    }
+    
     const cardSelection = document.getElementById('cardSelection');
     if (cardSelection) {
         cardSelection.style.display = 'flex';
@@ -2378,14 +2675,12 @@ function updateTurnIndicator() {
     }
 }
 
-function startTurnTimer() {
+function startTurnTimer(preserveTimeRemaining = false) {
     // Both players should track the timer
     if (!gameState || !gameState.currentTurn) {
         console.log('Not starting timer - no game state or current turn');
         return;
     }
-    
-    stopTurnTimer(); // Clear any existing timer
     
     // Check if there's a timeRush effect active for the current player
     const currentTurnPlayerId = gameState.currentTurn;
@@ -2395,13 +2690,30 @@ function startTurnTimer() {
     
     // Set timer limit based on whether timeRush is active
     const timeLimit = hasTimeRush ? 20 : TURN_TIME_LIMIT;
-    turnTimeRemaining = timeLimit;
+    
+    // Only reset time remaining if we're not preserving it (e.g., when Counter clears timeRush)
+    if (!preserveTimeRemaining) {
+        turnTimeRemaining = timeLimit;
+    } else {
+        // If preserving, make sure it doesn't exceed the new limit
+        if (turnTimeRemaining > timeLimit) {
+            turnTimeRemaining = timeLimit;
+        }
+    }
     
     const isMyTurn = gameState.currentTurn === currentPlayer;
     if (hasTimeRush && isMyTurn) {
         console.log('Time Rush effect active - timer set to 20 seconds');
+    } else if (!hasTimeRush && isMyTurn && preserveTimeRemaining) {
+        console.log(`Time Rush cleared - timer reset to ${turnTimeRemaining} seconds (limit: ${timeLimit})`);
     }
-    console.log(`Starting turn timer - is my turn: ${isMyTurn}`);
+    console.log(`Starting turn timer - is my turn: ${isMyTurn}, time remaining: ${turnTimeRemaining}, limit: ${timeLimit}, preserve: ${preserveTimeRemaining}`);
+    
+    // Clear any existing timer before starting new one
+    if (turnTimer) {
+        clearInterval(turnTimer);
+        turnTimer = null;
+    }
     
     updateTimerDisplay();
     
@@ -2469,6 +2781,11 @@ function updateTimerDisplay() {
         e.type === 'timeRush' && e.target === currentTurnPlayerId && !e.used
     );
     const timeLimit = hasTimeRush ? 20 : TURN_TIME_LIMIT;
+    
+    // Ensure timeRemaining doesn't exceed the current limit (in case timeRush was just cleared)
+    if (turnTimeRemaining > timeLimit) {
+        turnTimeRemaining = timeLimit;
+    }
     
     // Both players see the same countdown
     if (timerText) {
@@ -3619,6 +3936,32 @@ function switchTab(tabName) {
     if (tabName === 'settings') {
         initializeSettings();
     }
+    
+    // If switching to friends tab, load friends and check game status
+    if (tabName === 'friends') {
+        loadFriends();
+        // Also periodically check for friends in games while on this tab
+        if (window.friendStatusInterval) {
+            clearInterval(window.friendStatusInterval);
+        }
+        window.friendStatusInterval = setInterval(() => {
+            const friendsList = document.getElementById('friendsList');
+            if (friendsList && friendsList.querySelectorAll('.friend-item').length > 0) {
+                const friendIds = Array.from(friendsList.querySelectorAll('.friend-item'))
+                    .map(item => item.dataset.friendId)
+                    .filter(id => id);
+                if (friendIds.length > 0 && socket) {
+                    socket.emit('checkFriendsInGames', { friendIds: friendIds });
+                }
+            }
+        }, 5000); // Check every 5 seconds
+    } else {
+        // Clear interval when leaving friends tab
+        if (window.friendStatusInterval) {
+            clearInterval(window.friendStatusInterval);
+            window.friendStatusInterval = null;
+        }
+    }
 }
 
 // Update deck count display
@@ -3664,6 +4007,781 @@ document.getElementById('closeHelpBtnBottom').addEventListener('click', closeHel
 document.getElementById('helpOverlay').addEventListener('click', (e) => {
     if (e.target.id === 'helpOverlay') {
         closeHelp();
+    }
+});
+
+// Friends functionality
+async function loadFriends() {
+    if (!currentUser || !window.firebaseDb) {
+        console.log('User not authenticated or Firebase not available');
+        renderFriendsList([]);
+        renderFriendRequests([]);
+        return;
+    }
+    
+    try {
+        const userId = currentUser.uid;
+        const friendsRef = window.firebaseDb.collection('friends');
+        
+        // Get friends list (where status is 'accepted')
+        const friendsQuery = friendsRef.where('status', '==', 'accepted')
+            .where('users', 'array-contains', userId);
+        const friendsSnapshot = await friendsQuery.get();
+        
+        const friends = [];
+        friendsSnapshot.forEach(doc => {
+            const data = doc.data();
+            const friendId = data.users.find(id => id !== userId);
+            friends.push({
+                id: friendId,
+                friendDocId: doc.id,
+                ...data
+            });
+        });
+        
+        // Get friend requests (pending requests where current user is the recipient)
+        const requestsQuery = friendsRef.where('status', '==', 'pending')
+            .where('recipientId', '==', userId);
+        const requestsSnapshot = await requestsQuery.get();
+        
+        const requests = [];
+        requestsSnapshot.forEach(doc => {
+            const data = doc.data();
+            requests.push({
+                id: doc.id,
+                senderId: data.senderId,
+                ...data
+            });
+        });
+        
+        // Fetch user details for friends
+        const friendsWithDetails = await Promise.all(friends.map(async (friend) => {
+            try {
+                const userDoc = await window.firebaseDb.collection('users').doc(friend.id).get();
+                if (userDoc.exists) {
+                    return {
+                        ...friend,
+                        name: userDoc.data().displayName || 'Unknown',
+                        email: userDoc.data().email || ''
+                    };
+                }
+                return friend;
+            } catch (error) {
+                console.error('Error fetching friend details:', error);
+                return friend;
+            }
+        }));
+        
+        // Fetch user details for requests
+        const requestsWithDetails = await Promise.all(requests.map(async (request) => {
+            try {
+                const userDoc = await window.firebaseDb.collection('users').doc(request.senderId).get();
+                if (userDoc.exists) {
+                    return {
+                        ...request,
+                        senderName: userDoc.data().displayName || 'Unknown',
+                        senderEmail: userDoc.data().email || ''
+                    };
+                }
+                return request;
+            } catch (error) {
+                console.error('Error fetching request details:', error);
+                return request;
+            }
+        }));
+        
+        renderFriendsList(friendsWithDetails);
+        renderFriendRequests(requestsWithDetails);
+        
+        // Check which friends are in games
+        checkFriendsInGames(friendsWithDetails);
+    } catch (error) {
+        console.error('Error loading friends:', error);
+        renderFriendsList([]);
+        renderFriendRequests([]);
+    }
+}
+
+async function checkFriendsInGames(friends) {
+    if (!currentUser || !socket || friends.length === 0) return;
+    
+    // Get Firebase UIDs of friends
+    const friendFirebaseUids = friends
+        .filter(friend => friend.id && friend.id !== currentUser.uid)
+        .map(friend => friend.id);
+    
+    if (friendFirebaseUids.length === 0) return;
+    
+    // Request server to check which friends are in games
+    socket.emit('checkFriendsInGames', { friendIds: friendFirebaseUids });
+}
+
+socket.on('friendsInGames', (data) => {
+    // Update friends list to show eye icons for friends in games
+    console.log('friendsInGames received:', data);
+    const friendsList = document.getElementById('friendsList');
+    if (!friendsList) {
+        console.log('friendsInGames: friendsList not found');
+        return;
+    }
+    if (!data.friendsInGames) {
+        console.log('friendsInGames: No friendsInGames data');
+        return;
+    }
+    
+    console.log('friendsInGames: Updating UI with', Object.keys(data.friendsInGames).length, 'friends in games');
+    
+    // Re-render friends list with game status
+    const friendItems = friendsList.querySelectorAll('.friend-item');
+    console.log('friendsInGames: Found', friendItems.length, 'friend items in DOM');
+    
+    friendItems.forEach(item => {
+        const friendId = item.dataset.friendId;
+        if (!friendId) {
+            console.log('friendsInGames: Friend item missing friendId');
+            return;
+        }
+        
+        // Check if this friend is in a game
+        const gameInfo = data.friendsInGames[friendId];
+        console.log('friendsInGames: Friend', friendId, 'gameInfo:', gameInfo);
+        
+        let spectateBtn = item.querySelector('.spectate-btn');
+        
+        if (gameInfo && (gameInfo.status === 'playing' || gameInfo.status === 'waiting')) {
+            // Add or update eye icon
+            if (!spectateBtn) {
+                spectateBtn = document.createElement('button');
+                spectateBtn.className = 'spectate-btn';
+                spectateBtn.innerHTML = '<span class="btn-icon">👁️</span>';
+                spectateBtn.title = 'Spectate Game';
+                item.appendChild(spectateBtn);
+                console.log('friendsInGames: Created spectate button for', friendId);
+            }
+            spectateBtn.dataset.gameId = gameInfo.gameId;
+            spectateBtn.onclick = () => spectateFriendGame(friendId, gameInfo.gameId);
+            spectateBtn.style.display = 'block';
+            console.log('friendsInGames: Showing spectate button for', friendId, 'game:', gameInfo.gameId);
+        } else {
+            // Hide eye icon if friend is not in a game
+            if (spectateBtn) {
+                spectateBtn.style.display = 'none';
+                delete spectateBtn.dataset.gameId;
+            }
+        }
+    });
+});
+
+function renderFriendsList(friends) {
+    const friendsList = document.getElementById('friendsList');
+    if (!friendsList) return;
+    
+    if (friends.length === 0) {
+        friendsList.innerHTML = '<p class="friends-empty">No friends yet</p>';
+        return;
+    }
+    
+    friendsList.innerHTML = friends.map(friend => `
+        <div class="friend-item" data-friend-id="${friend.id || ''}">
+            <div class="friend-avatar">${friend.name ? friend.name.charAt(0).toUpperCase() : '👤'}</div>
+            <div class="friend-info">
+                <div class="friend-name">${friend.name || 'Unknown'}</div>
+                <div class="friend-status">${friend.email || ''}</div>
+            </div>
+            <button class="spectate-btn" style="display: none;" onclick="spectateFriendGame('${friend.id || ''}', '')" title="Spectate Game">
+                <span class="btn-icon">👁️</span>
+            </button>
+        </div>
+    `).join('');
+}
+
+function renderFriendRequests(requests) {
+    const requestsList = document.getElementById('friendRequestsList');
+    if (!requestsList) return;
+    
+    if (requests.length === 0) {
+        requestsList.innerHTML = '<p class="friends-empty">No pending requests</p>';
+        return;
+    }
+    
+    requestsList.innerHTML = requests.map(request => `
+        <div class="friend-item">
+            <div class="friend-avatar">${request.senderName ? request.senderName.charAt(0).toUpperCase() : '👤'}</div>
+            <div class="friend-info">
+                <div class="friend-name">${request.senderName || 'Unknown'}</div>
+                <div class="friend-status">${request.senderEmail || ''}</div>
+            </div>
+            <div class="friend-actions">
+                <button class="btn btn-primary btn-small friend-action-btn" onclick="acceptFriendRequest('${request.id}')">
+                    <span class="btn-icon">✓</span>
+                    <span>Accept</span>
+                </button>
+                <button class="btn btn-secondary btn-small friend-action-btn" onclick="rejectFriendRequest('${request.id}')">
+                    <span class="btn-icon">✗</span>
+                    <span>Decline</span>
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function searchFriend() {
+    const searchInput = document.getElementById('friendSearchInput');
+    if (!searchInput || !searchInput.value.trim()) {
+        alert('Please enter a username or email to search');
+        return;
+    }
+    
+    const searchTerm = searchInput.value.trim().toLowerCase();
+    
+    if (!currentUser || !window.firebaseDb) {
+        alert('You must be logged in to search for friends');
+        return;
+    }
+    
+    try {
+        const currentUserId = currentUser.uid;
+        
+        if (!window.firebaseDb) {
+            throw new Error('Firebase database is not initialized');
+        }
+        
+        const usersRef = window.firebaseDb.collection('users');
+        
+        // Get all users (Firestore doesn't support case-insensitive or partial search natively)
+        // We'll filter client-side for similar matches
+        console.log('Fetching all users for search...');
+        console.log('Firebase DB available:', !!window.firebaseDb);
+        console.log('Current user:', currentUserId);
+        
+        let allUsersSnapshot;
+        try {
+            allUsersSnapshot = await usersRef.get();
+        } catch (fetchError) {
+            console.error('Error fetching users from Firestore:', fetchError);
+            console.error('Error code:', fetchError.code);
+            console.error('Error message:', fetchError.message);
+            
+            // Check if it's a permissions error
+            if (fetchError.code === 'permission-denied') {
+                throw new Error('Permission denied: Firestore security rules need to allow reading user documents for friend search. Please update your Firestore rules to allow: `allow read: if request.auth != null;` for the users collection.');
+            }
+            
+            throw new Error(`Failed to fetch users: ${fetchError.message} (Code: ${fetchError.code})`);
+        }
+        
+        console.log('Found', allUsersSnapshot.size, 'total users');
+        
+        // Filter users client-side based on similar name/email
+        const matchingUsers = [];
+        allUsersSnapshot.forEach(doc => {
+            const userData = doc.data();
+            const userId = doc.id;
+            
+            // Skip current user
+            if (userId === currentUserId) {
+                return;
+            }
+            
+            const displayName = (userData.displayName || '').toLowerCase();
+            const email = (userData.email || '').toLowerCase();
+            
+            // Check if search term matches (contains or starts with)
+            const nameMatches = displayName.includes(searchTerm) || displayName.startsWith(searchTerm);
+            const emailMatches = email.includes(searchTerm) || email.startsWith(searchTerm);
+            
+            if (nameMatches || emailMatches) {
+                matchingUsers.push({
+                    id: userId,
+                    displayName: userData.displayName || 'Unknown',
+                    email: userData.email || '',
+                    photoURL: userData.photoURL || null
+                });
+            }
+        });
+        
+        console.log('Found', matchingUsers.length, 'matching users');
+        
+        // Display search results in the UI
+        showSearchResults(matchingUsers);
+    } catch (error) {
+        console.error('Error searching for friend:', error);
+        console.error('Error details:', {
+            code: error.code,
+            message: error.message,
+            stack: error.stack
+        });
+        alert(`Error searching for friend: ${error.message || 'Unknown error'}. Please check the console for details.`);
+    }
+}
+
+async function sendFriendRequest(foundUserId, foundUserName) {
+    if (!currentUser || !window.firebaseDb) {
+        alert('You must be logged in to send friend requests');
+        return;
+    }
+    
+    try {
+        const currentUserId = currentUser.uid;
+        
+        // Check if already friends or request exists
+        const friendsRef = window.firebaseDb.collection('friends');
+        const existingQuery = friendsRef.where('users', 'array-contains', currentUserId);
+        const existingSnapshot = await existingQuery.get();
+        
+        let alreadyFriend = false;
+        let pendingRequest = false;
+        
+        existingSnapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.users && data.users.includes(foundUserId)) {
+                if (data.status === 'accepted') {
+                    alreadyFriend = true;
+                } else if (data.status === 'pending') {
+                    // Check if request is from current user to found user
+                    if (data.senderId === currentUserId && data.recipientId === foundUserId) {
+                        pendingRequest = true;
+                    }
+                    // Check if request is from found user to current user (opposite direction)
+                    else if (data.senderId === foundUserId && data.recipientId === currentUserId) {
+                        // There's a pending request from them to us - we could auto-accept or show message
+                        pendingRequest = true;
+                    }
+                }
+            }
+        });
+        
+        if (alreadyFriend) {
+            alert('You are already friends with this user');
+            return;
+        }
+        
+        if (pendingRequest) {
+            alert('A friend request already exists between you and this user');
+            return;
+        }
+        
+        // Send friend request
+        await friendsRef.add({
+            users: [currentUserId, foundUserId],
+            senderId: currentUserId,
+            recipientId: foundUserId,
+            status: 'pending',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        alert(`Friend request sent to ${foundUserName}`);
+        
+        // Reload friends list to show the new request
+        loadFriends();
+        
+        return Promise.resolve();
+    } catch (error) {
+        console.error('Error sending friend request:', error);
+        alert('Error sending friend request. Please try again.');
+        return Promise.reject(error);
+    }
+}
+
+async function acceptFriendRequest(requestId) {
+    if (!currentUser || !window.firebaseDb) return;
+    
+    try {
+        const friendsRef = window.firebaseDb.collection('friends').doc(requestId);
+        await friendsRef.update({
+            status: 'accepted',
+            acceptedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        loadFriends(); // Reload friends list
+    } catch (error) {
+        console.error('Error accepting friend request:', error);
+        alert('Error accepting friend request. Please try again.');
+    }
+}
+
+async function rejectFriendRequest(requestId) {
+    if (!currentUser || !window.firebaseDb) return;
+    
+    try {
+        const friendsRef = window.firebaseDb.collection('friends').doc(requestId);
+        await friendsRef.delete();
+        
+        loadFriends(); // Reload friends list
+    } catch (error) {
+        console.error('Error rejecting friend request:', error);
+        alert('Error rejecting friend request. Please try again.');
+    }
+}
+
+function showSearchResults(users) {
+    const searchResultsContainer = document.getElementById('friendSearchResults');
+    const searchResultsList = document.getElementById('friendSearchResultsList');
+    
+    if (!searchResultsContainer || !searchResultsList) return;
+    
+    if (users.length === 0) {
+        searchResultsList.innerHTML = '<p class="friends-empty">No users found</p>';
+        searchResultsContainer.style.display = 'block';
+        return;
+    }
+    
+    // Check existing friend relationships for each user
+    const currentUserId = currentUser ? currentUser.uid : null;
+    const friendsRef = window.firebaseDb ? window.firebaseDb.collection('friends') : null;
+    
+    // Build the results list
+    Promise.all(users.map(async (user) => {
+        let relationshipStatus = 'none'; // none, pending, friends
+        
+        if (currentUserId && friendsRef) {
+            try {
+                const existingQuery = friendsRef.where('users', 'array-contains', currentUserId);
+                const existingSnapshot = await existingQuery.get();
+                
+                existingSnapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (data.users && data.users.includes(user.id)) {
+                        if (data.status === 'accepted') {
+                            relationshipStatus = 'friends';
+                        } else if (data.status === 'pending') {
+                            relationshipStatus = 'pending';
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error('Error checking friend status:', error);
+            }
+        }
+        
+        return {
+            ...user,
+            relationshipStatus
+        };
+    })).then(usersWithStatus => {
+        searchResultsList.innerHTML = usersWithStatus.map(user => {
+            const avatarText = user.displayName ? user.displayName.charAt(0).toUpperCase() : '👤';
+            let actionButton = '';
+            
+            if (user.relationshipStatus === 'friends') {
+                actionButton = '<span class="friend-status-badge">Friends</span>';
+            } else if (user.relationshipStatus === 'pending') {
+                actionButton = '<span class="friend-status-badge pending">Request Sent</span>';
+            } else {
+                actionButton = `<button class="btn btn-primary btn-small friend-action-btn" onclick="sendFriendRequestFromSearch('${user.id}', '${(user.displayName || user.email).replace(/'/g, "\\'")}')">
+                    <span class="btn-icon">➕</span>
+                    <span>Add Friend</span>
+                </button>`;
+            }
+            
+            return `
+                <div class="friend-search-result-item">
+                    <div class="friend-avatar">${avatarText}</div>
+                    <div class="friend-info">
+                        <div class="friend-name">${user.displayName || 'Unknown'}</div>
+                        <div class="friend-status">${user.email || ''}</div>
+                    </div>
+                    ${actionButton}
+                </div>
+            `;
+        }).join('');
+        
+        searchResultsContainer.style.display = 'block';
+    });
+}
+
+function sendFriendRequestFromSearch(userId, userName) {
+    sendFriendRequest(userId, userName).then(() => {
+        // Reload search results to update status
+        const searchInput = document.getElementById('friendSearchInput');
+        if (searchInput && searchInput.value.trim()) {
+            searchFriend();
+        }
+    });
+}
+
+function hideSearchResults() {
+    const searchResultsContainer = document.getElementById('friendSearchResults');
+    if (searchResultsContainer) {
+        searchResultsContainer.style.display = 'none';
+    }
+}
+
+function spectateFriendGame(friendFirebaseUid, gameId) {
+    if (!socket) {
+        alert('Not connected to server');
+        return;
+    }
+    
+    // If gameId not provided, get it from the button's data attribute
+    if (!gameId) {
+        const friendItem = document.querySelector(`[data-friend-id="${friendFirebaseUid}"]`);
+        if (friendItem) {
+            const spectateBtn = friendItem.querySelector('.spectate-btn');
+            gameId = spectateBtn?.dataset.gameId;
+        }
+    }
+    
+    if (!gameId) {
+        alert('Game information not available. Friend may have left the game.');
+        // Refresh friend status
+        loadFriends();
+        return;
+    }
+    
+    // Get spectator name (current user's display name if available)
+    let spectatorName = 'Someone';
+    if (currentUser && currentUser.displayName) {
+        spectatorName = currentUser.displayName;
+    } else if (currentUser && currentUser.email) {
+        spectatorName = currentUser.email.split('@')[0];
+    }
+    
+    // Request to spectate the game
+    socket.emit('spectateGame', { 
+        gameId: gameId,
+        spectatorName: spectatorName
+    });
+}
+
+socket.on('gameStateForSpectator', (data) => {
+    // Show spectator view
+    console.log('Received game state for spectator:', data);
+    
+    // Switch to game screen in spectator mode
+    if (ScreenManager.show('game')) {
+        // Set spectator mode flag
+        window.isSpectator = true;
+        window.spectatorGameId = data.gameId;
+        window.spectatorGameWord = data.word;
+        
+        // Initialize spectator view
+        initializeSpectatorView(data);
+    }
+});
+
+function initializeSpectatorView(gameState) {
+    console.log('Initializing spectator view with game state:', gameState);
+    
+    // Hide card selection immediately
+    const cardSelection = document.getElementById('cardSelection');
+    if (cardSelection) {
+        cardSelection.style.display = 'none';
+    }
+    
+    // Show game board
+    showGameBoard();
+    
+    // Clear game boards
+    const player1Board = document.getElementById('player1Board');
+    const player2Board = document.getElementById('player2Board');
+    if (player1Board) player1Board.innerHTML = '';
+    if (player2Board) player2Board.innerHTML = '';
+    
+    // Set player names
+    if (gameState.players && gameState.players.length >= 2) {
+        const player1NameEl = document.getElementById('player1Name');
+        const player2NameEl = document.getElementById('player2Name');
+        if (player1NameEl) player1NameEl.textContent = gameState.players[0].name || 'Player 1';
+        if (player2NameEl) player2NameEl.textContent = gameState.players[1].name || 'Player 2';
+    }
+    
+    // Initialize board and keyboard for spectator
+    createBoard();
+    createKeyboard();
+    
+    // Scale game board to fit available space (with a small delay to ensure layout is complete)
+    setTimeout(() => {
+        scaleGameBoard();
+    }, 50);
+    
+    // Display existing guesses for both players
+    if (gameState.players) {
+        gameState.players.forEach((player, index) => {
+            if (player.guesses && player.guesses.length > 0) {
+                player.guesses.forEach(guessData => {
+                    if (guessData.guess && guessData.feedback) {
+                        // For spectators, determine which board based on player position
+                        // We need to figure out which player is which - use the first player as player 1
+                        if (index === 0) {
+                            displayGuess(guessData.guess, guessData.feedback, guessData.row);
+                        } else {
+                            displayOpponentGuess(guessData.guess, guessData.feedback, guessData.row);
+                        }
+                    }
+                });
+            }
+        });
+    }
+    
+    // Update turn indicator for spectator
+    if (gameState.currentTurn) {
+        updateTurnIndicator();
+    }
+    
+    // Show leave button (removed spectator indicator text)
+    const gameHeaderLogo = document.querySelector('.game-header-logo');
+    if (gameHeaderLogo) {
+        // Hide spectator indicator if it exists (we're removing it)
+        const spectatorIndicator = document.getElementById('spectatorIndicator');
+        if (spectatorIndicator) {
+            spectatorIndicator.style.display = 'none';
+        }
+        
+        // Show leave button on the left side
+        const leaveBtn = document.getElementById('leaveSpectateBtn');
+        if (leaveBtn) {
+            leaveBtn.style.display = 'flex';
+        }
+    }
+    
+    // Hide input controls for spectators
+    const wordInput = document.getElementById('wordInput');
+    const submitBtn = document.getElementById('submitBtn');
+    const cardsContainer = document.getElementById('cardsContainer');
+    const cardSelectionPanel = document.getElementById('cardSelection');
+    
+    if (wordInput) {
+        wordInput.style.display = 'none';
+        wordInput.disabled = true;
+    }
+    if (submitBtn) submitBtn.style.display = 'none';
+    if (cardsContainer) cardsContainer.style.display = 'none';
+    if (cardSelectionPanel) cardSelectionPanel.style.display = 'none';
+    
+    // Also hide hand panel for spectators
+    const handPanel = document.querySelector('.hand-panel');
+    if (handPanel) handPanel.style.display = 'none';
+}
+
+// Listen for game updates while spectating
+socket.on('guessSubmitted', (data) => {
+    if (window.isSpectator && window.spectatorGameId) {
+        // Update spectator view with new guess
+        // This will be handled by existing displayGuess/displayOpponentGuess functions
+    }
+});
+
+socket.on('cardPlayed', (data) => {
+    if (window.isSpectator && window.spectatorGameId) {
+        // Show card splash for spectators too
+        queueCardSplash(data.card, data.playerName);
+    }
+});
+
+socket.on('gameOver', (data) => {
+    if (window.isSpectator && window.spectatorGameId) {
+        // Exit spectator mode and show game over
+        leaveSpectatorMode();
+        
+        // Show game over screen
+        ScreenManager.show('gameOver');
+    }
+});
+
+function leaveSpectatorMode() {
+    if (!window.isSpectator) {
+        console.log('leaveSpectatorMode called but not in spectator mode');
+        return;
+    }
+    
+    console.log('Leaving spectator mode, gameId:', window.spectatorGameId);
+    
+    // Leave the game room
+    if (window.spectatorGameId && socket) {
+        socket.emit('leaveSpectate', { gameId: window.spectatorGameId });
+    }
+    
+    // Clear spectator state
+    window.isSpectator = false;
+    window.spectatorGameId = null;
+    window.spectatorGameWord = null;
+    
+    // Hide spectator indicator and leave button
+    const spectatorIndicator = document.getElementById('spectatorIndicator');
+    if (spectatorIndicator) spectatorIndicator.style.display = 'none';
+    
+    const leaveBtn = document.getElementById('leaveSpectateBtn');
+    if (leaveBtn) leaveBtn.style.display = 'none';
+    
+    // Return to lobby
+    ScreenManager.show('lobby');
+}
+
+// Make leaveSpectatorMode available globally so the button can call it
+window.leaveSpectatorMode = leaveSpectatorMode;
+
+// Friends tab event listeners
+document.addEventListener('DOMContentLoaded', () => {
+    const searchFriendBtn = document.getElementById('searchFriendBtn');
+    if (searchFriendBtn) {
+        searchFriendBtn.addEventListener('click', searchFriend);
+    }
+    
+    const friendSearchInput = document.getElementById('friendSearchInput');
+    if (friendSearchInput) {
+        friendSearchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                searchFriend();
+            }
+        });
+    }
+    
+    // Username change functionality
+    const editUsernameBtn = document.getElementById('editUsernameBtn');
+    const saveUsernameBtn = document.getElementById('saveUsernameBtn');
+    const cancelUsernameBtn = document.getElementById('cancelUsernameBtn');
+    const usernameInput = document.getElementById('usernameInput');
+    const usernameError = document.getElementById('usernameError');
+    const usernameSuccess = document.getElementById('usernameSuccess');
+    const usernameSection = document.getElementById('profileUsernameSection');
+    
+    if (editUsernameBtn) {
+        editUsernameBtn.addEventListener('click', () => {
+            if (usernameSection) {
+                usernameSection.style.display = 'block';
+                // Set current username as placeholder
+                if (usernameInput && currentUser) {
+                    const currentName = currentUser.displayName || currentUser.email?.split('@')[0] || '';
+                    usernameInput.value = '';
+                    usernameInput.placeholder = `Current: ${currentName}`;
+                    setTimeout(() => usernameInput.focus(), 100);
+                }
+            }
+        });
+    }
+    
+    if (saveUsernameBtn) {
+        saveUsernameBtn.addEventListener('click', handleChangeUsername);
+    }
+    
+    if (cancelUsernameBtn) {
+        cancelUsernameBtn.addEventListener('click', () => {
+            if (usernameSection) {
+                usernameSection.style.display = 'none';
+            }
+            if (usernameInput) {
+                usernameInput.value = '';
+            }
+            if (usernameError) usernameError.style.display = 'none';
+            if (usernameSuccess) usernameSuccess.style.display = 'none';
+        });
+    }
+    
+    if (usernameInput) {
+        usernameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleChangeUsername();
+            } else if (e.key === 'Escape') {
+                if (cancelUsernameBtn) cancelUsernameBtn.click();
+            }
+        });
+        
+        usernameInput.addEventListener('input', () => {
+            // Clear error/success messages when user types
+            if (usernameError) usernameError.style.display = 'none';
+            if (usernameSuccess) usernameSuccess.style.display = 'none';
+        });
     }
 });
 
@@ -3789,13 +4907,52 @@ document.getElementById('wordInput').addEventListener('input', (e) => {
     }
 });
 
-document.getElementById('playAgainBtn').addEventListener('click', () => {
-    // Stop background music before reloading
-    if (typeof soundManager !== 'undefined') {
-        soundManager.stopBackgroundMusic();
+// Back to lobby and rematch buttons initialization
+function initializeGameOverButtons() {
+    const backToLobbyBtn = document.getElementById('backToLobbyBtn');
+    if (backToLobbyBtn) {
+        // Remove any existing listeners by cloning
+        const newBtn = backToLobbyBtn.cloneNode(true);
+        backToLobbyBtn.parentNode.replaceChild(newBtn, backToLobbyBtn);
+        
+        newBtn.addEventListener('click', () => {
+            // Cancel any pending rematch request
+            if (gameState && gameState.gameId) {
+                socket.emit('cancelRematch', { gameId: gameState.gameId });
+            }
+            ScreenManager.show('lobby');
+        });
     }
-    location.reload();
-});
+    
+    // Rematch button
+    const rematchBtn = document.getElementById('rematchBtn');
+    if (rematchBtn) {
+        // Remove any existing listeners by cloning
+        const newRematchBtn = rematchBtn.cloneNode(true);
+        rematchBtn.parentNode.replaceChild(newRematchBtn, rematchBtn);
+        
+        newRematchBtn.addEventListener('click', () => {
+            // Get gameId from gameState or from the gameOver event data
+            const gameId = gameState?.gameId || window.lastGameId;
+            if (!gameId) {
+                console.error('No gameId available for rematch');
+                alert('Unable to rematch: Game ID not found');
+                return;
+            }
+            
+            console.log('Requesting rematch for game:', gameId);
+            // Request rematch
+            socket.emit('requestRematch', { gameId: gameId });
+        });
+    }
+}
+
+// Initialize buttons when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeGameOverButtons);
+} else {
+    initializeGameOverButtons();
+}
 
 // Chat Functions
 function displayChatMessage(playerName, message, timestamp, isOwnMessage, isSystemMessage = false) {
@@ -3882,6 +5039,13 @@ function toggleChat() {
             // Hide chat
             chatContainer.classList.add('hidden');
             chatShowBtn.style.display = 'flex';
+        }
+        
+        // Rescale game board after chat toggle animation
+        if (ScreenManager.currentScreen === 'game') {
+            setTimeout(() => {
+                scaleGameBoard();
+            }, 350); // Wait for chat animation to complete
         }
     }
 }
@@ -3988,4 +5152,202 @@ function submitGuess() {
     selectedCard = null;
     cardChainActive = false; // Reset card chain flag after submitting
 }
+
+// Username change functionality
+async function checkUsernameAvailable(username) {
+    if (!window.firebaseDb || !currentUser) {
+        return { available: false, message: 'Not authenticated' };
+    }
+    
+    const trimmedUsername = username.trim().toLowerCase();
+    
+    // Validate username format
+    const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+    if (!usernameRegex.test(trimmedUsername)) {
+        return { 
+            available: false, 
+            message: 'Username must be 3-20 characters and contain only letters, numbers, underscores, or hyphens' 
+        };
+    }
+    
+    try {
+        // Check if username is already taken by querying users collection
+        const usersSnapshot = await window.firebaseDb.collection('users')
+            .where('displayName', '==', trimmedUsername)
+            .limit(1)
+            .get();
+        
+        if (!usersSnapshot.empty) {
+            // Check if it's the current user's username
+            const existingUser = usersSnapshot.docs[0];
+            if (existingUser.id !== currentUser.uid) {
+                return { available: false, message: 'Username is already taken' };
+            }
+        }
+        
+        return { available: true, message: 'Username is available' };
+    } catch (error) {
+        console.error('Error checking username availability:', error);
+        return { available: false, message: 'Error checking username availability' };
+    }
+}
+
+async function handleChangeUsername() {
+    const usernameInput = document.getElementById('usernameInput');
+    const usernameError = document.getElementById('usernameError');
+    const usernameSuccess = document.getElementById('usernameSuccess');
+    const saveUsernameBtn = document.getElementById('saveUsernameBtn');
+    const usernameSection = document.getElementById('profileUsernameSection');
+    
+    if (!usernameInput || !currentUser || !window.firebaseAuth || !window.firebaseDb) {
+        if (usernameError) {
+            usernameError.textContent = 'Please sign in to change your username';
+            usernameError.style.display = 'block';
+        }
+        return;
+    }
+    
+    const newUsername = usernameInput.value.trim();
+    
+    if (!newUsername) {
+        if (usernameError) {
+            usernameError.textContent = 'Please enter a username';
+            usernameError.style.display = 'block';
+        }
+        return;
+    }
+    
+    // Check if username is available
+    const checkResult = await checkUsernameAvailable(newUsername);
+    if (!checkResult.available) {
+        if (usernameError) {
+            usernameError.textContent = checkResult.message;
+            usernameError.style.display = 'block';
+        }
+        if (usernameSuccess) usernameSuccess.style.display = 'none';
+        return;
+    }
+    
+    // Disable button during update
+    if (saveUsernameBtn) {
+        saveUsernameBtn.disabled = true;
+        saveUsernameBtn.innerHTML = '<span>Saving...</span>';
+    }
+    
+    try {
+        // Update Firebase Auth displayName
+        await window.firebaseAuth.currentUser.updateProfile({
+            displayName: newUsername
+        });
+        
+        // Update Firestore user document
+        await window.firebaseDb.collection('users').doc(currentUser.uid).set({
+            displayName: newUsername,
+            usernameUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        
+        // Reload user to get updated displayName
+        await window.firebaseAuth.currentUser.reload();
+        currentUser = window.firebaseAuth.currentUser;
+        
+        // Update UI
+        updateLobbyUserInfo();
+        
+        // Show success message
+        if (usernameSuccess) {
+            usernameSuccess.textContent = 'Username updated successfully!';
+            usernameSuccess.style.display = 'block';
+        }
+        if (usernameError) usernameError.style.display = 'none';
+        
+        // Clear input and hide form after a delay
+        usernameInput.value = '';
+        
+        // Re-enable button
+        if (saveUsernameBtn) {
+            saveUsernameBtn.disabled = false;
+            saveUsernameBtn.innerHTML = '<span class="btn-icon">✓</span><span>Save</span>';
+        }
+        
+        // Hide form and success message after 2 seconds
+        setTimeout(() => {
+            if (usernameSection) {
+                usernameSection.style.display = 'none';
+            }
+            if (usernameSuccess) usernameSuccess.style.display = 'none';
+        }, 2000);
+        
+    } catch (error) {
+        console.error('Error updating username:', error);
+        if (usernameError) {
+            usernameError.textContent = 'Failed to update username. Please try again.';
+            usernameError.style.display = 'block';
+        }
+        if (usernameSuccess) usernameSuccess.style.display = 'none';
+        
+        // Re-enable button
+        if (saveUsernameBtn) {
+            saveUsernameBtn.disabled = false;
+            saveUsernameBtn.innerHTML = '<span class="btn-icon">✓</span><span>Save</span>';
+        }
+    }
+}
+
+// Socket event handlers for username (if using server-side validation)
+socket.on('usernameCheckResult', (data) => {
+    const usernameError = document.getElementById('usernameError');
+    const usernameSuccess = document.getElementById('usernameSuccess');
+    
+    if (data.available) {
+        if (usernameSuccess) {
+            usernameSuccess.textContent = data.message;
+            usernameSuccess.style.display = 'block';
+        }
+        if (usernameError) usernameError.style.display = 'none';
+    } else {
+        if (usernameError) {
+            usernameError.textContent = data.message;
+            usernameError.style.display = 'block';
+        }
+        if (usernameSuccess) usernameSuccess.style.display = 'none';
+    }
+});
+
+socket.on('usernameUpdateResult', (data) => {
+    const usernameError = document.getElementById('usernameError');
+    const usernameSuccess = document.getElementById('usernameSuccess');
+    const saveUsernameBtn = document.getElementById('saveUsernameBtn');
+    
+    if (data.success) {
+        if (usernameSuccess) {
+            usernameSuccess.textContent = data.message;
+            usernameSuccess.style.display = 'block';
+        }
+        if (usernameError) usernameError.style.display = 'none';
+        
+        // Update UI
+        updateLobbyUserInfo();
+        
+        // Clear input
+        const usernameInput = document.getElementById('usernameInput');
+        if (usernameInput) usernameInput.value = '';
+        
+        // Hide success message after 3 seconds
+        setTimeout(() => {
+            if (usernameSuccess) usernameSuccess.style.display = 'none';
+        }, 3000);
+    } else {
+        if (usernameError) {
+            usernameError.textContent = data.message;
+            usernameError.style.display = 'block';
+        }
+        if (usernameSuccess) usernameSuccess.style.display = 'none';
+    }
+    
+    // Re-enable button
+    if (saveUsernameBtn) {
+        saveUsernameBtn.disabled = false;
+        saveUsernameBtn.innerHTML = '<span class="btn-icon">✓</span><span>Save</span>';
+    }
+});
 

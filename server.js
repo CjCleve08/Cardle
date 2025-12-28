@@ -153,7 +153,7 @@ const CARD_CONFIG = {
         metadata: {
             id: 'gamblersCard',
             title: 'Bust Special',
-            description: '60% chance to reveal a letter, 40% chance to hide your next guess from yourself',
+            description: '50% chance to reveal a letter, 50% chance to hide your next guess from yourself',
             type: 'help'
         },
         modifier: {
@@ -164,8 +164,8 @@ const CARD_CONFIG = {
         },
         effects: {
             onGuess: (game, playerId) => {
-                // 60% chance for letter reveal, 40% chance for hidden guess
-                const isLucky = Math.random() < 0.60;
+                // 50% chance for letter reveal, 50% chance for hidden guess
+                const isLucky = Math.random() < 0.50;
                 
                 if (isLucky) {
                     // Reveal a random letter position
@@ -609,6 +609,9 @@ app.use(express.static(__dirname));
 // Game state storage
 const games = new Map();
 const players = new Map();
+const spectators = new Map(); // gameId -> Set of socket IDs
+const userToGame = new Map(); // firebaseUid -> gameId (for friend status checking)
+const rematchRequests = new Map(); // gameId -> Set of player socket IDs who requested rematch
 
 // Matchmaking queue
 const matchmakingQueue = [];
@@ -1164,17 +1167,33 @@ function createBotGame(humanSocket, humanName, firebaseUid = null) {
         const gameStateForClients = {
             gameId: game.gameId,
             currentTurn: game.currentTurn,
-            players: game.players,
+            players: game.players.map(p => ({
+                id: p.id,
+                name: p.name,
+                firebaseUid: p.firebaseUid || null,
+                guesses: p.guesses || [],
+                row: p.row || 0,
+                isBot: p.isBot || false
+            })),
             status: game.status,
             activeEffects: game.activeEffects,
             totalGuesses: game.totalGuesses
         };
         
+        console.log('Bot game starting. Players with firebaseUid:', gameStateForClients.players.map(p => ({ name: p.name, firebaseUid: p.firebaseUid })));
+        
         // Send game started to human
+        console.log(`Sending gameStarted (bot) to ${humanSocket.id} with players:`, gameStateForClients.players.map(p => ({ name: p.name, firebaseUid: p.firebaseUid })));
         humanSocket.emit('gameStarted', {
             ...gameStateForClients,
             yourPlayerId: humanSocket.id
         });
+        
+        // Track user's game for friend status
+        if (firebaseUid) {
+            userToGame.set(firebaseUid, gameId);
+            console.log('Bot game started: Tracked user', firebaseUid, 'in game', gameId);
+        }
         
         // If it's the bot's turn, process it
         if (game.currentTurn === botId) {
@@ -1297,10 +1316,14 @@ function processBotTurn(gameId) {
                 if (effectsBefore.length > 0) {
                     console.log(`Effect Clear (Bot): Successfully removed ${effectsBefore.length} active effect(s) from bot ${botId}`);
                     
-                    // Notify human opponent
+                    // Notify human opponent with updated active effects
                     if (opponent) {
                         const humanSocket = io.sockets.sockets.get(opponent.id);
                         if (humanSocket) {
+                            humanSocket.emit('activeEffectsUpdated', {
+                                activeEffects: currentGame.activeEffects,
+                                gameId: gameId
+                            });
                             humanSocket.emit('opponentEffectsCleared', {
                                 playerName: botPlayerForCard.name,
                                 count: effectsBefore.length
@@ -1490,13 +1513,21 @@ function submitBotGuess(gameId, botId, guess, card) {
             });
         }
         
-        // Delay gameOver to allow the winning guess animation to complete (2 seconds)
-        setTimeout(() => {
+            // Delay gameOver to allow the winning guess animation to complete (2 seconds)
+            setTimeout(() => {
+            game.status = 'finished';
+            // Clean up user-to-game tracking
+            game.players.forEach(player => {
+                if (player.firebaseUid) {
+                    userToGame.delete(player.firebaseUid);
+                }
+            });
             io.to(gameId).emit('gameOver', {
                 winner: botId,
-                word: game.word
+                word: game.word,
+                gameId: gameId
             });
-        }, 2000);
+            }, 2000);
         return;
     }
     
@@ -1532,6 +1563,23 @@ function submitBotGuess(gameId, botId, guess, card) {
             row: boardRow,
             hidden: shouldHideGuess
         });
+        
+        // Also send to spectators
+        const gameSpectators = spectators.get(gameId);
+        if (gameSpectators && gameSpectators.size > 0) {
+            gameSpectators.forEach(spectatorSocketId => {
+                const spectatorSocket = io.sockets.sockets.get(spectatorSocketId);
+                if (spectatorSocket) {
+                    spectatorSocket.emit('guessSubmitted', {
+                        playerId: botId,
+                        guess: guess,
+                        feedback: realFeedback,
+                        row: boardRow,
+                        hidden: false  // Spectators see all guesses
+                    });
+                }
+            });
+        }
     }
     
     // Check for extra guess
@@ -1692,6 +1740,16 @@ io.on('connection', (socket) => {
             players.set(player1.id, { gameId: gameId, playerId: player1.id });
             players.set(player2.id, { gameId: gameId, playerId: player2.id });
             
+            // Track users' games for friend status (even when waiting)
+            if (player1.firebaseUid) {
+                userToGame.set(player1.firebaseUid, gameId);
+                console.log('Matchmade game created: Tracked user', player1.firebaseUid, 'in game', gameId, '(waiting)');
+            }
+            if (player2.firebaseUid) {
+                userToGame.set(player2.firebaseUid, gameId);
+                console.log('Matchmade game created: Tracked user', player2.firebaseUid, 'in game', gameId, '(waiting)');
+            }
+            
             // Join both players to the game room
             const player1Socket = io.sockets.sockets.get(player1.id);
             const player2Socket = io.sockets.sockets.get(player2.id);
@@ -1714,11 +1772,18 @@ io.on('connection', (socket) => {
             // Start the game
             setTimeout(() => {
                 console.log('Matchmade game starting. Current turn:', game.currentTurn);
-                console.log('Players:', game.players.map(p => ({ id: p.id, name: p.name })));
+                console.log('Players with firebaseUid:', game.players.map(p => ({ id: p.id, name: p.name, firebaseUid: p.firebaseUid })));
                 const gameStateForClients = {
                     gameId: game.gameId,
                     currentTurn: game.currentTurn,
-                    players: game.players,
+                    players: game.players.map(p => ({
+                        id: p.id,
+                        name: p.name,
+                        firebaseUid: p.firebaseUid || null,
+                        guesses: p.guesses || [],
+                        row: p.row || 0,
+                        isBot: p.isBot || false
+                    })),
                     status: game.status,
                     activeEffects: game.activeEffects,
                     totalGuesses: game.totalGuesses
@@ -1727,10 +1792,16 @@ io.on('connection', (socket) => {
                 game.players.forEach(player => {
                     const playerSocket = io.sockets.sockets.get(player.id);
                     if (playerSocket) {
+                        console.log(`Sending gameStarted to ${player.id} (${player.name}) with players:`, gameStateForClients.players.map(p => ({ name: p.name, firebaseUid: p.firebaseUid })));
                         playerSocket.emit('gameStarted', {
                             ...gameStateForClients,
                             yourPlayerId: player.id
                         });
+                        // Track user's game for friend status
+                        if (player.firebaseUid) {
+                            userToGame.set(player.firebaseUid, game.gameId);
+                            console.log('Matchmade game started: Tracked user', player.firebaseUid, 'in game', game.gameId);
+                        }
                     }
                 });
             }, 1000);
@@ -1779,6 +1850,12 @@ io.on('connection', (socket) => {
         games.set(gameId, game);
         players.set(socket.id, { gameId: gameId, playerId: socket.id });
         
+        // Track user's game for friend status (even when waiting)
+        if (data.firebaseUid) {
+            userToGame.set(data.firebaseUid, gameId);
+            console.log('Game created: Tracked user', data.firebaseUid, 'in game', gameId, '(waiting)');
+        }
+        
         socket.join(gameId);
         socket.emit('gameCreated', { gameId: gameId, playerId: socket.id });
         socket.emit('playerJoined', { players: game.players });
@@ -1816,27 +1893,427 @@ io.on('connection', (socket) => {
         if (game.players.length === 2) {
             setTimeout(() => {
                 console.log('Game starting. Current turn:', game.currentTurn);
-                console.log('Players:', game.players.map(p => ({ id: p.id, name: p.name })));
+                console.log('Players with firebaseUid:', game.players.map(p => ({ id: p.id, name: p.name, firebaseUid: p.firebaseUid })));
                 const gameStateForClients = {
                     gameId: game.gameId,
                     currentTurn: game.currentTurn,
-                    players: game.players,
+                    players: game.players.map(p => ({
+                        id: p.id,
+                        name: p.name,
+                        firebaseUid: p.firebaseUid || null,
+                        guesses: p.guesses || [],
+                        row: p.row || 0,
+                        isBot: p.isBot || false
+                    })),
                     status: game.status,
                     activeEffects: game.activeEffects,
                     totalGuesses: game.totalGuesses
                 };
                 // Send gameStarted to all players, but include each player's own ID
+                game.status = 'playing';
                 game.players.forEach(player => {
                     const playerSocket = io.sockets.sockets.get(player.id);
                     if (playerSocket) {
+                        console.log(`Sending gameStarted to ${player.id} (${player.name}) with players:`, gameStateForClients.players.map(p => ({ name: p.name, firebaseUid: p.firebaseUid })));
                         playerSocket.emit('gameStarted', {
                             ...gameStateForClients,
                             yourPlayerId: player.id  // Include the player's own ID
                         });
+                        // Track user's game for friend status
+                        if (player.firebaseUid) {
+                            userToGame.set(player.firebaseUid, game.gameId);
+                            console.log('Game started: Tracked user', player.firebaseUid, 'in game', game.gameId);
+                        } else {
+                            console.log('Game started: Player', player.id, 'has no firebaseUid');
+                        }
                     }
                 });
             }, 1000);
         }
+    });
+    
+    socket.on('checkFriendsInGames', async (data) => {
+        // Check which friends (by firebaseUid) are currently in games
+        console.log('checkFriendsInGames: Received request for', data.friendIds?.length || 0, 'friends');
+        console.log('checkFriendsInGames: userToGame map has', userToGame.size, 'entries');
+        console.log('checkFriendsInGames: Current games:', Array.from(games.keys()));
+        
+        if (!data.friendIds || !Array.isArray(data.friendIds)) {
+            socket.emit('friendsInGames', { friendsInGames: {} });
+            return;
+        }
+        
+        const friendsInGames = {};
+        
+        // Check each friend's game status
+        data.friendIds.forEach(friendFirebaseUid => {
+            const gameId = userToGame.get(friendFirebaseUid);
+            console.log('checkFriendsInGames: Friend', friendFirebaseUid, 'is in game:', gameId);
+            
+            if (gameId) {
+                const game = games.get(gameId);
+                console.log('checkFriendsInGames: Game', gameId, 'exists:', !!game, 'status:', game?.status);
+                
+                if (game && (game.status === 'playing' || game.status === 'waiting')) {
+                    friendsInGames[friendFirebaseUid] = {
+                        gameId: gameId,
+                        status: game.status,
+                        players: game.players.map(p => ({
+                            id: p.id,
+                            name: p.name,
+                            firebaseUid: p.firebaseUid
+                        }))
+                    };
+                    console.log('checkFriendsInGames: Added friend', friendFirebaseUid, 'to friendsInGames');
+                } else {
+                    // Game ended or doesn't exist, remove from tracking
+                    userToGame.delete(friendFirebaseUid);
+                    console.log('checkFriendsInGames: Removed friend', friendFirebaseUid, 'from tracking (game ended)');
+                }
+            }
+        });
+        
+        console.log('checkFriendsInGames: Returning', Object.keys(friendsInGames).length, 'friends in games');
+        socket.emit('friendsInGames', { friendsInGames: friendsInGames });
+    });
+    
+    socket.on('spectateGame', (data) => {
+        const game = games.get(data.gameId);
+        
+        if (!game) {
+            socket.emit('error', { message: 'Game not found' });
+            return;
+        }
+        
+        // Check if game is in a viewable state
+        if (game.status !== 'playing' && game.status !== 'waiting') {
+            socket.emit('error', { message: 'Game is not currently active' });
+            return;
+        }
+        
+        // Initialize spectators set for this game if needed
+        if (!spectators.has(data.gameId)) {
+            spectators.set(data.gameId, new Set());
+        }
+        
+        // Add spectator to the game
+        spectators.get(data.gameId).add(socket.id);
+        socket.join(data.gameId);
+        
+        // Get spectator name if available (from data or player record)
+        let spectatorName = 'Someone';
+        if (data.spectatorName) {
+            spectatorName = data.spectatorName;
+        } else {
+            // Try to get name from players map if spectator was previously a player
+            const playerRecord = players.get(socket.id);
+            if (playerRecord && playerRecord.name) {
+                spectatorName = playerRecord.name;
+            }
+        }
+        
+        // Send system message to players that someone is spectating
+        sendSystemChatMessage(data.gameId, `${spectatorName} is now spectating the game`);
+        
+        // Send current game state to spectator
+        const spectatorGameState = {
+            gameId: game.gameId,
+            players: game.players.map(p => ({
+                id: p.id,
+                name: p.name,
+                guesses: p.guesses,
+                row: p.row
+            })),
+            currentTurn: game.currentTurn,
+            status: game.status,
+            totalGuesses: game.totalGuesses,
+            activeEffects: game.activeEffects,
+            word: game.word, // Spectators can see the word
+            isSpectator: true
+        };
+        
+        socket.emit('gameStateForSpectator', spectatorGameState);
+        
+        console.log(`Spectator ${socket.id} (${spectatorName}) joined game ${data.gameId}`);
+    });
+    
+    socket.on('leaveSpectate', (data) => {
+        const gameId = data.gameId;
+        
+        // Remove spectator from the game
+        if (spectators.has(gameId)) {
+            spectators.get(gameId).delete(socket.id);
+            if (spectators.get(gameId).size === 0) {
+                spectators.delete(gameId);
+            }
+        }
+        
+        socket.leave(gameId);
+        console.log(`Spectator ${socket.id} left game ${gameId}`);
+    });
+    
+    socket.on('requestRematch', (data) => {
+        console.log(`Rematch requested by ${socket.id} for game ${data.gameId}`);
+        const game = games.get(data.gameId);
+        if (!game) {
+            console.log(`Game ${data.gameId} not found`);
+            socket.emit('error', { message: 'Game not found' });
+            return;
+        }
+        
+        // Check if player was in this game
+        const player = game.players.find(p => p.id === socket.id);
+        if (!player) {
+            console.log(`Player ${socket.id} was not in game ${data.gameId}`);
+            socket.emit('error', { message: 'You were not in this game' });
+            return;
+        }
+        
+        // Initialize rematch requests for this game if needed
+        if (!rematchRequests.has(data.gameId)) {
+            rematchRequests.set(data.gameId, new Set());
+        }
+        
+        const requests = rematchRequests.get(data.gameId);
+        requests.add(socket.id);
+        console.log(`Rematch requests for game ${data.gameId}:`, Array.from(requests), `(${requests.size}/${game.players.length})`);
+        
+        // Notify all players about the rematch request
+        game.players.forEach(p => {
+            const playerSocket = io.sockets.sockets.get(p.id);
+            if (playerSocket) {
+                playerSocket.emit('rematchRequested', {
+                    playerId: socket.id,
+                    playerName: player.name || 'Player'
+                });
+            }
+        });
+        
+        // Check if both players have requested rematch
+        if (requests.size >= 2 && game.players.length === 2) {
+            console.log(`Both players requested rematch for game ${data.gameId}, creating new game...`);
+            // Both players want rematch - create new game
+            const player1 = game.players[0];
+            const player2 = game.players[1];
+            
+            // Create new game
+            const newGameId = generateGameId();
+            const newWord = getRandomWord();
+            
+            const newGame = {
+                gameId: newGameId,
+                word: newWord,
+                players: [
+                    {
+                        id: player1.id,
+                        name: player1.name,
+                        firebaseUid: player1.firebaseUid || null,
+                        guesses: [],
+                        row: 0
+                    },
+                    {
+                        id: player2.id,
+                        name: player2.name,
+                        firebaseUid: player2.firebaseUid || null,
+                        guesses: [],
+                        row: 0
+                    }
+                ],
+                currentTurn: Math.random() > 0.5 ? player1.id : player2.id,
+                activeEffects: [],
+                status: 'waiting',
+                totalGuesses: 0,
+                lastPlayedCards: new Map(),
+                mirroredCards: new Map(),
+                spectators: []
+            };
+            
+            games.set(newGameId, newGame);
+            players.set(player1.id, { gameId: newGameId, playerId: player1.id });
+            players.set(player2.id, { gameId: newGameId, playerId: player2.id });
+            
+            // Track users' games for friend status
+            if (player1.firebaseUid) {
+                userToGame.set(player1.firebaseUid, newGameId);
+            }
+            if (player2.firebaseUid) {
+                userToGame.set(player2.firebaseUid, newGameId);
+            }
+            
+            // Join both players to the new game room
+            const player1Socket = io.sockets.sockets.get(player1.id);
+            const player2Socket = io.sockets.sockets.get(player2.id);
+            
+            if (player1Socket) {
+                player1Socket.leave(data.gameId);
+                player1Socket.join(newGameId);
+            }
+            
+            if (player2Socket) {
+                player2Socket.leave(data.gameId);
+                player2Socket.join(newGameId);
+            }
+            
+            // Notify both players
+            io.to(newGameId).emit('playerJoined', { players: newGame.players });
+            
+            // Clean up old game and rematch requests
+            games.delete(data.gameId);
+            rematchRequests.delete(data.gameId);
+            
+            // Start the new game
+            setTimeout(() => {
+                newGame.status = 'playing';
+                const gameStateForClients = {
+                    gameId: newGame.gameId,
+                    currentTurn: newGame.currentTurn,
+                    players: newGame.players.map(p => ({
+                        id: p.id,
+                        name: p.name,
+                        firebaseUid: p.firebaseUid || null,
+                        guesses: p.guesses || [],
+                        row: p.row || 0,
+                        isBot: p.isBot || false
+                    })),
+                    status: newGame.status,
+                    activeEffects: newGame.activeEffects,
+                    totalGuesses: newGame.totalGuesses
+                };
+                
+                console.log('Rematch game starting. Players with firebaseUid:', gameStateForClients.players.map(p => ({ name: p.name, firebaseUid: p.firebaseUid })));
+                
+                newGame.players.forEach(player => {
+                    const playerSocket = io.sockets.sockets.get(player.id);
+                    if (playerSocket) {
+                        console.log(`Sending gameStarted (rematch) to ${player.id} (${player.name}) with players:`, gameStateForClients.players.map(p => ({ name: p.name, firebaseUid: p.firebaseUid })));
+                        playerSocket.emit('gameStarted', {
+                            ...gameStateForClients,
+                            yourPlayerId: player.id
+                        });
+                    }
+                });
+            }, 1000);
+            
+            // Notify players that rematch was accepted
+            if (player1Socket) {
+                player1Socket.emit('rematchAccepted', { gameId: newGameId });
+                console.log(`Sent rematchAccepted to player1 ${player1.id}`);
+            }
+            if (player2Socket) {
+                player2Socket.emit('rematchAccepted', { gameId: newGameId });
+                console.log(`Sent rematchAccepted to player2 ${player2.id}`);
+            }
+            
+            console.log(`Rematch game ${newGameId} created successfully`);
+        } else {
+            console.log(`Not enough rematch requests: ${requests.size} < 2, or game has ${game.players.length} players`);
+        }
+    });
+    
+    socket.on('cancelRematch', (data) => {
+        if (rematchRequests.has(data.gameId)) {
+            const requests = rematchRequests.get(data.gameId);
+            requests.delete(socket.id);
+            
+            // Notify other players that rematch was cancelled
+            const game = games.get(data.gameId);
+            if (game) {
+                game.players.forEach(p => {
+                    if (p.id !== socket.id) {
+                        const playerSocket = io.sockets.sockets.get(p.id);
+                        if (playerSocket) {
+                            playerSocket.emit('rematchCancelled');
+                        }
+                    }
+                });
+            }
+            
+            // Clean up if no requests left
+            if (requests.size === 0) {
+                rematchRequests.delete(data.gameId);
+            }
+        }
+    });
+    
+    // Username management
+    const usernames = new Map(); // username -> firebaseUid (for quick lookup)
+    
+    // Load existing usernames from Firestore on server start
+    // Note: This would require Firebase Admin SDK. For now, we'll check via client Firestore.
+    
+    socket.on('checkUsernameAvailable', async (data) => {
+        const { username, firebaseUid } = data;
+        
+        if (!username || username.trim().length === 0) {
+            socket.emit('usernameCheckResult', { available: false, message: 'Username cannot be empty' });
+            return;
+        }
+        
+        // Validate username format (alphanumeric, underscore, hyphen, 3-20 chars)
+        const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+        if (!usernameRegex.test(username.trim())) {
+            socket.emit('usernameCheckResult', { 
+                available: false, 
+                message: 'Username must be 3-20 characters and contain only letters, numbers, underscores, or hyphens' 
+            });
+            return;
+        }
+        
+        // Check if username is already taken
+        // We'll use a Firestore query via the client, but for server-side we can track in memory
+        // For production, you'd want to use Firebase Admin SDK
+        socket.emit('usernameCheckResult', { 
+            available: true, 
+            message: 'Username is available',
+            username: username.trim()
+        });
+    });
+    
+    socket.on('updateUsername', async (data) => {
+        const { username, firebaseUid } = data;
+        
+        if (!username || !firebaseUid) {
+            socket.emit('usernameUpdateResult', { success: false, message: 'Missing username or user ID' });
+            return;
+        }
+        
+        // Validate username format
+        const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+        if (!usernameRegex.test(username.trim())) {
+            socket.emit('usernameUpdateResult', { 
+                success: false, 
+                message: 'Invalid username format' 
+            });
+            return;
+        }
+        
+        // Update in-memory tracking
+        const trimmedUsername = username.trim().toLowerCase();
+        const existingUid = usernames.get(trimmedUsername);
+        if (existingUid && existingUid !== firebaseUid) {
+            socket.emit('usernameUpdateResult', { 
+                success: false, 
+                message: 'Username is already taken' 
+            });
+            return;
+        }
+        
+        // Remove old username from map if it exists
+        for (const [uname, uid] of usernames.entries()) {
+            if (uid === firebaseUid) {
+                usernames.delete(uname);
+                break;
+            }
+        }
+        
+        // Add new username
+        usernames.set(trimmedUsername, firebaseUid);
+        
+        socket.emit('usernameUpdateResult', { 
+            success: true, 
+            message: 'Username updated successfully',
+            username: username.trim()
+        });
     });
     
     socket.on('cancelPrivateGame', () => {
@@ -2115,17 +2592,21 @@ io.on('connection', (socket) => {
             // Notify the player if effects were cleared
             if (effectsBefore.length > 0) {
                 console.log(`Effect Clear: Successfully removed ${effectsBefore.length} active effect(s) from player ${socket.id}`);
-                // Send notification to client that effects were cleared
-                socket.emit('effectsCleared', {
-                    count: effectsBefore.length,
-                    gameId: data.gameId,
-                    effectTypes: effectTypes
+                // Send updated active effects to the player so they can update their gameState
+                socket.emit('activeEffectsUpdated', {
+                    activeEffects: game.activeEffects,
+                    gameId: data.gameId
                 });
                 
-                // Also notify opponent
+                // Also notify opponent about updated effects
                 if (opponent) {
                     const opponentSocket = io.sockets.sockets.get(opponent.id);
                     if (opponentSocket) {
+                        opponentSocket.emit('activeEffectsUpdated', {
+                            activeEffects: game.activeEffects,
+                            gameId: data.gameId
+                        });
+                        // Also send notification message
                         opponentSocket.emit('opponentEffectsCleared', {
                             playerName: player ? player.name : 'Player',
                             count: effectsBefore.length
@@ -2375,6 +2856,21 @@ io.on('connection', (socket) => {
                     playerId: socket.id
                 });
             }
+            
+            // Also send to spectators
+            const gameSpectators = spectators.get(data.gameId);
+            if (gameSpectators && gameSpectators.size > 0) {
+                gameSpectators.forEach(spectatorSocketId => {
+                    const spectatorSocket = io.sockets.sockets.get(spectatorSocketId);
+                    if (spectatorSocket) {
+                        spectatorSocket.emit('cardPlayed', {
+                            card: cardToShowOpponentForSplash,
+                            playerName: player ? player.name : 'Player',
+                            playerId: socket.id
+                        });
+                    }
+                });
+            }
         }
         
         // Clear the card chain and track the last played card (for stolen card)
@@ -2600,9 +3096,17 @@ io.on('connection', (socket) => {
             
             // Delay gameOver to allow the winning guess animation to complete (2 seconds)
             setTimeout(() => {
+            game.status = 'finished';
+            // Clean up user-to-game tracking
+            game.players.forEach(player => {
+                if (player.firebaseUid) {
+                    userToGame.delete(player.firebaseUid);
+                }
+            });
             io.to(data.gameId).emit('gameOver', {
                 winner: socket.id,
-                word: game.word
+                word: game.word,
+                gameId: data.gameId
             });
             }, 2000);
             return;
@@ -2707,10 +3211,10 @@ io.on('connection', (socket) => {
             });
         }
         
-        // Send to opponent
-        const opponentSocket = io.sockets.sockets.get(opponent.id);
-        if (opponentSocket) {
-            let opponentFeedback = null;
+            // Send to opponent and spectators
+            const opponentSocket = io.sockets.sockets.get(opponent.id);
+            if (opponentSocket) {
+                let opponentFeedback = null;
             if (shouldHideFeedback) {
                 // Hidden feedback: show all grey (absent) for opponent, but guess is visible
                 opponentFeedback = ['absent', 'absent', 'absent', 'absent', 'absent'];
@@ -2731,6 +3235,23 @@ io.on('connection', (socket) => {
                 row: boardRow,
                 hidden: shouldHideGuess  // Only hide if guess is hidden, not feedback
             });
+            
+            // Also send to spectators (they see everything)
+            const gameSpectators = spectators.get(data.gameId);
+            if (gameSpectators && gameSpectators.size > 0) {
+                gameSpectators.forEach(spectatorSocketId => {
+                    const spectatorSocket = io.sockets.sockets.get(spectatorSocketId);
+                    if (spectatorSocket) {
+                        spectatorSocket.emit('guessSubmitted', {
+                            playerId: socket.id,
+                            guess: guess,
+                            feedback: realFeedback,
+                            row: boardRow,
+                            hidden: false  // Spectators see all guesses
+                        });
+                    }
+                });
+            }
         }
         
         // Check if this was an extra guess (allows back-to-back guesses)
@@ -2859,11 +3380,27 @@ io.on('connection', (socket) => {
             console.log(`Player ${socket.id} removed from matchmaking queue. Queue size: ${matchmakingQueue.length}`);
         }
         
+        // Remove from spectators if applicable
+        spectators.forEach((spectatorSet, gameId) => {
+            if (spectatorSet.has(socket.id)) {
+                spectatorSet.delete(socket.id);
+                if (spectatorSet.size === 0) {
+                    spectators.delete(gameId);
+                }
+            }
+        });
+        
         const playerData = players.get(socket.id);
         if (playerData) {
             const game = games.get(playerData.gameId);
             if (game) {
                 game.players = game.players.filter(p => p.id !== socket.id);
+                
+                // Clean up user-to-game tracking
+                const player = game.players.find(p => p.id === socket.id);
+                if (player && player.firebaseUid) {
+                    userToGame.delete(player.firebaseUid);
+                }
                 
                 // Clean up bot games
                 if (game.isBotGame) {
@@ -2872,6 +3409,11 @@ io.on('connection', (socket) => {
                 
                 if (game.players.length === 0) {
                     games.delete(playerData.gameId);
+                    userToGame.forEach((gameIdForUser, firebaseUid) => {
+                        if (gameIdForUser === playerData.gameId) {
+                            userToGame.delete(firebaseUid);
+                        }
+                    });
                 } else {
                     io.to(playerData.gameId).emit('playerLeft', {});
                 }

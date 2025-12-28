@@ -91,14 +91,26 @@ You need to set up Firestore security rules so users can read/write their own da
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users can read/write their own user document
+    // Users can read any user document (for friend search), but only write their own
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
     }
     
-    // Users can read/write their own stats document
+    // Users can read any stats document (for displaying opponent stats), but only write their own
     match /stats/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Friends collection - users can read/write their own friend relationships
+    match /friends/{friendDocId} {
+      allow read, write: if request.auth != null && 
+        (request.auth.uid in resource.data.users || 
+         request.auth.uid == resource.data.senderId || 
+         request.auth.uid == resource.data.recipientId);
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.senderId;
     }
   }
 }

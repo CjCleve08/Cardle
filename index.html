@@ -217,6 +217,51 @@
                         </div>
                     </div>
                     
+                    <!-- Friends Tab -->
+                    <div id="friendsTab" class="tab-panel">
+                        <div class="tab-panel-inner">
+                            <h2 class="tab-panel-title">Friends</h2>
+                            
+                            <!-- Add Friend Section -->
+                            <div class="friends-add-section">
+                                <div class="input-group">
+                                    <input type="text" id="friendSearchInput" placeholder="Search by username or email" class="input-field">
+                                    <button id="searchFriendBtn" class="btn btn-primary btn-small">
+                                        <span class="btn-icon">🔍</span>
+                                        <span>Search</span>
+                                    </button>
+                                </div>
+                                
+                                <!-- Search Results -->
+                                <div id="friendSearchResults" class="friend-search-results" style="display: none;">
+                                    <div class="friend-search-results-header">
+                                        <h3 class="friend-search-results-title">Search Results</h3>
+                                        <button id="closeSearchResults" class="friend-search-close-btn">✕</button>
+                                    </div>
+                                    <div id="friendSearchResultsList" class="friend-search-results-list">
+                                        <!-- Results will be populated here -->
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Friend Requests Section -->
+                            <div class="friends-section">
+                                <h3 class="friends-section-title">Friend Requests</h3>
+                                <div id="friendRequestsList" class="friends-list">
+                                    <p class="friends-empty">No pending requests</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Friends List Section -->
+                            <div class="friends-section">
+                                <h3 class="friends-section-title">Your Friends</h3>
+                                <div id="friendsList" class="friends-list">
+                                    <p class="friends-empty">No friends yet</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <!-- Deck Tab -->
                     <div id="deckTab" class="tab-panel">
                         <div class="tab-panel-inner deck-tab-inner">
@@ -263,9 +308,33 @@
                                     <div class="avatar-placeholder">👤</div>
                                 </div>
                                 <div class="profile-info">
-                                    <div class="profile-name" id="profileName">Loading...</div>
+                                    <div class="profile-name-container">
+                                        <div class="profile-name" id="profileName">Loading...</div>
+                                        <button id="editUsernameBtn" class="btn-edit-username" style="display: none;" title="Edit Username">
+                                            <span class="edit-icon">✏️</span>
+                                        </button>
+                                    </div>
                                     <div class="profile-email" id="profileEmail">-</div>
                                     <span class="profile-badge" id="profileAccountType">-</span>
+                                </div>
+                            </div>
+                            <div class="profile-username-section" id="profileUsernameSection" style="display: none;">
+                                <div class="username-change-form">
+                                    <div class="input-group">
+                                        <label for="usernameInput" class="input-label">New Username</label>
+                                        <input type="text" id="usernameInput" class="input-field" placeholder="Enter new username" maxlength="20">
+                                        <div id="usernameError" class="error-message" style="display: none;"></div>
+                                        <div id="usernameSuccess" class="success-message" style="display: none;"></div>
+                                    </div>
+                                    <div class="username-form-actions">
+                                        <button id="saveUsernameBtn" class="btn btn-primary">
+                                            <span class="btn-icon">✓</span>
+                                            <span>Save</span>
+                                        </button>
+                                        <button id="cancelUsernameBtn" class="btn btn-secondary">
+                                            <span>Cancel</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                             <div class="profile-stats-section">
@@ -337,6 +406,12 @@
                             <span class="tab-icon">🃏</span>
                         </div>
                         <span class="tab-label">Deck</span>
+                    </button>
+                    <button class="lobby-tab" data-tab="friends">
+                        <div class="tab-icon-wrapper">
+                            <span class="tab-icon">👥</span>
+                        </div>
+                        <span class="tab-label">Friends</span>
                     </button>
                     <button class="lobby-tab" data-tab="profile">
                         <div class="tab-icon-wrapper">
@@ -495,6 +570,7 @@
                         <div class="vs-player-name" id="vsPlayer1Name">You</div>
                         <div class="vs-player-label">Player 1</div>
                         <div class="vs-player-stat" id="vsPlayer1Stat">Games Played: -</div>
+                        <div class="vs-player-stat" id="vsPlayer1StatWins">Games Won: -</div>
                     </div>
                     <div class="vs-vs-text">VS</div>
                     <div class="vs-player vs-player-right">
@@ -504,6 +580,7 @@
                         <div class="vs-player-name" id="vsPlayer2Name">Opponent</div>
                         <div class="vs-player-label">Player 2</div>
                         <div class="vs-player-stat" id="vsPlayer2Stat">Games Played: -</div>
+                        <div class="vs-player-stat" id="vsPlayer2StatWins">Games Won: -</div>
                     </div>
                 </div>
             </div>
@@ -511,6 +588,9 @@
 
         <!-- Game Screen -->
         <div id="game" class="screen">
+            <button id="leaveSpectateBtn" class="btn-leave-spectate" style="display: none;" title="Leave Spectator Mode" onclick="window.leaveSpectatorMode && window.leaveSpectatorMode()">
+                <span>← Leave</span>
+            </button>
             <div class="game-content">
                 <!-- Card Selection Phase -->
                 <div id="cardSelection" class="card-selection-phase">
@@ -542,6 +622,7 @@
 
                     <!-- Game Board -->
                     <div id="gameBoard" class="game-board">
+                    <div class="game-board-scaling-container" id="gameBoardScalingContainer">
                     <div class="game-header-logo">
                         <img src="images/CardleLogo.png" alt="Cardle Logo" class="game-logo">
                     </div>
@@ -581,6 +662,7 @@
 
                     <div class="keyboard" id="keyboard">
                         <!-- Keyboard will be generated dynamically -->
+                    </div>
                     </div>
                     </div>
 
@@ -655,7 +737,10 @@
                 <h2 id="gameOverTitle" class="game-over-title">Game Over</h2>
                 <p id="gameOverMessage" class="game-over-message"></p>
                 <div class="game-over-word" id="gameOverWord"></div>
-                <button id="playAgainBtn" class="btn btn-primary game-over-button">Play Again</button>
+                <div class="game-over-buttons">
+                    <button id="rematchBtn" class="btn btn-primary game-over-button">Rematch</button>
+                    <button id="backToLobbyBtn" class="btn btn-secondary game-over-button">Back to Lobby</button>
+                </div>
             </div>
         </div>
     </div>
