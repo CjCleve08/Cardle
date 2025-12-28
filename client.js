@@ -2591,12 +2591,104 @@ function createKeyboard() {
     }
 }
 
+function rebuildKeyboardFromBoard() {
+    // Rebuild keyboard feedback colors from the game board
+    // This is used when restoring keyboard after hiddenKeyboard effect ends
+    // Track the best state for each letter (correct > present > absent)
+    const letterStates = {};
+    
+    // First, try to rebuild from gameState if available (more reliable)
+    if (gameState && gameState.players && currentPlayer) {
+        const player = gameState.players.find(p => p.id === currentPlayer);
+        if (player && player.guesses && Array.isArray(player.guesses)) {
+            player.guesses.forEach(guessData => {
+                if (guessData.guess && guessData.feedback) {
+                    const guess = guessData.guess;
+                    const feedback = guessData.feedback;
+                    
+                    for (let i = 0; i < guess.length && i < feedback.length; i++) {
+                        const letter = guess[i];
+                        const state = feedback[i];
+                        
+                        if (letter && state) {
+                            const currentState = letterStates[letter];
+                            // Only update if we're setting a better state (correct > present > absent)
+                            if (!currentState || 
+                                (state === 'correct') ||
+                                (state === 'present' && currentState !== 'correct') ||
+                                (state === 'absent' && currentState !== 'correct' && currentState !== 'present')) {
+                                letterStates[letter] = state;
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    }
+    
+    // Fallback: rebuild from board if gameState not available or incomplete
+    if (Object.keys(letterStates).length === 0) {
+        const boardContainer = document.getElementById('boardContainer');
+        if (boardContainer) {
+            const rows = boardContainer.querySelectorAll('.board-row');
+            rows.forEach(row => {
+                const cells = row.querySelectorAll('.board-cell');
+                cells.forEach((cell, index) => {
+                    // Only process filled cells
+                    if (!cell.classList.contains('filled')) return;
+                    
+                    const letter = cell.textContent.trim();
+                    if (!letter) return;
+                    
+                    // Determine the feedback state from the cell classes
+                    let state = null;
+                    if (cell.classList.contains('correct')) {
+                        state = 'correct';
+                    } else if (cell.classList.contains('present')) {
+                        state = 'present';
+                    } else if (cell.classList.contains('absent')) {
+                        state = 'absent';
+                    }
+                    
+                    // Only update if we have a state and it's better than the current one
+                    if (state) {
+                        const currentState = letterStates[letter];
+                        if (!currentState || 
+                            (state === 'correct') ||
+                            (state === 'present' && currentState !== 'correct') ||
+                            (state === 'absent' && currentState !== 'correct' && currentState !== 'present')) {
+                            letterStates[letter] = state;
+                        }
+                    }
+                });
+            });
+        }
+    }
+    
+    // Apply the states to the keyboard
+    const keys = document.querySelectorAll('.key');
+    keys.forEach(key => {
+        const letter = key.textContent.trim();
+        if (letterStates.hasOwnProperty(letter)) {
+            // Remove all feedback classes
+            key.classList.remove('correct', 'present', 'absent');
+            // Add the correct state
+            key.classList.add(letterStates[letter]);
+        }
+    });
+}
+
 function updateKeyboardVisibility() {
     // Check if hiddenKeyboard effect is active for the current player
     if (!gameState || !currentPlayer) {
         // Game not initialized yet, don't hide keyboard
         return;
     }
+    
+    // Check if keyboard was previously hidden (before we update)
+    const wasKeyboardHidden = Array.from(document.querySelectorAll('.key')).some(key => 
+        key.classList.contains('keyboard-hidden')
+    );
     
     const isKeyboardHidden = gameState.activeEffects && gameState.activeEffects.some(e => 
         e.type === 'hiddenKeyboard' && e.target === currentPlayer && !e.used
@@ -2612,6 +2704,12 @@ function updateKeyboardVisibility() {
             key.classList.remove('keyboard-hidden');
         }
     });
+    
+    // If keyboard was previously hidden and is now visible, restore feedback colors
+    if (wasKeyboardHidden && !isKeyboardHidden) {
+        // Rebuild keyboard state from the board
+        rebuildKeyboardFromBoard();
+    }
 }
 
 function showCardSelection() {

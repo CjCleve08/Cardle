@@ -376,19 +376,7 @@ const CARD_CONFIG = {
             needsRealCardStorage: false
         },
         effects: {
-            onGuess: (game, playerId) => {
-                // Find the opponent
-                const opponent = game.players.find(p => p.id !== playerId);
-                if (opponent) {
-                    // Add timeRush effect targeting the opponent
-                    game.activeEffects.push({
-                        type: 'timeRush',
-                        target: opponent.id,
-                        description: 'Your next turn will only have 20 seconds',
-                        used: false
-                    });
-                }
-            }
+            // timeRush effect is applied immediately when card is selected (handled in selectCard)
         }
     },
     'wordScramble': {
@@ -1401,16 +1389,58 @@ function processBotTurn(gameId) {
                                 activeEffects: currentGame.activeEffects,
                                 gameId: gameId
                             });
-                            humanSocket.emit('opponentEffectsCleared', {
-                                playerName: botPlayerForCard.name,
-                                count: effectsBefore.length
-                            });
                         }
                     }
-                } else {
-                    console.log(`Effect Clear (Bot): No active effects to clear for bot ${botId}`);
                 }
             }
+            
+            // Check if this is a timeRush card - apply effect immediately when card is selected
+            if (selectedCard.id === 'timeRush' && opponent) {
+                // Add timeRush effect targeting the opponent
+                currentGame.activeEffects.push({
+                    type: 'timeRush',
+                    target: opponent.id,
+                    description: 'Your next turn will only have 20 seconds',
+                    used: false
+                });
+                console.log(`Time Rush (Bot): Added timeRush effect targeting opponent ${opponent.id}`);
+                
+                // Notify human opponent with updated active effects
+                if (opponent && !opponent.isBot) {
+                    const humanSocket = io.sockets.sockets.get(opponent.id);
+                    if (humanSocket) {
+                        humanSocket.emit('activeEffectsUpdated', {
+                            activeEffects: currentGame.activeEffects,
+                            gameId: gameId
+                        });
+                    }
+                }
+            }
+            
+            // Check if this is a timeRush card - apply effect immediately when card is selected
+            if (selectedCard.id === 'timeRush' && opponent) {
+                // Add timeRush effect targeting the opponent
+                currentGame.activeEffects.push({
+                    type: 'timeRush',
+                    target: opponent.id,
+                    description: 'Your next turn will only have 20 seconds',
+                    used: false
+                });
+                console.log(`Time Rush (Bot): Added timeRush effect targeting opponent ${opponent.id}`);
+                
+                // Notify human opponent with updated active effects
+                if (opponent && !opponent.isBot) {
+                    const humanSocket = io.sockets.sockets.get(opponent.id);
+                    if (humanSocket) {
+                        humanSocket.emit('activeEffectsUpdated', {
+                            activeEffects: currentGame.activeEffects,
+                            gameId: gameId
+                        });
+                    }
+                }
+            }
+            
+            // Emit card played event for human to see
             
             // Emit card played event for human to see
             const botPlayerForCard = currentGame.players.find(p => p.id === botId);
@@ -2793,6 +2823,32 @@ io.on('connection', (socket) => {
                 }
             } else {
                 console.log(`Effect Clear: No active effects to clear for player ${socket.id}`);
+            }
+        }
+        
+        // Check if this is a timeRush card - apply effect immediately when card is selected
+        if (realCard.id === 'timeRush' && opponent) {
+            // Add timeRush effect targeting the opponent
+            game.activeEffects.push({
+                type: 'timeRush',
+                target: opponent.id,
+                description: 'Your next turn will only have 20 seconds',
+                used: false
+            });
+            console.log(`Time Rush: Added timeRush effect targeting opponent ${opponent.id}`);
+            
+            // Notify both players about updated effects
+            socket.emit('activeEffectsUpdated', {
+                activeEffects: game.activeEffects,
+                gameId: data.gameId
+            });
+            
+            const opponentSocket = io.sockets.sockets.get(opponent.id);
+            if (opponentSocket) {
+                opponentSocket.emit('activeEffectsUpdated', {
+                    activeEffects: game.activeEffects,
+                    gameId: data.gameId
+                });
             }
         }
         
