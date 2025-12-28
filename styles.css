@@ -1121,6 +1121,151 @@ header h1 {
     opacity: 0.8;
 }
 
+/* Card Dropdown Menu */
+.card-dropdown-menu {
+    position: fixed;
+    background: linear-gradient(145deg, #1a1a1b, #2a2a2b);
+    border: 2px solid #6aaa64;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.8), 0 0 16px rgba(106, 170, 100, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    z-index: 10000;
+    min-width: 160px;
+    padding: 4px;
+    animation: dropdownFadeIn 0.2s ease-out;
+    pointer-events: auto;
+    backdrop-filter: blur(10px);
+}
+
+@keyframes dropdownFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.dropdown-item {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: #d7dadc;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    text-align: left;
+    margin: 1px 0;
+}
+
+.dropdown-item:hover {
+    background: linear-gradient(135deg, rgba(106, 170, 100, 0.15), rgba(106, 170, 100, 0.05));
+    color: #6aaa64;
+    transform: translateX(3px);
+}
+
+.dropdown-item:active {
+    transform: translateX(2px) scale(0.98);
+}
+
+.dropdown-item-icon {
+    font-size: 1rem;
+    width: 18px;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dropdown-item-text {
+    flex: 1;
+    letter-spacing: 0.2px;
+}
+
+/* Card Info Overlay */
+.card-info-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(10px);
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: overlayFadeIn 0.3s ease-in;
+}
+
+.card-info-content {
+    position: relative;
+    max-width: 600px;
+    max-height: 85vh;
+    width: 90%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: cardInfoSlideIn 0.3s ease-out;
+    margin-top: 20px;
+    padding-top: 20px;
+}
+
+@keyframes cardInfoSlideIn {
+    from {
+        opacity: 0;
+        transform: scale(0.9);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.card-info-image {
+    width: 100%;
+    height: auto;
+    max-height: 90vh;
+    object-fit: contain;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+}
+
+.card-info-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(58, 58, 60, 0.9);
+    border: 2px solid #3a3a3c;
+    color: #d7dadc;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    font-size: 1.8rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    line-height: 1;
+    z-index: 1;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.card-info-close:hover {
+    background: #3a3a3c;
+    color: #ffffff;
+    transform: rotate(90deg) scale(1.1);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.7);
+}
+
 .deck-cards-grid {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
@@ -2601,20 +2746,28 @@ header h1 {
 }
 
 .splash-card {
-    background: linear-gradient(145deg, #2a3a2b, #1a2a1b);
-    border: 3px solid #6aaa64;
+    background: transparent;
+    border: none;
     border-radius: 16px;
-    padding: 40px 30px;
+    padding: 0;
     width: 320px;
     height: 450px;
     box-shadow: 0 20px 60px rgba(106, 170, 100, 0.4), 0 0 40px rgba(106, 170, 100, 0.2);
     display: flex;
     flex-direction: column;
     justify-content: center;
+    align-items: center;
     margin-bottom: 20px;
     position: relative;
     overflow: hidden;
     transform-style: preserve-3d;
+}
+
+.splash-card-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 16px;
 }
 
 .splash-card::before {
@@ -4192,6 +4345,8 @@ header h1 {
     position: relative;
     transition: all 0.3s ease;
     cursor: pointer;
+    padding: 0;
+    overflow: hidden;
 }
 
 .deck-slot:hover {
@@ -4209,7 +4364,7 @@ header h1 {
 .deck-slot.filled {
     border: 3px solid #6aaa64;
     border-style: solid;
-    padding: 8px;
+    padding: 0;
     cursor: grab;
 }
 
@@ -4254,15 +4409,16 @@ header h1 {
     height: 100%;
     background: transparent;
     border: none;
-    border-radius: 8px;
+    border-radius: 0;
     padding: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
+    margin: 0;
+    display: block;
     cursor: grab;
     transition: all 0.2s ease;
     overflow: hidden;
+    position: absolute;
+    top: 0;
+    left: 0;
 }
 
 .deck-slot-card:hover {
@@ -4278,8 +4434,11 @@ header h1 {
 .deck-slot-card-image {
     width: 100%;
     height: 100%;
-    object-fit: contain;
-    border-radius: 4px;
+    object-fit: cover;
+    border-radius: 12px;
+    display: block;
+    margin: 0;
+    padding: 0;
 }
 
 .deck-slot-card-title {

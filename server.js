@@ -1641,6 +1641,30 @@ function submitBotGuess(gameId, botId, guess, card) {
         });
     }
     
+    // Also send turnChanged to spectators
+    const gameSpectators = spectators.get(gameId);
+    if (gameSpectators && gameSpectators.size > 0) {
+        const spectatorGameState = {
+            gameId: game.gameId,
+            currentTurn: game.currentTurn,
+            players: game.players.map(p => ({
+                id: p.id,
+                name: p.name,
+                guesses: p.guesses,
+                row: p.row
+            })),
+            status: game.status,
+            activeEffects: game.activeEffects,
+            totalGuesses: game.totalGuesses
+        };
+        gameSpectators.forEach(spectatorSocketId => {
+            const spectatorSocket = io.sockets.sockets.get(spectatorSocketId);
+            if (spectatorSocket) {
+                spectatorSocket.emit('turnChanged', spectatorGameState);
+            }
+        });
+    }
+    
     // If it's still bot's turn (extra guess), process again
     if (game.currentTurn === botId) {
         setTimeout(() => processBotTurn(gameId), 1000);
@@ -3393,6 +3417,30 @@ io.on('connection', (socket) => {
                 playerSocket.emit('turnChanged', gameStateForClient);
             }
         });
+        
+        // Also send turnChanged to spectators
+        const gameSpectators = spectators.get(data.gameId);
+        if (gameSpectators && gameSpectators.size > 0) {
+            const spectatorGameState = {
+                gameId: game.gameId,
+                currentTurn: game.currentTurn,
+                players: game.players.map(p => ({
+                    id: p.id,
+                    name: p.name,
+                    guesses: p.guesses,
+                    row: p.row
+                })),
+                status: game.status,
+                activeEffects: game.activeEffects,
+                totalGuesses: game.totalGuesses
+            };
+            gameSpectators.forEach(spectatorSocketId => {
+                const spectatorSocket = io.sockets.sockets.get(spectatorSocketId);
+                if (spectatorSocket) {
+                    spectatorSocket.emit('turnChanged', spectatorGameState);
+                }
+            });
+        }
         
         // Check if it's a bot's turn in a bot game
         if (game.isBotGame && game.currentTurn.startsWith('BOT_')) {

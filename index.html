@@ -693,8 +693,7 @@
                 <div id="cardSplash" class="card-splash-overlay">
                     <div class="card-splash-content">
                         <div class="splash-card" id="splashCard">
-                            <div class="splash-card-title" id="splashCardTitle"></div>
-                            <div class="splash-card-description" id="splashCardDescription"></div>
+                            <img id="splashCardImage" class="splash-card-image" src="" alt="Card">
                         </div>
                         <div class="splash-player" id="splashPlayer"></div>
                     </div>
@@ -738,6 +737,26 @@
                     <button id="backToLobbyBtn" class="btn btn-secondary game-over-button">Back to Lobby</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Card Dropdown Menu (outside deck builder for proper positioning) -->
+    <div id="cardDropdownMenu" class="card-dropdown-menu" style="display: none;">
+        <button class="dropdown-item" id="dropdownAddRemove">
+            <span class="dropdown-item-icon">➕</span>
+            <span class="dropdown-item-text">Add to Deck</span>
+        </button>
+        <button class="dropdown-item" id="dropdownInfo">
+            <span class="dropdown-item-icon">ℹ️</span>
+            <span class="dropdown-item-text">Info</span>
+        </button>
+    </div>
+    
+    <!-- Card Info Overlay -->
+    <div id="cardInfoOverlay" class="card-info-overlay" style="display: none;">
+        <div class="card-info-content">
+            <button class="card-info-close" id="cardInfoClose">×</button>
+            <img id="cardInfoImage" class="card-info-image" src="" alt="Card">
         </div>
     </div>
 

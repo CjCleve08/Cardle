@@ -473,7 +473,7 @@ function getCardConfig() {
 function getCardImagePath(cardId) {
     const cardImageMap = {
         'falseFeedback': 'Bluff.png',
-        'hiddenFeedback': 'PockerFace.png',
+        'hiddenFeedback': 'PokerFace.png',
         'hiddenGuess': 'Blank.png',
         'extraGuess': 'HitMe.png',
         'hideCard': 'SneakySet.png',
@@ -484,7 +484,7 @@ function getCardImagePath(cardId) {
         'blindGuess': 'Null.png',
         'cardSteal': 'Finesse.png',
         'greenToGrey': 'FalseShuffle.png',
-        'cardBlock': 'OppresiveFold.png',
+        'cardBlock': 'OppressiveFold.png',
         'effectClear': 'Counter.png',
         'timeRush': 'QuickDeal.png',
         'wordScramble': 'Undertrick.png',
@@ -1551,6 +1551,9 @@ socket.on('snackTimeTriggered', (data) => {
     if (window.isSpectator) return;
     
     if (data.gameId === gameState?.gameId) {
+        // Save the original hand before replacing it
+        window.snackTimeOriginalHand = [...window.playerCardHand];
+        
         // Put all deck cards into hand (excluding snackTime)
         const deckCards = getDeckCards();
         const allCards = deckCards.filter(card => card.id !== 'snackTime');
@@ -1650,6 +1653,11 @@ socket.on('activeEffectsUpdated', (data) => {
 });
 
 socket.on('turnChanged', (data) => {
+    // Skip if spectator (spectators are handled by a separate handler below)
+    if (window.isSpectator) {
+        return;
+    }
+    
     console.log('Turn changed event received:', data);
     console.log('Current player ID:', currentPlayer);
     console.log('Current turn ID:', data.currentTurn);
@@ -1752,7 +1760,33 @@ socket.on('turnChanged', (data) => {
 });
 
 socket.on('guessSubmitted', (data) => {
-    if (data.playerId === currentPlayer) {
+    // Check if we're spectating
+    if (window.isSpectator && window.spectatedPlayerId) {
+        // For spectators, show spectated player's guesses with displayGuess
+        if (data.playerId === window.spectatedPlayerId) {
+            // This is the spectated player's guess
+            if (data.hidden || !data.guess || !data.feedback) {
+                displayOpponentGuessHidden(data.row);
+            } else {
+                displayGuess(data.guess, data.feedback, data.row);
+                updateKeyboard({ guess: data.guess, feedback: data.feedback });
+            }
+        } else {
+            // This is the opponent's guess (show on opponent board)
+            if (data.hidden || !data.guess) {
+                displayOpponentGuessHidden(data.row);
+            } else if (data.feedback && data.feedback.every(f => f === 'absent') && data.guess) {
+                displayOpponentGuess(data.guess, data.feedback, data.row);
+            } else if (!data.feedback) {
+                displayOpponentGuess(data.guess, ['absent', 'absent', 'absent', 'absent', 'absent'], data.row);
+            } else {
+                displayOpponentGuess(data.guess, data.feedback, data.row);
+                if (!data.feedback.every(f => f === 'absent')) {
+                    updateKeyboard({ guess: data.guess, feedback: data.feedback });
+                }
+            }
+        }
+    } else if (data.playerId === currentPlayer) {
         // This is my guess
         if (data.hidden || !data.guess || !data.feedback) {
             // Guess is hidden from player (Gambler's Card bad luck)
@@ -1804,7 +1838,7 @@ socket.on('requestHand', (data) => {
     if (!window.playerCardHand || window.playerCardHand.length < 3) {
         // Initialize deck pool if needed
         if (!window.deckPool || window.deckPool.length === 0) {
-            initializeDeckPool();
+            initializeDeckPoolSync();
         }
         
         // Draw cards to fill hand
@@ -1837,7 +1871,7 @@ socket.on('requestHandForSteal', (data) => {
     if (!window.playerCardHand || window.playerCardHand.length < 3) {
         // Initialize deck pool if needed
         if (!window.deckPool || window.deckPool.length === 0) {
-            initializeDeckPool();
+            initializeDeckPoolSync();
         }
         
         // Draw cards to fill hand
@@ -1870,7 +1904,7 @@ socket.on('requestHandForBlock', (data) => {
     if (!window.playerCardHand || window.playerCardHand.length < 3) {
         // Initialize deck pool if needed
         if (!window.deckPool || window.deckPool.length === 0) {
-            initializeDeckPool();
+            initializeDeckPoolSync();
         }
         
         // Draw cards to fill hand
@@ -2266,7 +2300,7 @@ function updatePlayersList(players) {
     }
 }
 
-function initializeGame(data) {
+async function initializeGame(data) {
     // Skip normal initialization if spectator
     if (window.isSpectator) {
         console.log('Spectator mode: Skipping normal game initialization');
@@ -2277,7 +2311,7 @@ function initializeGame(data) {
     // Reset card hand and initialize deck pool for new game
     window.playerCardHand = [];
     window.blockedCardId = null; // Clear blocked card for new game
-    initializeDeckPool();
+    await initializeDeckPool();
     createBoard();
     createKeyboard();
     stopTurnTimer(); // Reset timer for new game
@@ -2596,8 +2630,27 @@ function showGameBoard() {
 }
 
 // Deck cycling system (like Clash Royale)
-function initializeDeckPool() {
-    const deckCards = getDeckCards();
+async function initializeDeckPool() {
+    // Ensure decks are loaded from Firebase before getting the deck
+    if (!isGuestMode && currentUser && cachedDecks === null) {
+        await getAllDecks();
+    }
+    
+    const deckIds = await getPlayerDeck();
+    const allCards = getAllCards();
+    const deckCards = deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
+    
+    // Create a shuffled pool of deck cards
+    window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
+    window.playerCardHand = [];
+}
+
+// Synchronous version that uses cached decks (for backwards compatibility)
+function initializeDeckPoolSync() {
+    const deckIds = getPlayerDeckSync();
+    const allCards = getAllCards();
+    const deckCards = deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
+    
     // Create a shuffled pool of deck cards
     window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
     window.playerCardHand = [];
@@ -2614,7 +2667,7 @@ function updateHandPanel() {
     
     // Ensure deck pool is initialized
     if (!window.deckPool || window.deckPool.length === 0) {
-        initializeDeckPool();
+        initializeDeckPoolSync();
     }
     
     // Ensure hand has cards (draw if needed)
@@ -2686,7 +2739,9 @@ function updateHandPanel() {
 function drawCardFromDeck() {
     // If deck pool is empty, reshuffle
     if (!window.deckPool || window.deckPool.length === 0) {
-        const deckCards = getDeckCards();
+        const deckIds = getPlayerDeckSync();
+        const allCards = getAllCards();
+        const deckCards = deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
         window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
     }
     
@@ -2706,7 +2761,7 @@ function generateCards() {
     
     // Initialize deck pool if not exists
     if (!window.deckPool || window.deckPool.length === 0) {
-        initializeDeckPool();
+        initializeDeckPoolSync();
     }
     
     // Get or initialize player's card hand
@@ -2829,7 +2884,7 @@ function generateCards() {
         cardElement.appendChild(cardImage);
         
         if (!isBlocked) {
-            cardElement.onclick = () => selectCard(card, cardElement);
+        cardElement.onclick = () => selectCard(card, cardElement);
         }
         
         // Add hover sound to card
@@ -2913,11 +2968,18 @@ function selectCard(card, cardElement) {
                     }
                 });
                 
-                // Restore normal hand (draw 3 cards)
-                window.playerCardHand = [];
-                while (window.playerCardHand.length < 3 && window.deckPool.length > 0) {
-                    const newCard = drawCardFromDeck();
-                    window.playerCardHand.push(newCard);
+                // Restore the original hand (excluding Snack Time since it was used)
+                if (window.snackTimeOriginalHand && window.snackTimeOriginalHand.length > 0) {
+                    window.playerCardHand = window.snackTimeOriginalHand.filter(c => c.id !== 'snackTime');
+                    // Clean up the saved hand
+                    window.snackTimeOriginalHand = null;
+                } else {
+                    // Fallback: draw 3 cards if original hand wasn't saved
+                    window.playerCardHand = [];
+                    while (window.playerCardHand.length < 3 && window.deckPool.length > 0) {
+                        const newCard = drawCardFromDeck();
+                        window.playerCardHand.push(newCard);
+                    }
                 }
                 
                 // Clear snack time mode
@@ -2965,7 +3027,7 @@ function selectCard(card, cardElement) {
             
             // If deck pool is empty or we couldn't find a suitable card, reshuffle
             if (!newCard) {
-                initializeDeckPool();
+                initializeDeckPoolSync();
                 // Remove cards currently in hand from the new pool to avoid duplicates
                 const handCardIds = new Set(window.playerCardHand.map(c => c.id));
                 window.deckPool = window.deckPool.filter(c => !handCardIds.has(c.id));
@@ -3033,6 +3095,24 @@ function updateTurnIndicator() {
     const indicator = document.getElementById('turnIndicator');
     if (!indicator) return;
     
+    // Handle spectators
+    if (window.isSpectator && gameState && gameState.currentTurn) {
+        const spectatedPlayerId = window.spectatedPlayerId;
+        if (gameState.currentTurn === spectatedPlayerId) {
+            // It's the spectated player's turn
+            indicator.textContent = `${gameState.players?.find(p => p.id === spectatedPlayerId)?.name || 'Player'}'s Turn`;
+            indicator.classList.add('active-turn');
+        } else {
+            // It's the opponent's turn
+            const currentTurnPlayer = gameState.players?.find(p => p.id === gameState.currentTurn);
+            indicator.textContent = `${currentTurnPlayer?.name || 'Opponent'}'s Turn`;
+            indicator.classList.remove('active-turn');
+        }
+        // Start timer for spectators (they see the timer for whoever's turn it is)
+        startTurnTimer();
+        return;
+    }
+    
     if (gameState && gameState.currentTurn === currentPlayer) {
         if (isCardLocked()) {
             indicator.textContent = 'Your Turn - Card Locked!';
@@ -3051,7 +3131,7 @@ function updateTurnIndicator() {
 }
 
 function startTurnTimer(preserveTimeRemaining = false) {
-    // Both players should track the timer
+    // Both players and spectators should track the timer
     if (!gameState || !gameState.currentTurn) {
         console.log('Not starting timer - no game state or current turn');
         return;
@@ -3068,7 +3148,7 @@ function startTurnTimer(preserveTimeRemaining = false) {
     
     // Only reset time remaining if we're not preserving it (e.g., when Counter clears timeRush)
     if (!preserveTimeRemaining) {
-    turnTimeRemaining = timeLimit;
+        turnTimeRemaining = timeLimit;
     } else {
         // If preserving, make sure it doesn't exceed the new limit
         if (turnTimeRemaining > timeLimit) {
@@ -3076,13 +3156,20 @@ function startTurnTimer(preserveTimeRemaining = false) {
         }
     }
     
-    const isMyTurn = gameState.currentTurn === currentPlayer;
-    if (hasTimeRush && isMyTurn) {
+    // Store the current turn for spectators to detect turn changes
+    if (window.isSpectator) {
+        window.spectatorTimerCurrentTurn = gameState.currentTurn;
+    }
+    
+    const isMyTurn = !window.isSpectator && gameState.currentTurn === currentPlayer;
+    const isSpectatedPlayerTurn = window.isSpectator && gameState.currentTurn === window.spectatedPlayerId;
+    
+    if (hasTimeRush && (isMyTurn || isSpectatedPlayerTurn)) {
         console.log('Time Rush effect active - timer set to 20 seconds');
-    } else if (!hasTimeRush && isMyTurn && preserveTimeRemaining) {
+    } else if (!hasTimeRush && (isMyTurn || isSpectatedPlayerTurn) && preserveTimeRemaining) {
         console.log(`Time Rush cleared - timer reset to ${turnTimeRemaining} seconds (limit: ${timeLimit})`);
     }
-    console.log(`Starting turn timer - is my turn: ${isMyTurn}, time remaining: ${turnTimeRemaining}, limit: ${timeLimit}, preserve: ${preserveTimeRemaining}`);
+    console.log(`Starting turn timer - is my turn: ${isMyTurn}, is spectator: ${window.isSpectator}, time remaining: ${turnTimeRemaining}, limit: ${timeLimit}, preserve: ${preserveTimeRemaining}`);
     
     // Clear any existing timer before starting new one
     if (turnTimer) {
@@ -3100,10 +3187,22 @@ function startTurnTimer(preserveTimeRemaining = false) {
             return;
         }
         
-        const stillMyTurn = gameState.currentTurn === currentPlayer;
+        // For spectators, check if the current turn changed (compare with stored turn)
+        if (window.isSpectator) {
+            const currentTurnWhenStarted = window.spectatorTimerCurrentTurn;
+            if (currentTurnWhenStarted !== undefined && currentTurnWhenStarted !== gameState.currentTurn) {
+                // Turn changed, restart timer with new turn
+                console.log('Timer: Turn changed for spectator, restarting timer');
+                stopTurnTimer();
+                startTurnTimer();
+                return;
+            }
+        }
         
-        // If turn changed, stop timer
-        if (isMyTurn && !stillMyTurn) {
+        const stillMyTurn = !window.isSpectator && gameState.currentTurn === currentPlayer;
+        
+        // If turn changed, stop timer (for players only)
+        if (!window.isSpectator && isMyTurn && !stillMyTurn) {
             console.log('Timer: Turn changed, stopping timer');
             stopTurnTimer();
             return;
@@ -3112,10 +3211,10 @@ function startTurnTimer(preserveTimeRemaining = false) {
         turnTimeRemaining--;
         updateTimerDisplay();
         
-        // Only the player whose turn it is can trigger timeout
+        // Only the player whose turn it is can trigger timeout (not spectators)
         if (turnTimeRemaining <= 0) {
             stopTurnTimer();
-            if (stillMyTurn && gameState.gameId) {
+            if (stillMyTurn && gameState.gameId && !window.isSpectator) {
                 console.log('Turn timer expired - switching turn, gameId:', gameState.gameId);
                 socket.emit('turnTimeout', { gameId: gameState.gameId });
             }
@@ -3128,7 +3227,8 @@ function stopTurnTimer() {
         clearInterval(turnTimer);
         turnTimer = null;
     }
-    turnTimeRemaining = TURN_TIME_LIMIT;
+    // Don't reset turnTimeRemaining here - let startTurnTimer() handle it
+    // This allows the timer to properly reset to the correct limit (which may be 20 for timeRush)
     updateTimerDisplay();
 }
 
@@ -3148,7 +3248,8 @@ function updateTimerDisplay() {
         return;
     }
     
-    const isMyTurn = gameState.currentTurn === currentPlayer;
+    // For spectators, always show the timer (for whoever's turn it is)
+    const isMyTurn = !window.isSpectator && gameState.currentTurn === currentPlayer;
     
     // Check if timeRush is active for the current turn
     const currentTurnPlayerId = gameState.currentTurn;
@@ -3466,11 +3567,10 @@ function processSplashQueue() {
 
 function showCardSplash(card, playerName, onComplete) {
     const splash = document.getElementById('cardSplash');
-    const splashTitle = document.getElementById('splashCardTitle');
-    const splashDescription = document.getElementById('splashCardDescription');
+    const splashImage = document.getElementById('splashCardImage');
     const splashPlayer = document.getElementById('splashPlayer');
     
-    if (!splash || !splashTitle || !splashDescription || !splashPlayer) {
+    if (!splash || !splashImage || !splashPlayer) {
         console.error('Splash elements not found');
         if (onComplete) onComplete();
         return;
@@ -3500,8 +3600,8 @@ function showCardSplash(card, playerName, onComplete) {
     splash.onclick = null;
     
     // Set content
-    splashTitle.textContent = card.title || 'Card';
-    splashDescription.textContent = card.description || '';
+    splashImage.src = getCardImagePath(card.id);
+    splashImage.alt = card.title || 'Card';
     splashPlayer.textContent = `${playerName || 'Player'} played:`;
     
     // Reset animation by forcing reflow
@@ -3713,9 +3813,15 @@ function createDeckSlotCard(card, slotIndex) {
         draggedSlotIndex = null;
     });
     
-    cardElement.addEventListener('click', () => {
-        // Remove card from slot on click
-        removeCardFromSlot(slotIndex);
+    cardElement.addEventListener('click', (e) => {
+        // Don't trigger click if it was part of a drag
+        if (cardElement.classList.contains('dragging')) {
+            return;
+        }
+        
+        e.stopPropagation();
+        const isInDeck = true; // Cards in slots are always in deck
+        showCardDropdown(card, cardElement, isInDeck, slotIndex);
     });
     
     return cardElement;
@@ -3890,39 +3996,16 @@ function renderAvailableCards() {
             stopAutoScroll();
         });
         
-        // Add click handler to add card to first open slot
+        // Add click handler to show dropdown menu
         cardElement.addEventListener('click', (e) => {
             // Don't trigger click if it was part of a drag
             if (cardElement.classList.contains('dragging')) {
                 return;
             }
             
-            // Check if card is already in deck
-            if (currentDeckSelection.includes(card.id)) {
-                return; // Card already in deck
-            }
-            
-            const isSpecial = isSpecialCard(card.id);
-            
-            // Find appropriate open slot
-            let targetSlot = -1;
-            if (isSpecial) {
-                // Special cards must go in special slots (0-1)
-                targetSlot = currentDeckSelection.findIndex((slot, index) => 
-                    slot === null && index < SPECIAL_CARD_SLOTS
-                );
-            } else {
-                // Normal cards can go in any slot
-                targetSlot = currentDeckSelection.findIndex(slot => slot === null);
-            }
-            
-            if (targetSlot !== -1) {
-                currentDeckSelection[targetSlot] = card.id;
-                updateDeckSlots();
-                autoSaveDeck(); // Auto-save when deck changes
-            } else if (isSpecial) {
-                showGameMessage('No Special Slot Available', 'Special card slots are full! Remove a card from a special slot (★) first.', '⚠️');
-            }
+            e.stopPropagation();
+            const isInDeck = currentDeckSelection.includes(card.id);
+            showCardDropdown(card, cardElement, isInDeck, null);
         });
         
         deckCardsGrid.appendChild(cardElement);
@@ -4093,6 +4176,241 @@ function removeCardFromSlot(slotIndex) {
     autoSaveDeck(); // Auto-save when deck changes
 }
 
+// Dropdown menu for deck builder cards
+let currentDropdownCard = null;
+let currentDropdownSlotIndex = null;
+let currentDropdownCardElement = null;
+let dropdownPositionUpdateInterval = null;
+
+function updateDropdownPosition() {
+    if (!currentDropdownCardElement) return;
+    
+    const dropdown = document.getElementById('cardDropdownMenu');
+    if (!dropdown || dropdown.style.display === 'none') return;
+    
+    const rect = currentDropdownCardElement.getBoundingClientRect();
+    
+    // Center the dropdown below the card
+    dropdown.style.left = `${rect.left + (rect.width / 2) - 80}px`;
+    dropdown.style.top = `${rect.bottom + 8}px`;
+    
+    // Ensure dropdown is visible (adjust if it goes off screen)
+    const dropdownRect = dropdown.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    
+    // Adjust if dropdown goes off right edge
+    if (dropdownRect.right > viewportWidth - 10) {
+        dropdown.style.left = `${viewportWidth - dropdownRect.width - 10}px`;
+    }
+    // Adjust if dropdown goes off left edge
+    if (dropdownRect.left < 10) {
+        dropdown.style.left = '10px';
+    }
+    // Adjust if dropdown goes off bottom edge - show above card instead
+    if (dropdownRect.bottom > viewportHeight - 10) {
+        dropdown.style.top = `${rect.top - dropdownRect.height - 8}px`;
+    }
+}
+
+function showCardDropdown(card, cardElement, isInDeck, slotIndex = null) {
+    const dropdown = document.getElementById('cardDropdownMenu');
+    const addRemoveBtn = document.getElementById('dropdownAddRemove');
+    
+    if (!dropdown || !addRemoveBtn) {
+        console.error('Dropdown elements not found', { dropdown: !!dropdown, addRemoveBtn: !!addRemoveBtn });
+        return;
+    }
+    
+    const addRemoveText = addRemoveBtn.querySelector('.dropdown-item-text');
+    const addRemoveIcon = addRemoveBtn.querySelector('.dropdown-item-icon');
+    
+    if (!addRemoveText || !addRemoveIcon) {
+        console.error('Dropdown button elements not found');
+        return;
+    }
+    
+    // Clean up any existing dropdown event listeners first
+    if (dropdown._scrollHandler) {
+        window.removeEventListener('scroll', dropdown._scrollHandler, true);
+        delete dropdown._scrollHandler;
+    }
+    if (dropdown._resizeHandler) {
+        window.removeEventListener('resize', dropdown._resizeHandler);
+        delete dropdown._resizeHandler;
+    }
+    if (dropdownPositionUpdateInterval) {
+        clearInterval(dropdownPositionUpdateInterval);
+        dropdownPositionUpdateInterval = null;
+    }
+    
+    // Store current card info
+    currentDropdownCard = card;
+    currentDropdownSlotIndex = slotIndex;
+    currentDropdownCardElement = cardElement;
+    
+    // Update button text and icon based on whether card is in deck
+    if (isInDeck) {
+        addRemoveText.textContent = 'Remove from Deck';
+        addRemoveIcon.textContent = '➖';
+    } else {
+        addRemoveText.textContent = 'Add to Deck';
+        addRemoveIcon.textContent = '➕';
+    }
+    
+    // Position dropdown directly below the clicked card while hidden (visibility: hidden keeps layout)
+    dropdown.style.display = 'block';
+    dropdown.style.visibility = 'hidden';
+    updateDropdownPosition();
+    
+    // Show it after position is set (using double RAF to ensure browser has applied the position)
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            dropdown.style.visibility = 'visible';
+        });
+    });
+    
+    // Update position on scroll and resize to keep it under the card
+    const updateHandler = () => updateDropdownPosition();
+    window.addEventListener('scroll', updateHandler, true);
+    window.addEventListener('resize', updateHandler);
+    
+    // Store handlers for cleanup
+    dropdown._scrollHandler = updateHandler;
+    dropdown._resizeHandler = updateHandler;
+    
+    // Also update position periodically in case of layout shifts
+    dropdownPositionUpdateInterval = setInterval(updateDropdownPosition, 100);
+    
+    // Add click handler for add/remove button
+    addRemoveBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (isInDeck) {
+            removeCardFromSlot(slotIndex);
+        } else {
+            addCardToDeck(card);
+        }
+        hideCardDropdown();
+    };
+    
+    // Add click handler for info button
+    const infoBtn = document.getElementById('dropdownInfo');
+    if (infoBtn) {
+        infoBtn.onclick = (e) => {
+            e.stopPropagation();
+            showCardInfo(card);
+            hideCardDropdown();
+        };
+    }
+    
+    // Close dropdown when clicking outside
+    setTimeout(() => {
+        const clickHandler = (e) => {
+            if (!dropdown.contains(e.target)) {
+                hideCardDropdown();
+                document.removeEventListener('click', clickHandler);
+            }
+        };
+        document.addEventListener('click', clickHandler);
+    }, 0);
+}
+
+function hideCardDropdown() {
+    const dropdown = document.getElementById('cardDropdownMenu');
+    if (dropdown) {
+        // Clean up event listeners
+        if (dropdown._scrollHandler) {
+            window.removeEventListener('scroll', dropdown._scrollHandler, true);
+            delete dropdown._scrollHandler;
+        }
+        if (dropdown._resizeHandler) {
+            window.removeEventListener('resize', dropdown._resizeHandler);
+            delete dropdown._resizeHandler;
+        }
+        
+        // Hide the dropdown
+        dropdown.style.display = 'none';
+        dropdown.style.visibility = 'hidden';
+    }
+    
+    // Clear interval
+    if (dropdownPositionUpdateInterval) {
+        clearInterval(dropdownPositionUpdateInterval);
+        dropdownPositionUpdateInterval = null;
+    }
+    
+    currentDropdownCard = null;
+    currentDropdownSlotIndex = null;
+    currentDropdownCardElement = null;
+}
+
+function addCardToDeck(card) {
+    const isSpecial = isSpecialCard(card.id);
+    
+    // Find appropriate open slot
+    let targetSlot = -1;
+    if (isSpecial) {
+        // Special cards must go in special slots (0-1)
+        targetSlot = currentDeckSelection.findIndex((slot, index) => 
+            slot === null && index < SPECIAL_CARD_SLOTS
+        );
+    } else {
+        // Normal cards can go in any slot
+        targetSlot = currentDeckSelection.findIndex(slot => slot === null);
+    }
+    
+    if (targetSlot !== -1) {
+        currentDeckSelection[targetSlot] = card.id;
+        updateDeckSlots();
+        autoSaveDeck(); // Auto-save when deck changes
+    } else if (isSpecial) {
+        showGameMessage('No Special Slot Available', 'Special card slots are full! Remove a card from a special slot first.', '⚠️');
+    } else {
+        showGameMessage('Deck Full', 'Your deck is full! Remove a card first.', '⚠️');
+    }
+}
+
+// Card info overlay
+function showCardInfo(card) {
+    const overlay = document.getElementById('cardInfoOverlay');
+    const cardImage = document.getElementById('cardInfoImage');
+    
+    if (!overlay || !cardImage) {
+        console.error('Card info overlay elements not found');
+        return;
+    }
+    
+    cardImage.src = getCardImagePath(card.id);
+    cardImage.alt = card.title || 'Card';
+    overlay.style.display = 'flex';
+    
+    // Close on click
+    overlay.onclick = (e) => {
+        if (e.target === overlay) {
+            hideCardInfo();
+        }
+    };
+}
+
+function hideCardInfo() {
+    const overlay = document.getElementById('cardInfoOverlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+        overlay.onclick = null;
+    }
+}
+
+// Initialize card info overlay close button (called after DOM is loaded)
+function initializeCardInfoOverlay() {
+    const cardInfoCloseBtn = document.getElementById('cardInfoClose');
+    if (cardInfoCloseBtn) {
+        cardInfoCloseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            hideCardInfo();
+        });
+    }
+}
+
 // Save button removed - no longer needed
 
 async function saveDeck() {
@@ -4190,6 +4508,9 @@ async function switchDeckSlot(slot) {
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize current deck slot
     currentDeckSlot = getCurrentDeckSlot();
+    
+    // Initialize card info overlay
+    initializeCardInfoOverlay();
     
     // Wait a bit for CARD_CONFIG to be injected by server
     setTimeout(async () => {
@@ -5099,8 +5420,16 @@ socket.on('gameStateForSpectator', (data) => {
     }
 });
 
-function initializeSpectatorView(gameState) {
-    console.log('Initializing spectator view with game state:', gameState);
+function initializeSpectatorView(data) {
+    console.log('Initializing spectator view with game state:', data);
+    
+    // Set the player being spectated (first player, index 0)
+    if (data.players && data.players.length > 0) {
+        window.spectatedPlayerId = data.players[0].id;
+    }
+    
+    // Store gameState for spectator (use global gameState variable)
+    gameState = data;
     
     // Hide card selection immediately
     const cardSelection = document.getElementById('cardSelection');
@@ -5140,9 +5469,9 @@ function initializeSpectatorView(gameState) {
             if (player.guesses && player.guesses.length > 0) {
                 player.guesses.forEach(guessData => {
                     if (guessData.guess && guessData.feedback) {
-                        // For spectators, determine which board based on player position
-                        // We need to figure out which player is which - use the first player as player 1
-                        if (index === 0) {
+                        // For spectators, show spectated player's guesses with displayGuess (main view)
+                        // and opponent's guesses with displayOpponentGuess
+                        if (player.id === window.spectatedPlayerId) {
                             displayGuess(guessData.guess, guessData.feedback, guessData.row);
                         } else {
                             displayOpponentGuess(guessData.guess, guessData.feedback, guessData.row);
@@ -5153,7 +5482,7 @@ function initializeSpectatorView(gameState) {
         });
     }
     
-    // Update turn indicator for spectator
+    // Update turn indicator for spectator (this will also start the timer)
     if (gameState.currentTurn) {
         updateTurnIndicator();
     }
@@ -5192,6 +5521,29 @@ function initializeSpectatorView(gameState) {
     const handPanel = document.querySelector('.hand-panel');
     if (handPanel) handPanel.style.display = 'none';
 }
+
+// Listen for turn changes while spectating (this runs after the main turnChanged handler)
+// We need a separate handler because the main one has an early return for spectators
+socket.on('turnChanged', (data) => {
+    if (window.isSpectator && window.spectatorGameId && data.gameId === window.spectatorGameId) {
+        // Update gameState for spectator
+        if (gameState) {
+            gameState.currentTurn = data.currentTurn;
+            gameState.players = data.players;
+            gameState.status = data.status;
+            gameState.activeEffects = data.activeEffects;
+            if (data.totalGuesses !== undefined) {
+                gameState.totalGuesses = data.totalGuesses;
+            }
+        } else {
+            gameState = data;
+        }
+        
+        // Update turn indicator and start timer
+        stopTurnTimer();
+        updateTurnIndicator();
+    }
+});
 
 // Listen for game updates while spectating
 socket.on('guessSubmitted', (data) => {
