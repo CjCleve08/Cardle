@@ -10,9 +10,7 @@ class SoundManager {
         this.enabled = true;
         this.backgroundMusic = null;
         this.musicEnabled = true;
-        this.audioUnlocked = false;
         this.initAudioContext();
-        this.unlockHtmlAudio();
     }
 
     initAudioContext() {
@@ -25,67 +23,11 @@ class SoundManager {
         }
     }
 
-    // Unlock HTML Audio by playing a silent audio element (bypasses autoplay restrictions)
-    unlockHtmlAudio() {
-        if (this.audioUnlocked) return;
-        
-        try {
-            // Create a data URI for a very short silent audio file (1 second of silence in WAV format)
-            // Base64 encoded 1-second silent WAV file
-            const silentAudio = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==';
-            
-            // Create a silent HTML audio element and play it to unlock audio
-            const unlockAudio = new Audio(silentAudio);
-            unlockAudio.volume = 0.01; // Very quiet but not silent (some browsers block completely silent audio)
-            
-            // Try to play immediately to unlock audio
-            const playPromise = unlockAudio.play();
-            if (playPromise !== undefined) {
-                playPromise.then(() => {
-                    this.audioUnlocked = true;
-                    console.log('HTML Audio unlocked for autoplay');
-                    unlockAudio.pause();
-                    unlockAudio.remove();
-                }).catch(err => {
-                    console.log('Could not unlock HTML Audio initially:', err);
-                    // Will unlock on first user interaction
-                });
-            }
-            
-            // Also unlock on any user interaction as fallback
-            const unlockOnInteraction = () => {
-                if (!this.audioUnlocked) {
-                    unlockAudio.play().then(() => {
-                        this.audioUnlocked = true;
-                        console.log('HTML Audio unlocked on user interaction');
-                        unlockAudio.pause();
-                        unlockAudio.remove();
-                    }).catch(err => {
-                        console.log('Could not unlock HTML Audio:', err);
-                    });
-                    document.removeEventListener('click', unlockOnInteraction);
-                    document.removeEventListener('touchstart', unlockOnInteraction);
-                    document.removeEventListener('keydown', unlockOnInteraction);
-                }
-            };
-            document.addEventListener('click', unlockOnInteraction, { once: true });
-            document.addEventListener('touchstart', unlockOnInteraction, { once: true });
-            document.addEventListener('keydown', unlockOnInteraction, { once: true });
-        } catch (e) {
-            console.warn('Could not unlock HTML Audio:', e);
-        }
-    }
-
     // Ensure audio context is running (required for Chrome autoplay policy)
     ensureAudioContext() {
-        if (!this.enabled) {
-            this.initAudioContext();
-        }
-        if (!this.audioContext) return;
+        if (!this.enabled || !this.audioContext) return;
         if (this.audioContext.state === 'suspended') {
-            this.audioContext.resume().catch(err => {
-                console.log('Could not resume audio context:', err);
-            });
+            this.audioContext.resume();
         }
     }
 
@@ -378,10 +320,6 @@ class SoundManager {
         // Stop any existing music
         this.stopBackgroundMusic();
         
-        // Ensure audio is unlocked
-        this.unlockHtmlAudio();
-        this.ensureAudioContext();
-        
         // Create audio element for intro music
         this.backgroundMusic = new Audio(`Sounds/Music/${filename}`);
         this.backgroundMusic.loop = false; // Don't loop intro music
@@ -422,41 +360,17 @@ class SoundManager {
             this.backgroundMusic.addEventListener('timeupdate', updateVolume);
         });
         
-        // Try to load and play immediately
-        this.backgroundMusic.load();
+        // Handle autoplay policy - try to play, but don't fail if blocked
+        const playPromise = this.backgroundMusic.play();
+        if (playPromise !== undefined) {
+            playPromise.catch(error => {
+                console.log('Intro music autoplay prevented (will play on user interaction):', error);
+                // Music will play on first user interaction via initSoundOnInteraction
+            });
+        }
         
-        // Aggressively try to play the music
-        const tryPlay = () => {
-            if (!this.backgroundMusic) return;
-            
-            const playPromise = this.backgroundMusic.play();
-            if (playPromise !== undefined) {
-                playPromise.then(() => {
-                    console.log('Intro music started playing');
-                }).catch(error => {
-                    // If autoplay is blocked, try again when user interacts
-                    console.log('Intro music autoplay blocked, will play on interaction');
-                    const playOnInteraction = () => {
-                        if (this.backgroundMusic && this.backgroundMusic.paused) {
-                            this.backgroundMusic.play().catch(() => {});
-                        }
-                        document.removeEventListener('click', playOnInteraction);
-                        document.removeEventListener('touchstart', playOnInteraction);
-                        document.removeEventListener('keydown', playOnInteraction);
-                    };
-                    document.addEventListener('click', playOnInteraction, { once: true });
-                    document.addEventListener('touchstart', playOnInteraction, { once: true });
-                    document.addEventListener('keydown', playOnInteraction, { once: true });
-                });
-            }
-        };
-        
-        // Try to play as soon as possible
-        this.backgroundMusic.addEventListener('canplay', tryPlay, { once: true });
-        this.backgroundMusic.addEventListener('loadeddata', tryPlay, { once: true });
-        
-        // Also try immediately
-        setTimeout(tryPlay, 50);
+        // Also ensure audio context is ready
+        this.ensureAudioContext();
     }
 
     stopBackgroundMusic() {
