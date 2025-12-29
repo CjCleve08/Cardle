@@ -1090,7 +1090,19 @@ function createFallingElement(container) {
     element.className = `falling-element ${isCard ? 'falling-card' : 'falling-letter'}`;
     
     if (isCard) {
-        element.textContent = '🃏';
+        // Get a random card from all available cards
+        const allCards = getAllCards();
+        if (allCards.length > 0) {
+            const randomCard = allCards[Math.floor(Math.random() * allCards.length)];
+            const cardImage = document.createElement('img');
+            cardImage.src = getCardImagePath(randomCard.id);
+            cardImage.alt = randomCard.title || 'Card';
+            cardImage.className = 'falling-card-image';
+            element.appendChild(cardImage);
+        } else {
+            // Fallback to emoji if cards aren't loaded yet
+            element.textContent = '🃏';
+        }
     } else {
         // Random letter from A-Z
         const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -1373,6 +1385,7 @@ socket.on('playerLeftPrivateGame', (data) => {
 socket.on('gameStarted', (data) => {
     console.log('Game started event received:', data);
     console.log('Players array:', data.players);
+    console.log('Is tutorial?', data.isTutorial);
     
     // Set currentPlayer from the event if not already set
     if (data.yourPlayerId) {
@@ -1382,9 +1395,15 @@ socket.on('gameStarted', (data) => {
     
     console.log('My player ID:', currentPlayer);
     
-    // Remove yourPlayerId from data before storing in gameState
+    // Remove yourPlayerId from data before storing in gameState, but preserve isTutorial
     const { yourPlayerId, ...gameStateData } = data;
     gameState = gameStateData;
+    
+    // Ensure isTutorial is preserved in gameState
+    if (data.isTutorial !== undefined) {
+        gameState.isTutorial = data.isTutorial;
+        console.log('Tutorial mode set in gameState:', gameState.isTutorial);
+    }
     
     // Ensure gameId is set in gameState (it might be in the data)
     if (data.gameId && !gameState.gameId) {
@@ -1413,8 +1432,10 @@ socket.on('gameStarted', (data) => {
         }
     }
     
-    // Show VS screen first
-    if (ScreenManager.show('vs')) {
+    // Show VS screen first (or skip for tutorial)
+    const showVSScreen = !data.isTutorial; // Skip VS screen for tutorial
+    if (showVSScreen && ScreenManager.show('vs')) {
+        console.log('Showing VS screen');
         // Update VS screen with player names
         const vsPlayer1Name = document.getElementById('vsPlayer1Name');
         const vsPlayer2Name = document.getElementById('vsPlayer2Name');
@@ -1558,8 +1579,10 @@ socket.on('gameStarted', (data) => {
             }
         }
         
-        // After 5 seconds, transition to game screen
+        // After 3 seconds (or immediately for tutorial), transition to game screen
+        const transitionDelay = data.isTutorial ? 500 : 3000; // Faster transition for tutorial
         setTimeout(() => {
+            console.log('Transitioning to game screen, tutorial:', data.isTutorial);
             // Play game start sound when transitioning to game
             if (typeof soundManager !== 'undefined') {
                 soundManager.playGameStart();
@@ -1573,27 +1596,54 @@ socket.on('gameStarted', (data) => {
             }
             if (findMatchBtn) {
                 findMatchBtn.disabled = false;
-    }
+            }
     
-    if (ScreenManager.show('game')) {
+            if (ScreenManager.show('game')) {
+                console.log('Game screen shown successfully');
                 // Start background music when game starts
                 if (typeof soundManager !== 'undefined') {
                     soundManager.playBackgroundMusic('GameSoundTrack.mp4');
                 }
-    initializeGame(gameState);
-    } else {
-        console.error('Failed to show game screen!');
+                // Check if this is a tutorial game (check both gameState and data)
+                if (gameState.isTutorial || data.isTutorial) {
+                    window.tutorialMode = true;
+                    window.tutorialStep = 0;
+                    window.tutorialMessagesShown = new Set(); // Track which messages have been shown
+                    // Store tutorial word if provided
+                    if (data.tutorialWord) {
+                        tutorialWord = data.tutorialWord;
+                        console.log('Tutorial word set in gameStarted:', tutorialWord);
+                    }
+                    console.log('Tutorial mode activated in gameStarted handler, step:', window.tutorialStep);
+                }
+                initializeGame(gameState);
+            } else {
+                console.error('Failed to show game screen!');
             }
-        }, 3000);
+        }, transitionDelay);
     } else {
-        // Fallback: if VS screen fails, go directly to game
-        console.error('Failed to show vs screen, going directly to game');
+        // For tutorial or if VS screen fails, go directly to game
+        console.log('Skipping VS screen, going directly to game (tutorial:', data.isTutorial, ')');
         if (ScreenManager.show('game')) {
             if (typeof soundManager !== 'undefined') {
                 soundManager.playGameStart();
                 soundManager.playBackgroundMusic('GameSoundTrack.mp4');
             }
+            // Check if this is a tutorial game
+            if (gameState.isTutorial || data.isTutorial) {
+                window.tutorialMode = true;
+                window.tutorialStep = 0;
+                window.tutorialMessagesShown = new Set(); // Track which messages have been shown
+                // Store tutorial word if provided
+                if (data.tutorialWord) {
+                    tutorialWord = data.tutorialWord;
+                    console.log('Tutorial word set in fallback:', tutorialWord);
+                }
+                console.log('Tutorial mode activated (direct to game), step:', window.tutorialStep);
+            }
             initializeGame(gameState);
+        } else {
+            console.error('Failed to show game screen in fallback!');
         }
     }
 });
@@ -1840,6 +1890,17 @@ socket.on('turnChanged', (data) => {
         hideCardSelection();
         document.getElementById('wordInput').disabled = true;
         document.getElementById('wordInput').value = '';
+        
+        // Show tutorial message on opponent's turn (only once, when opponent's turn first starts)
+        if (window.tutorialMode && !window.tutorialMessagesShown?.has('opponentTurn')) {
+            setTimeout(() => {
+                if (window.tutorialMode && !window.tutorialMessagesShown.has('opponentTurn')) {
+                    queueTutorialMessage('opponentTurn');
+                    window.tutorialStep = 4;
+                    console.log('Tutorial step updated to:', window.tutorialStep);
+                }
+            }, 1000);
+        }
     }
 });
 
@@ -1880,6 +1941,18 @@ socket.on('guessSubmitted', (data) => {
             // Normal display
         displayGuess(data.guess, data.feedback, data.row);
         updateKeyboard({ guess: data.guess, feedback: data.feedback });
+        
+        // Show tutorial message after first guess feedback (only once, after first guess)
+        if (window.tutorialMode && !window.tutorialMessagesShown?.has('feedback')) {
+            console.log('Feedback received, queueing feedback tutorial');
+            setTimeout(() => {
+                if (window.tutorialMode && !window.tutorialMessagesShown.has('feedback')) {
+                    queueTutorialMessage('feedback');
+                    window.tutorialStep = 3;
+                    console.log('Tutorial step updated to:', window.tutorialStep);
+                }
+            }, 2500);
+        }
         }
     } else {
         // This is opponent's guess
@@ -2278,6 +2351,15 @@ socket.on('gameOver', (data) => {
         }
     }
     
+    // Show tutorial message if in tutorial mode (only once, when game ends)
+    if (window.tutorialMode && !window.tutorialMessagesShown?.has('gameOver')) {
+        setTimeout(() => {
+            if (window.tutorialMode && !window.tutorialMessagesShown.has('gameOver')) {
+                queueTutorialMessage('gameOver');
+            }
+        }, 2000);
+    }
+    
     // Update statistics (async, but don't wait for it)
     updateStats({
         won: won,
@@ -2371,6 +2453,14 @@ socket.on('cardPlayed', (data) => {
     console.log('Card played event received:', data);
     if (data && data.card) {
         queueCardSplash(data.card, data.playerName);
+        
+        // Show tutorial message if opponent played a card (only once, first time)
+        if (window.tutorialMode && data.playerId !== currentPlayer && !window.tutorialMessagesShown?.has('opponentCard')) {
+            // Wait for card splash to finish, then show tutorial message
+            setTimeout(() => {
+                queueTutorialMessage('opponentCard');
+            }, 2000);
+        }
     }
 });
 
@@ -2423,6 +2513,29 @@ async function initializeGame(data) {
     if (window.isSpectator) {
         console.log('Spectator mode: Skipping normal game initialization');
         return;
+    }
+    
+    // Initialize tutorial mode if this is a tutorial game
+    if (data.isTutorial) {
+        console.log('Tutorial mode activated!');
+        window.tutorialMode = true;
+        window.tutorialStep = 0;
+        window.tutorialMessagesShown = new Set(); // Track which messages have been shown
+        // Store tutorial word if provided
+        if (data.tutorialWord) {
+            tutorialWord = data.tutorialWord;
+            console.log('Tutorial word set:', tutorialWord);
+        }
+        // Show first tutorial message after a delay to ensure game is set up
+        setTimeout(() => {
+            if (window.tutorialMode) {
+                queueTutorialMessage('welcome');
+            }
+        }, 1500);
+    } else {
+        window.tutorialMode = false;
+        tutorialWord = null;
+        window.tutorialMessagesShown = null;
     }
     
     currentRow = 0;
@@ -2857,6 +2970,18 @@ function showCardSelection() {
         cardSelection.style.display = 'flex';
         console.log('Card selection shown');
         
+        // Show tutorial message if in tutorial mode (only once, when card selection first appears)
+        if (window.tutorialMode && !window.tutorialMessagesShown?.has('cardSelection')) {
+            console.log('Card selection shown, queueing tutorial message');
+            setTimeout(() => {
+                if (window.tutorialMode && !window.tutorialMessagesShown.has('cardSelection')) {
+                    queueTutorialMessage('cardSelection');
+                    window.tutorialStep = 1;
+                    console.log('Tutorial step updated to:', window.tutorialStep);
+                }
+            }, 800);
+        }
+        
         // Check if player is card locked - if so, show cards but grayed out
         if (isCardLocked()) {
             // Update title to show Forced Miss
@@ -2905,31 +3030,45 @@ function showGameBoard() {
 
 // Deck cycling system (like Clash Royale)
 async function initializeDeckPool() {
-    // Always ensure decks are loaded before getting the deck
-    // Clear cache to ensure fresh data
-    cachedDecks = null;
-    await getAllDecks();
-    
-    const deckIds = await getPlayerDeck();
-    const allCards = getAllCards();
-    const deckCards = deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
-    
-    // Validate that we have cards
-    if (deckCards.length === 0) {
-        console.error('No cards found in deck! Deck IDs:', deckIds);
-        // Fallback to premade deck if current deck is empty
+    // For tutorial mode, always use premade deck
+    if (window.tutorialMode) {
+        const allCards = getAllCards();
         const premadeDeck = createPremadeDeck().filter(id => id !== null);
         const premadeCards = premadeDeck.map(id => allCards.find(c => c.id === id)).filter(Boolean);
         if (premadeCards.length > 0) {
-            console.warn('Using premade deck as fallback');
+            console.log('Tutorial mode: Using premade deck');
             window.deckPool = [...premadeCards].sort(() => Math.random() - 0.5);
         } else {
-            console.error('Premade deck is also empty! Cannot initialize deck pool.');
+            console.error('Tutorial mode: Premade deck is empty!');
             window.deckPool = [];
         }
     } else {
-    // Create a shuffled pool of deck cards
-    window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
+        // Always ensure decks are loaded before getting the deck
+        // Clear cache to ensure fresh data
+        cachedDecks = null;
+        await getAllDecks();
+        
+        const deckIds = await getPlayerDeck();
+        const allCards = getAllCards();
+        const deckCards = deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
+        
+        // Validate that we have cards
+        if (deckCards.length === 0) {
+            console.error('No cards found in deck! Deck IDs:', deckIds);
+            // Fallback to premade deck if current deck is empty
+            const premadeDeck = createPremadeDeck().filter(id => id !== null);
+            const premadeCards = premadeDeck.map(id => allCards.find(c => c.id === id)).filter(Boolean);
+            if (premadeCards.length > 0) {
+                console.warn('Using premade deck as fallback');
+                window.deckPool = [...premadeCards].sort(() => Math.random() - 0.5);
+            } else {
+                console.error('Premade deck is also empty! Cannot initialize deck pool.');
+                window.deckPool = [];
+            }
+        } else {
+        // Create a shuffled pool of deck cards
+        window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
+        }
     }
     
     window.playerCardHand = [];
@@ -3340,6 +3479,18 @@ function selectCard(card, cardElement) {
         }
         showGameMessage('🚫', 'Card Blocked', 'This card has been blocked and cannot be used!');
         return;
+    }
+    
+    // Show tutorial message after card selection (only once, when first card is selected)
+    if (window.tutorialMode && !window.tutorialMessagesShown?.has('makeGuess')) {
+        console.log('Card selected, queueing makeGuess tutorial');
+        setTimeout(() => {
+            if (window.tutorialMode && !window.tutorialMessagesShown.has('makeGuess')) {
+                queueTutorialMessage('makeGuess');
+                window.tutorialStep = 2;
+                console.log('Tutorial step updated to:', window.tutorialStep);
+            }
+        }, 800);
     }
     
     // Play card select sound
@@ -5356,10 +5507,233 @@ function closeHelp() {
     }
 }
 
+// Tutorial system
+let tutorialWord = null;
+let tutorialHints = {
+    'APPLE': { hint1: 'It\'s a red or green fruit', hint2: 'It grows on trees', hint3: 'Common snack, starts with A' },
+    'HEART': { hint1: 'It beats in your chest', hint2: 'Symbol of love', hint3: 'Pumps blood through your body' },
+    'MUSIC': { hint1: 'You listen to it', hint2: 'Has rhythm and melody', hint3: 'Made with instruments' },
+    'WATER': { hint1: 'You drink it', hint2: 'Falls from the sky as rain', hint3: 'Essential for life' },
+    'LIGHT': { hint1: 'Comes from the sun', hint2: 'Makes things visible', hint3: 'Opposite of dark' },
+    'DREAM': { hint1: 'Happens when you sleep', hint2: 'Can be good or bad', hint3: 'Your imagination at night' },
+    'HAPPY': { hint1: 'A feeling of joy', hint2: 'Opposite of sad', hint3: 'When you smile' },
+    'SMILE': { hint1: 'What you do when happy', hint2: 'Uses your mouth', hint3: 'Shows your teeth' }
+};
+
+let tutorialMessages = {
+    welcome: {
+        icon: '🎓',
+        title: 'Welcome to the Tutorial!',
+        getText: () => {
+            return 'This is a practice game against Bot. You\'ll learn how to play Cardle step by step. Let\'s start!';
+        }
+    },
+    cardSelection: {
+        icon: '🃏',
+        title: 'Choose a Card',
+        getText: () => {
+            return 'At the start of each turn, you\'ll see 3 cards. Click on one to play it. Cards can help you or hinder your opponent!';
+        }
+    },
+    makeGuess: {
+        icon: '⌨️',
+        title: 'Make Your Guess',
+        getText: () => {
+            return 'Now type a 5-letter word and press Enter or click Submit. Try starting with common letters like E, A, R, T, or O!';
+        }
+    },
+    feedback: {
+        icon: '💡',
+        title: 'Understanding Feedback',
+        getText: () => {
+            return '<span class="highlight">Green</span> = correct letter in correct position<br><span class="highlight">Yellow</span> = letter is in the word but wrong position<br><span class="highlight">Gray</span> = letter is not in the word<br><br>Use this feedback to narrow down the word!';
+        }
+    },
+    opponentTurn: {
+        icon: '⏳',
+        title: 'Opponent\'s Turn',
+        getText: () => {
+            return 'Now it\'s Bot\'s turn. Watch their guess and learn from their feedback too!';
+        }
+    },
+    opponentCard: {
+        icon: '🃏',
+        title: 'Bot Played a Card',
+        getText: () => {
+            let baseText = 'Bot just played a card! Cards can affect the game in different ways - some help the player, some hinder them. Pay attention to what happens next!';
+            if (tutorialWord && tutorialHints[tutorialWord]) {
+                const allHints = [
+                    tutorialHints[tutorialWord].hint1,
+                    tutorialHints[tutorialWord].hint2,
+                    tutorialHints[tutorialWord].hint3
+                ].filter(Boolean);
+                if (allHints.length > 0) {
+                    baseText += `<br><br><strong>Hint for the word:</strong> ${allHints.join('. ')}.`;
+                }
+            }
+            return baseText;
+        }
+    },
+    gameOver: {
+        icon: '🎉',
+        title: 'Game Over!',
+        getText: () => {
+            return 'Great job completing the tutorial! You now know how to play Cardle. Try a real match to test your skills!';
+        }
+    }
+};
+
+// Tutorial message queue system
+let tutorialMessageQueue = [];
+let isShowingTutorialMessage = false;
+
+function queueTutorialMessage(messageKey) {
+    if (!window.tutorialMode) {
+        console.log('Tutorial message requested but tutorial mode is off');
+        return;
+    }
+    
+    // Don't queue if already shown
+    if (window.tutorialMessagesShown?.has(messageKey)) {
+        console.log('Tutorial message already shown:', messageKey);
+        return;
+    }
+    
+    console.log('Queueing tutorial message:', messageKey);
+    tutorialMessageQueue.push(messageKey);
+    
+    // If no message is currently showing, show the next one
+    if (!isShowingTutorialMessage) {
+        showNextTutorialMessage();
+    }
+}
+
+function showNextTutorialMessage() {
+    if (tutorialMessageQueue.length === 0) {
+        isShowingTutorialMessage = false;
+        return;
+    }
+    
+    if (isShowingTutorialMessage) {
+        return; // Already showing a message, wait for user to click
+    }
+    
+    const messageKey = tutorialMessageQueue.shift();
+    const message = tutorialMessages[messageKey];
+    
+    if (!message) {
+        console.error('Tutorial message not found:', messageKey);
+        showNextTutorialMessage(); // Try next message
+        return;
+    }
+    
+    // Mark as shown
+    if (window.tutorialMessagesShown) {
+        window.tutorialMessagesShown.add(messageKey);
+    }
+    
+    isShowingTutorialMessage = true;
+    const text = typeof message.getText === 'function' ? message.getText() : message.text;
+    console.log('Showing tutorial message:', messageKey);
+    
+    // Show message with custom button handler
+    showTutorialMessageWithCallback(message.icon, message.title, text, () => {
+        isShowingTutorialMessage = false;
+        // Show next message in queue
+        showNextTutorialMessage();
+    });
+}
+
+function showTutorialMessageWithCallback(icon, title, text, onClose) {
+    const overlay = document.getElementById('gameMessage');
+    const iconEl = document.getElementById('gameMessageIcon');
+    const titleEl = document.getElementById('gameMessageTitle');
+    const textEl = document.getElementById('gameMessageText');
+    const buttonEl = document.getElementById('gameMessageButton');
+    
+    if (!overlay || !iconEl || !titleEl || !textEl || !buttonEl) {
+        console.error('Game message elements not found');
+        if (onClose) onClose();
+        return;
+    }
+    
+    // Set content
+    iconEl.textContent = icon || '🎮';
+    titleEl.textContent = title || 'Game Message';
+    textEl.innerHTML = text || '';
+    
+    // Set button text based on whether there are more messages
+    const hasMoreMessages = tutorialMessageQueue.length > 0;
+    buttonEl.textContent = hasMoreMessages ? 'Next' : 'Got it!';
+    
+    // Reset classes
+    overlay.classList.remove('show', 'hiding');
+    
+    // Force reflow
+    void overlay.offsetWidth;
+    
+    // Show overlay
+    overlay.classList.add('show');
+    
+    // Close handler
+    const closeMessage = () => {
+        overlay.classList.add('hiding');
+        setTimeout(() => {
+            overlay.classList.remove('show', 'hiding');
+            if (onClose) onClose();
+        }, 300);
+    };
+    
+    // Button click - remove old handlers and add new one
+    buttonEl.onclick = closeMessage;
+}
+
+function showTutorialMessage(messageKey) {
+    queueTutorialMessage(messageKey);
+}
+
 // Help button event listeners
 document.getElementById('helpBtn').addEventListener('click', openHelp);
 document.getElementById('closeHelpBtn').addEventListener('click', closeHelp);
 document.getElementById('closeHelpBtnBottom').addEventListener('click', closeHelp);
+
+// Start Tutorial button
+document.getElementById('startTutorialBtn').addEventListener('click', async () => {
+    const name = getPlayerName();
+    if (!name) {
+        showGameMessage('⚠️', 'Name Required', 'Please enter your name first');
+        return;
+    }
+    
+    closeHelp();
+    
+    // Get Firebase UID if available
+    const firebaseUid = window.firebaseAuth?.currentUser?.uid || null;
+    
+    console.log('Starting tutorial for player:', name, 'firebaseUid:', firebaseUid);
+    
+    // Check if socket is connected
+    if (!socket || !socket.connected) {
+        showGameMessage('⚠️', 'Connection Error', 'Not connected to server. Please refresh the page.');
+        return;
+    }
+    
+    // Emit tutorial start event
+    socket.emit('startTutorial', { 
+        playerName: name,
+        firebaseUid: firebaseUid
+    });
+    
+    // Show loading message
+    showGameMessage('🎓', 'Starting Tutorial', 'Setting up your practice game...', 0);
+    
+    // Set a timeout to show error if game doesn't start
+    setTimeout(() => {
+        if (!gameState || !gameState.gameId) {
+            showGameMessage('⚠️', 'Tutorial Error', 'Failed to start tutorial. Please try again.');
+        }
+    }, 10000);
+});
 
 // Close help when clicking outside the modal
 document.getElementById('helpOverlay').addEventListener('click', (e) => {

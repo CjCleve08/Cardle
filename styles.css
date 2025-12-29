@@ -429,6 +429,17 @@ header h1 {
     color: #6aaa64;
     filter: drop-shadow(0 2px 4px rgba(106, 170, 100, 0.4));
     animation: fallDown linear;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.falling-card-image {
+    width: 30px;
+    height: 42px;
+    object-fit: contain;
+    border-radius: 8px;
+    filter: drop-shadow(0 2px 4px rgba(106, 170, 100, 0.4));
 }
 
 .falling-letter {

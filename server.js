@@ -1160,11 +1160,13 @@ function botSelectCard(game, botId, botHand) {
 }
 
 // Create a bot game
-function createBotGame(humanSocket, humanName, firebaseUid = null) {
+function createBotGame(humanSocket, humanName, firebaseUid = null, isTutorial = false) {
     const botId = 'BOT_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
-    const botName = getRandomBotName();
+    const botName = isTutorial ? 'Bot' : getRandomBotName();
     const gameId = generateGameId();
-    const word = getRandomWord();
+    // Use a simple word for tutorial (common, easy words)
+    const tutorialWords = ['APPLE', 'HEART', 'MUSIC', 'WATER', 'LIGHT', 'DREAM', 'HAPPY', 'SMILE'];
+    const word = isTutorial ? tutorialWords[Math.floor(Math.random() * tutorialWords.length)] : getRandomWord();
     
     // Create game state
     const game = {
@@ -1186,13 +1188,14 @@ function createBotGame(humanSocket, humanName, firebaseUid = null) {
                 isBot: true
             }
         ],
-        currentTurn: Math.random() > 0.5 ? humanSocket.id : botId, // Random first turn
+        currentTurn: isTutorial ? humanSocket.id : (Math.random() > 0.5 ? humanSocket.id : botId), // Tutorial always starts with human, otherwise random
         activeEffects: [],
         status: 'waiting',
         totalGuesses: 0,
         lastPlayedCards: new Map(),
         mirroredCards: new Map(),
-        isBotGame: true
+        isBotGame: true,
+        isTutorial: isTutorial
     };
     
     games.set(gameId, game);
@@ -1249,10 +1252,18 @@ function createBotGame(humanSocket, humanName, firebaseUid = null) {
         
         // Send game started to human
         console.log(`Sending gameStarted (bot) to ${humanSocket.id} with players:`, gameStateForClients.players.map(p => ({ name: p.name, firebaseUid: p.firebaseUid })));
-        humanSocket.emit('gameStarted', {
+        const gameStartedData = {
             ...gameStateForClients,
-            yourPlayerId: humanSocket.id
-        });
+            yourPlayerId: humanSocket.id,
+            isTutorial: isTutorial
+        };
+        
+        // For tutorial games, include the word so we can give hints
+        if (isTutorial) {
+            gameStartedData.tutorialWord = word;
+        }
+        
+        humanSocket.emit('gameStarted', gameStartedData);
         
         // Track user's game for friend status
         if (firebaseUid) {
@@ -1825,6 +1836,15 @@ io.on('connection', (socket) => {
                 socket.emit('wordResponse', { word: game.word, gameId: game.gameId });
             }
         }
+    });
+    
+    // Tutorial handler
+    socket.on('startTutorial', (data) => {
+        const playerName = data.playerName || 'Player';
+        const firebaseUid = data.firebaseUid || null;
+        
+        // Create tutorial bot game
+        createBotGame(socket, playerName, firebaseUid, true);
     });
     
     // Matchmaking handlers
