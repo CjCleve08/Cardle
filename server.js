@@ -1638,6 +1638,8 @@ function submitBotGuess(gameId, botId, guess, card) {
                 if (player.firebaseUid) {
                     userToGame.delete(player.firebaseUid);
                 }
+                // Remove players from players Map so they can matchmake again
+                players.delete(player.id);
             });
             io.to(gameId).emit('gameOver', {
                 winner: botId,
@@ -1726,24 +1728,24 @@ function submitBotGuess(gameId, botId, guess, card) {
         return true;
     });
     
-    // Clear blocked card after bot uses a card/makes a guess
-    if (game.blockedCards && game.blockedCards.has(botId)) {
-        game.blockedCards.delete(botId);
-        console.log(`Cleared blocked card for bot ${botId} after their turn`);
-        // Notify human player that bot's card is unblocked (for bot games)
-        const opponent = game.players.find(p => p.id !== botId);
-        if (opponent && !opponent.isBot) {
-            const opponentSocket = io.sockets.sockets.get(opponent.id);
-            if (opponentSocket) {
-                // Bot's card is unblocked, but this doesn't affect the human player's UI
-                // Only needed if we want to track it, but for now we'll just log
-            }
-        }
-    }
-    
     // Switch turns
     if (!isExtraGuess) {
         game.currentTurn = opponent.id;
+        
+        // Clear blocked card when the bot's turn ends
+        // (when turn switches away from them)
+        if (game.blockedCards && game.blockedCards.has(botId)) {
+            game.blockedCards.delete(botId);
+            console.log(`Cleared blocked card for bot ${botId} after their turn`);
+            // Notify human player that bot's card is unblocked (for bot games)
+            if (opponent && !opponent.isBot) {
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    // Bot's card is unblocked, but this doesn't affect the human player's UI
+                    // Only needed if we want to track it, but for now we'll just log
+                }
+            }
+        }
     } else {
         game.activeEffects = game.activeEffects.filter(e => 
             !(e.type === 'extraGuess' && e.target === botId)
@@ -1817,11 +1819,18 @@ io.on('connection', (socket) => {
             return;
         }
         
-        // Check if player is already in a game
+        // Check if player is already in an active game (not finished)
         const playerData = players.get(socket.id);
-        if (playerData && games.get(playerData.gameId)) {
-            socket.emit('error', { message: 'You are already in a game' });
-            return;
+        if (playerData) {
+            const game = games.get(playerData.gameId);
+            if (game && game.status !== 'finished') {
+                socket.emit('error', { message: 'You are already in a game' });
+                return;
+            }
+            // If game is finished, remove player from players Map so they can matchmake again
+            if (game && game.status === 'finished') {
+                players.delete(socket.id);
+            }
         }
         
         // Add player to queue
@@ -1990,6 +1999,20 @@ io.on('connection', (socket) => {
     });
     
     socket.on('createGame', (data) => {
+        // Check if player is already in an active game (not finished)
+        const playerData = players.get(socket.id);
+        if (playerData) {
+            const game = games.get(playerData.gameId);
+            if (game && game.status !== 'finished') {
+                socket.emit('error', { message: 'You are already in a game' });
+                return;
+            }
+            // If game is finished, remove player from players Map so they can create a new game
+            if (game && game.status === 'finished') {
+                players.delete(socket.id);
+            }
+        }
+        
         const gameId = generateGameId();
         const word = getRandomWord();
         
@@ -2026,10 +2049,29 @@ io.on('connection', (socket) => {
     });
     
     socket.on('joinGame', (data) => {
+        // Check if player is already in an active game (not finished)
+        const playerData = players.get(socket.id);
+        if (playerData) {
+            const existingGame = games.get(playerData.gameId);
+            if (existingGame && existingGame.status !== 'finished') {
+                socket.emit('error', { message: 'You are already in a game' });
+                return;
+            }
+            // If game is finished, remove player from players Map so they can join a new game
+            if (existingGame && existingGame.status === 'finished') {
+                players.delete(socket.id);
+            }
+        }
+        
         const game = games.get(data.gameId);
         
         if (!game) {
             socket.emit('error', { message: 'Game not found' });
+            return;
+        }
+        
+        if (game.status === 'finished') {
+            socket.emit('error', { message: 'Game has already ended' });
             return;
         }
         
@@ -3346,6 +3388,8 @@ io.on('connection', (socket) => {
                 if (player.firebaseUid) {
                     userToGame.delete(player.firebaseUid);
                 }
+                // Remove players from players Map so they can matchmake again
+                players.delete(player.id);
             });
             io.to(data.gameId).emit('gameOver', {
                 winner: socket.id,
@@ -3519,6 +3563,15 @@ io.on('connection', (socket) => {
             game.activeEffects = game.activeEffects.filter(e => 
                 !(e.type === 'cardLock' && e.target === socket.id)
             );
+            
+            // Clear blocked card when the blocked player's turn ends
+            // (when turn switches away from them)
+            if (game.blockedCards && game.blockedCards.has(socket.id)) {
+                game.blockedCards.delete(socket.id);
+                console.log(`Cleared blocked card for player ${socket.id} after their turn`);
+                // Notify client that the card is unblocked
+                socket.emit('cardUnblocked', {});
+            }
         } else {
             // Extra guess: don't count toward limit, don't switch turns
             // Player gets another turn immediately
@@ -3557,14 +3610,6 @@ io.on('connection', (socket) => {
             }
             return true;
         });
-        
-        // Clear blocked card after opponent uses a card/makes a guess
-        if (game.blockedCards && game.blockedCards.has(socket.id)) {
-            game.blockedCards.delete(socket.id);
-            console.log(`Cleared blocked card for player ${socket.id} after their turn`);
-            // Notify client that the card is unblocked
-            socket.emit('cardUnblocked', {});
-        }
         
         // Emit turn change to all players in the game (don't send the word)
         // Send personalized turnChanged events to each player with their own ID

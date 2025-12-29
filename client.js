@@ -1829,10 +1829,10 @@ socket.on('guessSubmitted', (data) => {
 });
 
 socket.on('letterRevealed', (data) => {
-    // Show revealed letter information (Gambler's Card lucky outcome)
+    // Show revealed letter information (Bust Special lucky outcome)
     showGameMessage(
         '🎰',
-        'Gambler\'s Card',
+        'Bust Special',
         `Letter <span class="highlight">${data.letter}</span> is at position <span class="highlight">${data.position + 1}</span>!`
     );
     console.log('Letter revealed:', data.letter, 'at position', data.position + 1);
@@ -2769,10 +2769,9 @@ function showGameBoard() {
 
 // Deck cycling system (like Clash Royale)
 async function initializeDeckPool() {
-    // Ensure decks are loaded from Firebase before getting the deck
-    if (!isGuestMode && currentUser && cachedDecks === null) {
-        await getAllDecks();
-    }
+    // Always ensure decks are loaded before getting the deck
+    // This ensures decks are fresh when the game starts
+    await getAllDecks();
     
     const deckIds = await getPlayerDeck();
     const allCards = getAllCards();
@@ -4867,12 +4866,16 @@ function validateDeckForGame() {
     return { valid: true };
 }
 
-document.getElementById('findMatchBtn').addEventListener('click', () => {
+document.getElementById('findMatchBtn').addEventListener('click', async () => {
     const name = getPlayerName();
     if (!name) {
         alert('Please enter your name');
         return;
     }
+    
+    // Ensure decks are loaded before starting matchmaking
+    cachedDecks = null;
+    await getAllDecks();
     
     // Validate deck before starting matchmaking
     const validation = validateDeckForGame();
@@ -4891,11 +4894,16 @@ document.getElementById('cancelMatchmakingBtn').addEventListener('click', () => 
     socket.emit('cancelMatchmaking');
 });
 
-document.getElementById('createGameBtn').addEventListener('click', () => {
+document.getElementById('createGameBtn').addEventListener('click', async () => {
     const name = getPlayerName();
     if (name) {
         // Cancel matchmaking if active
         socket.emit('cancelMatchmaking');
+        
+        // Ensure decks are loaded before creating game
+        cachedDecks = null;
+        await getAllDecks();
+        
         const firebaseUid = currentUser ? currentUser.uid : null;
         socket.emit('createGame', { playerName: name, firebaseUid: firebaseUid });
     } else {
@@ -5902,12 +5910,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-document.getElementById('joinWithIdBtn').addEventListener('click', () => {
+document.getElementById('joinWithIdBtn').addEventListener('click', async () => {
     const name = getPlayerName();
     const gameId = document.getElementById('gameIdInput').value.trim();
     if (name && gameId) {
         // Cancel matchmaking if active
         socket.emit('cancelMatchmaking');
+        
+        // Ensure decks are loaded before joining game
+        cachedDecks = null;
+        await getAllDecks();
+        
         const firebaseUid = currentUser ? currentUser.uid : null;
         socket.emit('joinGame', { playerName: name, gameId: gameId, firebaseUid: firebaseUid });
     } else {
