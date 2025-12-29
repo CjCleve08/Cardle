@@ -1706,7 +1706,7 @@ function submitBotGuess(gameId, botId, guess, card) {
         e.type === 'extraGuess' && e.target === botId && !e.used
     );
     
-    // Remove used effects
+    // Remove used effects (but not timeRush - that's handled in turn switch section)
     game.activeEffects = game.activeEffects.filter(e => {
         if (e.target === botId && (
             e.type === 'hiddenGuess' || 
@@ -1719,7 +1719,6 @@ function submitBotGuess(gameId, botId, guess, card) {
             e.type === 'blindGuess' ||
             e.type === 'remJobHide' ||
             e.type === 'greenToGrey' ||
-            e.type === 'timeRush' ||
             e.type === 'wordScramble' ||
             e.type === 'hiddenKeyboard'
         )) {
@@ -1731,6 +1730,16 @@ function submitBotGuess(gameId, botId, guess, card) {
     // Switch turns
     if (!isExtraGuess) {
         game.currentTurn = opponent.id;
+        
+        // Clear timeRush effect when the affected bot's turn ends
+        // (when turn switches away from them)
+        game.activeEffects = game.activeEffects.filter(e => {
+            if (e.type === 'timeRush' && e.target === botId) {
+                console.log('Removing timeRush effect after turn ended for bot:', botId);
+                return false;
+            }
+            return true;
+        });
         
         // Clear blocked card when the bot's turn ends
         // (when turn switches away from them)
@@ -1750,6 +1759,14 @@ function submitBotGuess(gameId, botId, guess, card) {
         game.activeEffects = game.activeEffects.filter(e => 
             !(e.type === 'extraGuess' && e.target === botId)
         );
+        // Clear timeRush effect even if bot has extra guess (timeRush only affects one turn)
+        game.activeEffects = game.activeEffects.filter(e => {
+            if (e.type === 'timeRush' && e.target === botId) {
+                console.log('Removing timeRush effect after first guess (extra guess used) for bot:', botId);
+                return false;
+            }
+            return true;
+        });
         game.currentTurn = botId; // Bot gets another turn
     }
     
@@ -2584,7 +2601,7 @@ io.on('connection', (socket) => {
             e.type === 'cardLock' && e.target === socket.id && !e.used
         );
         if (isCardLocked) {
-            socket.emit('error', { message: 'You cannot use a card this turn - Card Lock is active!' });
+            socket.emit('error', { message: 'You cannot use a card this turn - Forced Miss is active!' });
             return;
         }
         
@@ -3013,7 +3030,7 @@ io.on('connection', (socket) => {
             e.type === 'cardLock' && e.target === socket.id && !e.used
         );
         if (isCardLocked) {
-            socket.emit('error', { message: 'You cannot use a card this turn - Card Lock is active!' });
+            socket.emit('error', { message: 'You cannot use a card this turn - Forced Miss is active!' });
             return;
         }
         
@@ -3038,6 +3055,43 @@ io.on('connection', (socket) => {
         
         // The selected card from opponent's hand
         const stolenCard = data.card;
+        
+        // Check if this is a snack time card - trigger it immediately (same as normal selectCard)
+        if (stolenCard.id === 'snackTime') {
+            // Initialize snack time mode tracking if needed
+            if (!game.snackTimeMode) {
+                game.snackTimeMode = new Map();
+            }
+            game.snackTimeMode.set(socket.id, true);
+            
+            // Emit event to client to trigger snack time selection mode
+            socket.emit('snackTimeTriggered', {
+                gameId: data.gameId
+            });
+            
+            // Show splash for snack time card
+            const splashBehavior = getSplashBehavior(stolenCard.id);
+            if (splashBehavior === 'show') {
+                io.to(data.gameId).emit('cardPlayed', {
+                    card: stolenCard,
+                    playerName: player ? player.name : 'Player',
+                    playerId: socket.id
+                });
+                
+                // Send system notification to chat
+                const cardName = getCardDisplayName(stolenCard);
+                sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`);
+            }
+            
+            // Notify the player they can select another card from all available cards
+            socket.emit('cardSelected', {
+                playerId: socket.id,
+                card: stolenCard,
+                allowSecondCard: true,
+                snackTimeMode: true
+            });
+            return;
+        }
         
         // Check if this card is a modifier card using config
         const cardIsModifier = isModifierCard(stolenCard.id);
@@ -3103,6 +3157,147 @@ io.on('connection', (socket) => {
                 playerName: player ? player.name : 'Player',
                 playerId: socket.id
             });
+        }
+        
+        // Check if this is a hand reveal card - trigger it immediately
+        if (realCard.id === 'handReveal' && opponent) {
+            // Check if opponent is a bot
+            if (opponent.isBot) {
+                // Bot's hand is stored in botGames
+                const botData = botGames.get(data.gameId);
+                if (botData && botData.botHand) {
+                    const requesterSocket = io.sockets.sockets.get(socket.id);
+                    if (requesterSocket) {
+                        requesterSocket.emit('opponentHandRevealed', {
+                            cards: botData.botHand.slice(0, 3).map(card => ({
+                                id: card.id,
+                                title: card.title,
+                                description: card.description
+                            })),
+                            opponentName: opponent.name
+                        });
+                    }
+                }
+            } else {
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('requestHand', {
+                        gameId: data.gameId,
+                        requesterId: socket.id
+                    });
+                }
+            }
+        }
+        
+        // Check if this is a card block card - trigger it immediately
+        if (realCard.id === 'cardBlock' && opponent) {
+            // Check if opponent is a bot
+            if (opponent.isBot) {
+                // Bot's hand is stored in botGames - block a random card
+                const botData = botGames.get(data.gameId);
+                if (botData && botData.botHand && botData.botHand.length > 0) {
+                    // Initialize blocked cards tracking if needed
+                    if (!game.blockedCards) {
+                        game.blockedCards = new Map();
+                    }
+                    
+                    // Pick a random card from bot's hand to block
+                    const randomIndex = Math.floor(Math.random() * botData.botHand.length);
+                    const blockedCardId = botData.botHand[randomIndex].id;
+                    game.blockedCards.set(opponent.id, blockedCardId);
+                }
+            } else {
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('requestHandForBlock', {
+                        gameId: data.gameId,
+                        requesterId: socket.id
+                    });
+                }
+            }
+        }
+        
+        // Check if this is an effect clear card - remove all active effects on the player
+        // Do this IMMEDIATELY when the card is selected, before guess submission
+        if (realCard.id === 'effectClear') {
+            // Count effects before clearing (log them for debugging)
+            const effectsBefore = game.activeEffects.filter(e => e.target === socket.id && !e.used);
+            const effectTypes = effectsBefore.map(e => e.type);
+            
+            console.log(`Effect Clear: Player ${socket.id} playing Purge. Current active effects targeting them:`, effectTypes);
+            
+            // Remove all active effects targeting this player
+            const effectsAfter = game.activeEffects.filter(e => {
+                // Keep effects that don't target this player, or are already used
+                if (e.target !== socket.id || e.used) {
+                    return true;
+                }
+                // Remove all effects targeting this player
+                console.log(`Effect Clear: Removing effect ${e.type} from player ${socket.id}`);
+                return false;
+            });
+            
+            game.activeEffects = effectsAfter;
+            
+            // Also clear blocked card if any
+            if (game.blockedCards && game.blockedCards.has(socket.id)) {
+                game.blockedCards.delete(socket.id);
+                console.log(`Effect Clear: Cleared blocked card for player ${socket.id}`);
+            }
+            
+            // Notify the player if effects were cleared
+            if (effectsBefore.length > 0) {
+                console.log(`Effect Clear: Successfully removed ${effectsBefore.length} active effect(s) from player ${socket.id}`);
+                // Send updated active effects to the player so they can update their gameState
+                socket.emit('activeEffectsUpdated', {
+                    activeEffects: game.activeEffects,
+                    gameId: data.gameId
+                });
+                
+                // Also notify opponent about updated effects
+                if (opponent) {
+                    const opponentSocket = io.sockets.sockets.get(opponent.id);
+                    if (opponentSocket) {
+                        opponentSocket.emit('activeEffectsUpdated', {
+                            activeEffects: game.activeEffects,
+                            gameId: data.gameId
+                        });
+                        // Also send notification message
+                        opponentSocket.emit('opponentEffectsCleared', {
+                            playerName: player ? player.name : 'Player',
+                            count: effectsBefore.length
+                        });
+                    }
+                }
+            } else {
+                console.log(`Effect Clear: No active effects to clear for player ${socket.id}`);
+            }
+        }
+        
+        // Check if this is a timeRush card - apply effect immediately when card is selected
+        if (realCard.id === 'timeRush' && opponent) {
+            // Add timeRush effect targeting the opponent
+            game.activeEffects.push({
+                type: 'timeRush',
+                target: opponent.id,
+                description: 'Your next turn will only have 20 seconds',
+                used: false
+            });
+            console.log(`Time Rush: Added timeRush effect targeting opponent ${opponent.id}`);
+            
+            // Notify both players about updated effects
+            socket.emit('activeEffectsUpdated', {
+                activeEffects: game.activeEffects,
+                gameId: data.gameId
+            });
+            
+            const opponentSocket = io.sockets.sockets.get(opponent.id);
+            if (opponentSocket) {
+                opponentSocket.emit('activeEffectsUpdated', {
+                    activeEffects: game.activeEffects,
+                    gameId: data.gameId
+                });
+            }
         }
         
         // Notify the player with the real card
@@ -3564,6 +3759,16 @@ io.on('connection', (socket) => {
                 !(e.type === 'cardLock' && e.target === socket.id)
             );
             
+            // Clear timeRush effect when the affected player's turn ends
+            // (when turn switches away from them)
+            game.activeEffects = game.activeEffects.filter(e => {
+                if (e.type === 'timeRush' && e.target === socket.id) {
+                    console.log('Removing timeRush effect after turn ended for player:', socket.id);
+                    return false;
+                }
+                return true;
+            });
+            
             // Clear blocked card when the blocked player's turn ends
             // (when turn switches away from them)
             if (game.blockedCards && game.blockedCards.has(socket.id)) {
@@ -3579,6 +3784,14 @@ io.on('connection', (socket) => {
             game.activeEffects = game.activeEffects.filter(e => 
                 !(e.type === 'extraGuess' && e.target === socket.id && !e.used)
             );
+            // Clear timeRush effect even if player has extra guess (timeRush only affects one turn)
+            game.activeEffects = game.activeEffects.filter(e => {
+                if (e.type === 'timeRush' && e.target === socket.id) {
+                    console.log('Removing timeRush effect after first guess (extra guess used):', socket.id);
+                    return false;
+                }
+                return true;
+            });
             // Keep the turn with the same player
             game.currentTurn = socket.id;
             console.log(`Extra guess used - ${socket.id} gets another turn. Turn stays with: ${game.currentTurn}`);
@@ -3586,7 +3799,8 @@ io.on('connection', (socket) => {
         
         // Remove used effects (mark as used and remove)
         game.activeEffects = game.activeEffects.filter(e => {
-            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, remJobHide, greenToGrey, timeRush, wordScramble, and hiddenKeyboard after they've been used on this guess
+            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, remJobHide, greenToGrey, wordScramble, and hiddenKeyboard after they've been used on this guess
+            // Note: timeRush is removed in the turn switch section above, not here
             if (e.target === socket.id && (
                 e.type === 'hiddenGuess' || 
                 e.type === 'hiddenFeedback' || 
@@ -3596,15 +3810,11 @@ io.on('connection', (socket) => {
                 e.type === 'blindGuess' ||
                 e.type === 'remJobHide' ||
                 e.type === 'greenToGrey' ||
-                e.type === 'timeRush' ||
                 e.type === 'wordScramble' ||
                 e.type === 'hiddenKeyboard'
             )) {
                 if (e.type === 'falseFeedback') {
                     console.log('Removing falseFeedback effect after it was applied to player:', socket.id);
-                }
-                if (e.type === 'timeRush') {
-                    console.log('Removing timeRush effect after it was applied to player:', socket.id);
                 }
                 return false; // Remove used effects
             }

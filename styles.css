@@ -69,6 +69,201 @@ header h1 {
     animation: fadeIn 0.3s ease-in;
 }
 
+/* Splash Screen */
+#splash.screen {
+    display: none;
+    background: #121213;
+    justify-content: center;
+    align-items: center;
+    padding: 0;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+#splash.screen.active {
+    display: flex;
+    animation: splashFadeIn 0.5s ease-out;
+}
+
+.splash-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    position: relative;
+}
+
+.splash-logo-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 30px;
+}
+
+.splash-logo {
+    max-width: 350px;
+    width: 85%;
+    height: auto;
+    filter: drop-shadow(0 15px 40px rgba(106, 170, 100, 0.4));
+    animation: logoEntrance 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    transform-origin: center;
+}
+
+.splash-slogan {
+    font-size: 1.1rem;
+    color: #d7dadc;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0;
+    animation: sloganFadeIn 0.8s ease-out 0.6s forwards;
+    text-align: center;
+    margin: 0;
+    padding: 0 20px;
+}
+
+
+@keyframes logoEntrance {
+    0% {
+        opacity: 0;
+        transform: scale(0.6) translateY(30px);
+        filter: drop-shadow(0 0 0 rgba(106, 170, 100, 0));
+    }
+    60% {
+        opacity: 1;
+        transform: scale(1.05) translateY(-5px);
+        filter: drop-shadow(0 20px 50px rgba(106, 170, 100, 0.5));
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+        filter: drop-shadow(0 15px 40px rgba(106, 170, 100, 0.4));
+    }
+}
+
+@keyframes sloganFadeIn {
+    0% {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Credits Screen */
+#credits.screen {
+    display: none;
+    background: #121213;
+    justify-content: center;
+    align-items: center;
+    padding: 0;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+#credits.screen.active {
+    display: flex;
+    animation: creditsFadeIn 0.4s ease-out;
+}
+
+.credits-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 50px;
+    max-width: 600px;
+    padding: 40px;
+    text-align: center;
+}
+
+.credits-title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #6aaa64;
+    letter-spacing: 0.15em;
+    margin: 0;
+    opacity: 0;
+    animation: creditsTitleIn 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s forwards;
+    text-transform: uppercase;
+}
+
+.credits-list {
+    display: flex;
+    flex-direction: column;
+    gap: 35px;
+    width: 100%;
+}
+
+.credit-item {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    opacity: 0;
+    animation: creditItemIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.credit-item:nth-child(1) {
+    animation-delay: 0.4s;
+}
+
+.credit-item:nth-child(2) {
+    animation-delay: 0.7s;
+}
+
+.credit-label {
+    font-size: 0.95rem;
+    color: #818384;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.credit-name {
+    font-size: 1.75rem;
+    color: #ffffff;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+}
+
+
+@keyframes creditsFadeIn {
+    from {
+        opacity: 0;
+        background: #121213;
+    }
+    to {
+        opacity: 1;
+        background: #121213;
+    }
+}
+
+@keyframes creditsTitleIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px) scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes creditItemIn {
+    from {
+        opacity: 0;
+        transform: translateX(-25px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
 /* Auth screens should not have extra padding and should center content */
 #login.screen.active,
 #signup.screen.active,
@@ -2617,6 +2812,12 @@ header h1 {
     to {
         opacity: 1;
     }
+}
+
+/* Blocked/grayed out cards - maintain consistent opacity during animation */
+.card.blocked {
+    opacity: 0.4 !important;
+    filter: grayscale(100%) !important;
 }
 
 .card:hover {

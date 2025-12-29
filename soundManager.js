@@ -10,7 +10,9 @@ class SoundManager {
         this.enabled = true;
         this.backgroundMusic = null;
         this.musicEnabled = true;
+        this.audioUnlocked = false;
         this.initAudioContext();
+        this.unlockHtmlAudio();
     }
 
     initAudioContext() {
@@ -23,11 +25,67 @@ class SoundManager {
         }
     }
 
+    // Unlock HTML Audio by playing a silent audio element (bypasses autoplay restrictions)
+    unlockHtmlAudio() {
+        if (this.audioUnlocked) return;
+        
+        try {
+            // Create a data URI for a very short silent audio file (1 second of silence in WAV format)
+            // Base64 encoded 1-second silent WAV file
+            const silentAudio = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==';
+            
+            // Create a silent HTML audio element and play it to unlock audio
+            const unlockAudio = new Audio(silentAudio);
+            unlockAudio.volume = 0.01; // Very quiet but not silent (some browsers block completely silent audio)
+            
+            // Try to play immediately to unlock audio
+            const playPromise = unlockAudio.play();
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
+                    this.audioUnlocked = true;
+                    console.log('HTML Audio unlocked for autoplay');
+                    unlockAudio.pause();
+                    unlockAudio.remove();
+                }).catch(err => {
+                    console.log('Could not unlock HTML Audio initially:', err);
+                    // Will unlock on first user interaction
+                });
+            }
+            
+            // Also unlock on any user interaction as fallback
+            const unlockOnInteraction = () => {
+                if (!this.audioUnlocked) {
+                    unlockAudio.play().then(() => {
+                        this.audioUnlocked = true;
+                        console.log('HTML Audio unlocked on user interaction');
+                        unlockAudio.pause();
+                        unlockAudio.remove();
+                    }).catch(err => {
+                        console.log('Could not unlock HTML Audio:', err);
+                    });
+                    document.removeEventListener('click', unlockOnInteraction);
+                    document.removeEventListener('touchstart', unlockOnInteraction);
+                    document.removeEventListener('keydown', unlockOnInteraction);
+                }
+            };
+            document.addEventListener('click', unlockOnInteraction, { once: true });
+            document.addEventListener('touchstart', unlockOnInteraction, { once: true });
+            document.addEventListener('keydown', unlockOnInteraction, { once: true });
+        } catch (e) {
+            console.warn('Could not unlock HTML Audio:', e);
+        }
+    }
+
     // Ensure audio context is running (required for Chrome autoplay policy)
     ensureAudioContext() {
-        if (!this.enabled || !this.audioContext) return;
+        if (!this.enabled) {
+            this.initAudioContext();
+        }
+        if (!this.audioContext) return;
         if (this.audioContext.state === 'suspended') {
-            this.audioContext.resume();
+            this.audioContext.resume().catch(err => {
+                console.log('Could not resume audio context:', err);
+            });
         }
     }
 
@@ -311,6 +369,94 @@ class SoundManager {
     // Play lobby music
     playLobbyMusic(filename = 'LobbySoundTrack.mp4') {
         this.playBackgroundMusic(filename);
+    }
+
+    // Play intro music (non-looping)
+    playIntroMusic(filename = 'IntroSoundTrack.mp4') {
+        if (!this.musicEnabled) return;
+        
+        // Stop any existing music
+        this.stopBackgroundMusic();
+        
+        // Ensure audio is unlocked
+        this.unlockHtmlAudio();
+        this.ensureAudioContext();
+        
+        // Create audio element for intro music
+        this.backgroundMusic = new Audio(`Sounds/Music/${filename}`);
+        this.backgroundMusic.loop = false; // Don't loop intro music
+        this.backgroundMusic.volume = 0; // Start at 0 for fade in
+        this.backgroundMusic.preload = 'auto';
+        
+        // Add error handling for debugging
+        this.backgroundMusic.addEventListener('error', (e) => {
+            console.error('Error loading intro music:', filename, e);
+            console.error('Audio error details:', {
+                code: this.backgroundMusic.error?.code,
+                message: this.backgroundMusic.error?.message,
+                path: `Sounds/Music/${filename}`
+            });
+        });
+        
+        // Fade in duration (in seconds)
+        const fadeInDuration = 1;
+        
+        // Fade in when metadata loads
+        this.backgroundMusic.addEventListener('loadedmetadata', () => {
+            const updateVolume = () => {
+                if (!this.backgroundMusic || !this.musicEnabled) return;
+                
+                const currentTime = this.backgroundMusic.currentTime;
+                
+                // Fade in at the start (first fadeInDuration seconds)
+                if (currentTime < fadeInDuration) {
+                    const fadeInProgress = currentTime / fadeInDuration;
+                    this.backgroundMusic.volume = Math.min(this.musicVolume, fadeInProgress * this.musicVolume);
+                } else {
+                    // Maintain full volume after fade in
+                    this.backgroundMusic.volume = this.musicVolume;
+                }
+            };
+            
+            // Update volume on timeupdate for smooth fade
+            this.backgroundMusic.addEventListener('timeupdate', updateVolume);
+        });
+        
+        // Try to load and play immediately
+        this.backgroundMusic.load();
+        
+        // Aggressively try to play the music
+        const tryPlay = () => {
+            if (!this.backgroundMusic) return;
+            
+            const playPromise = this.backgroundMusic.play();
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
+                    console.log('Intro music started playing');
+                }).catch(error => {
+                    // If autoplay is blocked, try again when user interacts
+                    console.log('Intro music autoplay blocked, will play on interaction');
+                    const playOnInteraction = () => {
+                        if (this.backgroundMusic && this.backgroundMusic.paused) {
+                            this.backgroundMusic.play().catch(() => {});
+                        }
+                        document.removeEventListener('click', playOnInteraction);
+                        document.removeEventListener('touchstart', playOnInteraction);
+                        document.removeEventListener('keydown', playOnInteraction);
+                    };
+                    document.addEventListener('click', playOnInteraction, { once: true });
+                    document.addEventListener('touchstart', playOnInteraction, { once: true });
+                    document.addEventListener('keydown', playOnInteraction, { once: true });
+                });
+            }
+        };
+        
+        // Try to play as soon as possible
+        this.backgroundMusic.addEventListener('canplay', tryPlay, { once: true });
+        this.backgroundMusic.addEventListener('loadeddata', tryPlay, { once: true });
+        
+        // Also try immediately
+        setTimeout(tryPlay, 50);
     }
 
     stopBackgroundMusic() {

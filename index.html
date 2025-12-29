@@ -15,6 +15,33 @@
 </head>
 <body>
     <div class="container">
+        <!-- Splash Screen (Logo Animation) -->
+        <div id="splash" class="screen">
+            <div class="splash-content">
+                <div class="splash-logo-container">
+                    <img src="images/CardleLogo.png" alt="Cardle Logo" class="splash-logo">
+                    <p class="splash-slogan">Multiplayer Wordle with Power Cards</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Credits Screen -->
+        <div id="credits" class="screen">
+            <div class="credits-content">
+                <h1 class="credits-title">Credits</h1>
+                <div class="credits-list">
+                    <div class="credit-item">
+                        <div class="credit-label">Brought to you by</div>
+                        <div class="credit-name">Caiden Cleveland</div>
+                    </div>
+                    <div class="credit-item">
+                        <div class="credit-label">Art done by</div>
+                        <div class="credit-name">Bust Perkasomething</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Login Screen -->
         <div id="login" class="screen">
             <div class="auth-content">
@@ -699,16 +726,6 @@
                     </div>
                 </div>
 
-                <!-- Game Message Overlay -->
-                <div id="gameMessage" class="game-message-overlay">
-                    <div class="game-message-content">
-                        <div class="game-message-icon" id="gameMessageIcon">🎰</div>
-                        <div class="game-message-title" id="gameMessageTitle"></div>
-                        <div class="game-message-text" id="gameMessageText"></div>
-                        <button class="game-message-button" id="gameMessageButton">Got it!</button>
-                    </div>
-                </div>
-
                 <!-- Hand Reveal Overlay -->
                 <div id="handRevealOverlay" class="hand-reveal-overlay">
                     <div class="hand-reveal-content">
@@ -737,6 +754,16 @@
                     <button id="backToLobbyBtn" class="btn btn-secondary game-over-button">Back to Lobby</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Game Message Overlay (global, accessible from all screens) -->
+    <div id="gameMessage" class="game-message-overlay">
+        <div class="game-message-content">
+            <div class="game-message-icon" id="gameMessageIcon">🎰</div>
+            <div class="game-message-title" id="gameMessageTitle"></div>
+            <div class="game-message-text" id="gameMessageText"></div>
+            <button class="game-message-button" id="gameMessageButton">Got it!</button>
         </div>
     </div>
 
