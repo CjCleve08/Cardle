@@ -106,6 +106,9 @@ function showLobby() {
         soundManager.stopBackgroundMusic();
     }
     
+    // Register user as online when showing lobby
+    registerUserAsOnline();
+    
     if (ScreenManager.show('lobby')) {
         updateLobbyUserInfo();
         // Load and display stats
@@ -145,6 +148,8 @@ function continueToAuth() {
                 // Clear stats cache when user changes
                 clearStatsCache();
         clearDecksCache();
+                // Register user as online
+                registerUserAsOnline();
                 // User is signed in - show splash/credits then lobby
                 showSplashThenLobby();
             } else {
@@ -1802,7 +1807,17 @@ function showScreen(screenName) {
 }
 
 // Socket Events
+// Register user as online when authenticated
+function registerUserAsOnline() {
+    if (socket && socket.connected && currentUser && currentUser.uid) {
+        socket.emit('registerOnline', { firebaseUid: currentUser.uid });
+        console.log('Registered user as online:', currentUser.uid);
+    }
+}
+
 socket.on('connect', () => {
+    // Register user as online when socket connects (if authenticated)
+    registerUserAsOnline();
     console.log('Connected to server');
 });
 
@@ -6415,6 +6430,10 @@ document.getElementById('helpOverlay').addEventListener('click', (e) => {
 });
 
 // Friends functionality
+// Store friends list and activity status
+let friendsListData = [];
+let friendsActivityStatus = {}; // Map of friendId -> { isActive: boolean, gameId: string }
+
 async function loadFriends() {
     if (!currentUser || !window.firebaseDb) {
         console.log('User not authenticated or Firebase not available');
@@ -6494,7 +6513,11 @@ async function loadFriends() {
             }
         }));
         
-        renderFriendsList(friendsWithDetails);
+        // Store friends list data
+        friendsListData = friendsWithDetails;
+        
+        // Sort and render friends list
+        sortAndRenderFriendsList();
         renderFriendRequests(requestsWithDetails);
         
         // Check which friends are in games
@@ -6504,6 +6527,21 @@ async function loadFriends() {
         renderFriendsList([]);
         renderFriendRequests([]);
     }
+}
+
+// Sort friends by activity status (active first) and render
+function sortAndRenderFriendsList() {
+    // Sort friends: active first, then inactive
+    const sortedFriends = [...friendsListData].sort((a, b) => {
+        const aActive = friendsActivityStatus[a.id]?.isActive || false;
+        const bActive = friendsActivityStatus[b.id]?.isActive || false;
+        
+        if (aActive && !bActive) return -1; // a is active, b is not - a comes first
+        if (!aActive && bActive) return 1;  // b is active, a is not - b comes first
+        return 0; // Both have same status, maintain original order
+    });
+    
+    renderFriendsList(sortedFriends);
 }
 
 async function checkFriendsInGames(friends) {
@@ -6521,21 +6559,46 @@ async function checkFriendsInGames(friends) {
 }
 
 socket.on('friendsInGames', (data) => {
-    // Update friends list to show eye icons for friends in games
+    // Update friends list to show eye icons for friends in games and sort by online status
     console.log('friendsInGames received:', data);
     const friendsList = document.getElementById('friendsList');
     if (!friendsList) {
         console.log('friendsInGames: friendsList not found');
         return;
     }
-    if (!data.friendsInGames) {
-        console.log('friendsInGames: No friendsInGames data');
-        return;
+    
+    // Update activity status for all friends based on online status
+    // First, mark all friends as inactive
+    friendsListData.forEach(friend => {
+        if (!friendsActivityStatus[friend.id]) {
+            friendsActivityStatus[friend.id] = { isActive: false, gameId: null };
+        }
+    });
+    
+    // Update status based on online status (not just in games)
+    if (data.friendsOnline) {
+        Object.keys(data.friendsOnline).forEach(friendId => {
+            const isOnline = data.friendsOnline[friendId] === true;
+            friendsActivityStatus[friendId] = {
+                isActive: isOnline,
+                gameId: data.friendsInGames?.[friendId]?.gameId || null
+            };
+        });
     }
     
-    console.log('friendsInGames: Updating UI with', Object.keys(data.friendsInGames).length, 'friends in games');
+    // If no friendsOnline data, mark all as inactive
+    if (!data.friendsOnline || Object.keys(data.friendsOnline).length === 0) {
+        friendsListData.forEach(friend => {
+            friendsActivityStatus[friend.id] = { isActive: false, gameId: null };
+        });
+    }
     
-    // Re-render friends list with game status
+    console.log('friendsInGames: Updating UI with', Object.values(friendsActivityStatus).filter(s => s.isActive).length, 'friends online');
+    
+    // Re-sort and re-render friends list with updated activity status
+    sortAndRenderFriendsList();
+    
+    // Update online indicators and spectate buttons for all friend items
     const friendItems = friendsList.querySelectorAll('.friend-item');
     console.log('friendsInGames: Found', friendItems.length, 'friend items in DOM');
     
@@ -6546,26 +6609,46 @@ socket.on('friendsInGames', (data) => {
             return;
         }
         
+        // Update online indicator
+        const onlineIndicator = item.querySelector('.friend-online-indicator');
+        const isActive = friendsActivityStatus[friendId]?.isActive || false;
+        if (onlineIndicator) {
+            onlineIndicator.className = `friend-online-indicator ${isActive ? 'online' : 'offline'}`;
+            onlineIndicator.title = isActive ? 'Online' : 'Offline';
+        }
+        
+        // Update challenge button visibility
+        const challengeBtn = item.querySelector('.challenge-btn');
+        if (challengeBtn) {
+            challengeBtn.style.display = isActive ? 'flex' : 'none';
+        }
+        
         // Check if this friend is in a game
-        const gameInfo = data.friendsInGames[friendId];
+        const gameInfo = data.friendsInGames?.[friendId];
         console.log('friendsInGames: Friend', friendId, 'gameInfo:', gameInfo);
         
         let spectateBtn = item.querySelector('.spectate-btn');
         
         if (gameInfo && (gameInfo.status === 'playing' || gameInfo.status === 'waiting')) {
-            // Add or update eye icon
+            // Show spectate button if friend is in a game
             if (!spectateBtn) {
-                spectateBtn = document.createElement('button');
-                spectateBtn.className = 'spectate-btn';
-                spectateBtn.innerHTML = '<span class="btn-icon">👁️</span>';
-                spectateBtn.title = 'Spectate Game';
-                item.appendChild(spectateBtn);
-                console.log('friendsInGames: Created spectate button for', friendId);
+                const statusIndicators = item.querySelector('.friend-status-indicators');
+                if (statusIndicators) {
+                    spectateBtn = document.createElement('button');
+                    spectateBtn.className = 'spectate-btn';
+                    spectateBtn.innerHTML = '<span class="btn-icon">👁️</span>';
+                    spectateBtn.title = 'Spectate Game';
+                    // Insert after online indicator
+                    statusIndicators.insertBefore(spectateBtn, challengeBtn);
+                    console.log('friendsInGames: Created spectate button for', friendId);
+                }
             }
-            spectateBtn.dataset.gameId = gameInfo.gameId;
-            spectateBtn.onclick = () => spectateFriendGame(friendId, gameInfo.gameId);
-            spectateBtn.style.display = 'block';
-            console.log('friendsInGames: Showing spectate button for', friendId, 'game:', gameInfo.gameId);
+            if (spectateBtn) {
+                spectateBtn.dataset.gameId = gameInfo.gameId;
+                spectateBtn.onclick = () => spectateFriendGame(friendId, gameInfo.gameId);
+                spectateBtn.style.display = 'flex';
+                console.log('friendsInGames: Showing spectate button for', friendId, 'game:', gameInfo.gameId);
+            }
         } else {
             // Hide eye icon if friend is not in a game
             if (spectateBtn) {
@@ -6585,18 +6668,45 @@ function renderFriendsList(friends) {
         return;
     }
     
-    friendsList.innerHTML = friends.map(friend => `
-        <div class="friend-item" data-friend-id="${friend.id || ''}">
+    friendsList.innerHTML = friends.map(friend => {
+        const isActive = friendsActivityStatus[friend.id]?.isActive || false;
+        return `
+        <div class="friend-item" data-friend-id="${friend.id || ''}" data-friend-name="${friend.name || 'Unknown'}" data-friend-email="${friend.email || ''}">
             <div class="friend-avatar">${friend.name ? friend.name.charAt(0).toUpperCase() : '👤'}</div>
             <div class="friend-info">
-                <div class="friend-name">${friend.name || 'Unknown'}</div>
+                <div class="friend-name-container">
+                    <div class="friend-name">${friend.name || 'Unknown'}</div>
+                    <div class="friend-status-indicators">
+                        <button class="challenge-btn" style="display: ${isActive ? 'flex' : 'none'};" onclick="challengeFriend('${friend.id || ''}', '${friend.name || 'Unknown'}', event)" title="Challenge Friend">
+                            <span class="btn-icon">⚔️</span>
+                        </button>
+                        <button class="spectate-btn" style="display: none;" onclick="spectateFriendGame('${friend.id || ''}', '')" title="Spectate Game">
+                            <span class="btn-icon">👁️</span>
+                        </button>
+                        <div class="friend-online-indicator ${isActive ? 'online' : 'offline'}" title="${isActive ? 'Online' : 'Offline'}"></div>
+                    </div>
+                </div>
                 <div class="friend-status">${friend.email || ''}</div>
             </div>
-            <button class="spectate-btn" style="display: none;" onclick="spectateFriendGame('${friend.id || ''}', '')" title="Spectate Game">
-                <span class="btn-icon">👁️</span>
-            </button>
         </div>
-    `).join('');
+    `;
+    }).join('');
+    
+    // Add click handlers to friend items
+    friendsList.querySelectorAll('.friend-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            // Don't trigger if clicking on spectate button or challenge button
+            if (e.target.closest('.spectate-btn') || e.target.closest('.challenge-btn')) {
+                return;
+            }
+            const friendId = item.dataset.friendId;
+            const friendName = item.dataset.friendName;
+            const friendEmail = item.dataset.friendEmail;
+            if (friendId) {
+                openFriendStats(friendId, friendName, friendEmail);
+            }
+        });
+    });
 }
 
 function renderFriendRequests(requests) {
@@ -6627,6 +6737,121 @@ function renderFriendRequests(requests) {
             </div>
         </div>
     `).join('');
+}
+
+// Fetch friend stats from Firestore
+async function getFriendStats(friendId) {
+    if (!window.firebaseDb || !friendId) {
+        console.warn('Firebase not available or friend ID missing');
+        return getDefaultStats();
+    }
+    
+    try {
+        const statsDoc = await window.firebaseDb.collection('stats').doc(friendId).get();
+        if (statsDoc.exists) {
+            return statsDoc.data();
+        } else {
+            // No stats yet, return defaults
+            return getDefaultStats();
+        }
+    } catch (error) {
+        console.error('Error loading friend stats from Firestore:', error);
+        return getDefaultStats();
+    }
+}
+
+// Open friend stats popup
+async function openFriendStats(friendId, friendName, friendEmail) {
+    const overlay = document.getElementById('friendStatsOverlay');
+    if (!overlay) return;
+    
+    // Show loading state
+    overlay.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    
+    // Set friend name
+    const nameEl = document.getElementById('friendStatsName');
+    if (nameEl) {
+        nameEl.textContent = friendName || 'Friend Stats';
+    }
+    
+    // Set avatar
+    const avatarEl = document.getElementById('friendStatsAvatar');
+    if (avatarEl) {
+        avatarEl.textContent = friendName ? friendName.charAt(0).toUpperCase() : '👤';
+    }
+    
+    // Fetch and display stats
+    try {
+        const stats = await getFriendStats(friendId);
+        
+        // Calculate rank
+        const chipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+        const rank = getRankFromChips(chipPoints);
+        
+        // Display rank
+        const rankEl = document.getElementById('friendStatsRank');
+        if (rankEl) {
+            rankEl.textContent = `${rank.tier} ${rank.subRank}`;
+            rankEl.style.color = rank.color;
+        }
+        
+        // Display all stats
+        const chipsEl = document.getElementById('friendStatChips');
+        if (chipsEl) chipsEl.textContent = Math.round(chipPoints);
+        
+        const gamesPlayedEl = document.getElementById('friendStatGamesPlayed');
+        if (gamesPlayedEl) gamesPlayedEl.textContent = stats.gamesPlayed || 0;
+        
+        const winsEl = document.getElementById('friendStatWins');
+        if (winsEl) winsEl.textContent = stats.wins || 0;
+        
+        const lossesEl = document.getElementById('friendStatLosses');
+        if (lossesEl) lossesEl.textContent = stats.losses || 0;
+        
+        const winRateEl = document.getElementById('friendStatWinRate');
+        if (winRateEl) {
+            if (stats.gamesPlayed > 0) {
+                const winRate = Math.round((stats.wins / stats.gamesPlayed) * 100);
+                winRateEl.textContent = winRate + '%';
+            } else {
+                winRateEl.textContent = '0%';
+            }
+        }
+        
+        const avgGuessesEl = document.getElementById('friendStatAvgGuesses');
+        if (avgGuessesEl) {
+            if (stats.gamesWithGuesses > 0) {
+                const avgGuesses = (stats.totalGuesses / stats.gamesWithGuesses).toFixed(1);
+                avgGuessesEl.textContent = avgGuesses;
+            } else {
+                avgGuessesEl.textContent = '-';
+            }
+        }
+        
+        const winStreakEl = document.getElementById('friendStatWinStreak');
+        if (winStreakEl) {
+            const winStreak = stats.winStreak !== undefined && stats.winStreak !== null ? stats.winStreak : 0;
+            winStreakEl.textContent = winStreak;
+        }
+        
+        const bestWinStreakEl = document.getElementById('friendStatBestWinStreak');
+        if (bestWinStreakEl) {
+            const bestWinStreak = stats.bestWinStreak !== undefined && stats.bestWinStreak !== null ? stats.bestWinStreak : 0;
+            bestWinStreakEl.textContent = bestWinStreak;
+        }
+    } catch (error) {
+        console.error('Error loading friend stats:', error);
+    }
+}
+
+// Close friend stats popup
+function closeFriendStats() {
+    const overlay = document.getElementById('friendStatsOverlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+        document.body.style.overflow = '';
+    }
 }
 
 async function searchFriend() {
@@ -6911,6 +7136,150 @@ function hideSearchResults() {
     }
 }
 
+// Challenge a friend
+function challengeFriend(friendFirebaseUid, friendName, event) {
+    // Prevent event propagation to avoid triggering friend stats popup
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+    
+    if (!socket || !socket.connected) {
+        showGameMessage('⚠️', 'Connection Error', 'Not connected to server. Please refresh the page.');
+        return;
+    }
+    
+    if (!currentUser || !currentUser.uid) {
+        showGameMessage('⚠️', 'Sign In Required', 'You must be signed in to challenge friends.');
+        return;
+    }
+    
+    const playerName = getPlayerName();
+    if (!playerName) {
+        showGameMessage('⚠️', 'Name Required', 'Please enter your name first');
+        return;
+    }
+    
+    console.log('Challenging friend:', friendFirebaseUid, friendName);
+    socket.emit('challengeFriend', {
+        challengerFirebaseUid: currentUser.uid,
+        challengerName: playerName,
+        targetFirebaseUid: friendFirebaseUid,
+        targetName: friendName
+    });
+    
+    showGameMessage('⚔️', 'Challenge Sent', `Challenge sent to ${friendName}!`, 2000);
+}
+
+// Handle incoming challenge request
+socket.on('challengeRequest', (data) => {
+    console.log('Received challenge request:', data);
+    const challengerName = data.challengerName || 'Unknown';
+    
+    const overlay = document.getElementById('challengeRequestOverlay');
+    const titleEl = document.getElementById('challengeRequestTitle');
+    const textEl = document.getElementById('challengeRequestText');
+    const acceptBtn = document.getElementById('challengeAcceptBtn');
+    const denyBtn = document.getElementById('challengeDenyBtn');
+    
+    if (!overlay || !titleEl || !textEl || !acceptBtn || !denyBtn) {
+        console.error('Challenge popup elements not found');
+        return;
+    }
+    
+    titleEl.textContent = 'Challenge Request';
+    textEl.textContent = `${challengerName} wants to challenge you to a game!`;
+    
+    // Store challenge data
+    overlay.dataset.challengeId = data.challengeId;
+    overlay.dataset.challengerFirebaseUid = data.challengerFirebaseUid;
+    overlay.dataset.challengerName = data.challengerName;
+    
+    // Show overlay using the same pattern as gameMessage (with class, not direct display)
+    overlay.classList.remove('show', 'hiding');
+    void overlay.offsetWidth; // Force reflow
+    overlay.classList.add('show');
+    
+    // Set up button handlers
+    acceptBtn.onclick = () => acceptChallenge(data.challengeId, data.challengerFirebaseUid, data.challengerName);
+    denyBtn.onclick = () => denyChallenge(data.challengeId);
+    
+    // Close on overlay click (outside content)
+    overlay.onclick = (e) => {
+        if (e.target === overlay) {
+            denyChallenge(data.challengeId);
+        }
+    };
+});
+
+// Accept challenge
+function acceptChallenge(challengeId, challengerFirebaseUid, challengerName) {
+    if (!socket || !socket.connected) {
+        showGameMessage('⚠️', 'Connection Error', 'Not connected to server.');
+        return;
+    }
+    
+    console.log('Accepting challenge:', challengeId);
+    socket.emit('acceptChallenge', { challengeId: challengeId });
+    
+    // Close popup with animation
+    const overlay = document.getElementById('challengeRequestOverlay');
+    if (overlay) {
+        overlay.classList.add('hiding');
+        setTimeout(() => {
+            overlay.classList.remove('show', 'hiding');
+            overlay.style.display = 'none';
+        }, 300);
+    }
+    
+    showGameMessage('✅', 'Challenge Accepted', `Starting game with ${challengerName}...`, 2000);
+}
+
+// Deny challenge
+function denyChallenge(challengeId) {
+    if (!socket || !socket.connected) {
+        return;
+    }
+    
+    console.log('Denying challenge:', challengeId);
+    socket.emit('denyChallenge', { challengeId: challengeId });
+    
+    // Close popup with animation
+    const overlay = document.getElementById('challengeRequestOverlay');
+    if (overlay) {
+        overlay.classList.add('hiding');
+        setTimeout(() => {
+            overlay.classList.remove('show', 'hiding');
+            overlay.style.display = 'none';
+        }, 300);
+    }
+}
+
+// Handle challenge accepted (start game)
+socket.on('challengeAccepted', (data) => {
+    console.log('Challenge accepted, starting game:', data);
+    // Close challenge popup if open
+    const overlay = document.getElementById('challengeRequestOverlay');
+    if (overlay) {
+        overlay.classList.add('hiding');
+        setTimeout(() => {
+            overlay.classList.remove('show', 'hiding');
+            overlay.style.display = 'none';
+        }, 300);
+    }
+    // The game will start automatically via the normal game flow
+    // Cancel any active matchmaking
+    if (socket && socket.connected) {
+        socket.emit('cancelMatchmaking');
+    }
+});
+
+// Handle challenge denied
+socket.on('challengeDenied', (data) => {
+    console.log('Challenge denied:', data);
+    showGameMessage('❌', 'Challenge Declined', `${data.targetName || 'Your friend'} declined the challenge.`, 3000);
+});
+
 function spectateFriendGame(friendFirebaseUid, gameId) {
     if (!socket) {
         showGameMessage('⚠️', 'Connection Error', 'Not connected to server');
@@ -7151,6 +7520,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const searchFriendBtn = document.getElementById('searchFriendBtn');
     if (searchFriendBtn) {
         searchFriendBtn.addEventListener('click', searchFriend);
+    }
+    
+    // Friend stats popup event listeners
+    const closeFriendStatsBtn = document.getElementById('closeFriendStatsBtn');
+    if (closeFriendStatsBtn) {
+        closeFriendStatsBtn.addEventListener('click', closeFriendStats);
+    }
+    
+    const friendStatsOverlay = document.getElementById('friendStatsOverlay');
+    if (friendStatsOverlay) {
+        friendStatsOverlay.addEventListener('click', (e) => {
+            if (e.target.id === 'friendStatsOverlay') {
+                closeFriendStats();
+            }
+        });
     }
     
     const friendSearchInput = document.getElementById('friendSearchInput');

@@ -807,6 +807,56 @@
             </div>
         </div>
 
+        <!-- Friend Stats Overlay -->
+        <div id="friendStatsOverlay" class="help-overlay" style="display: none;">
+            <div class="help-modal friend-stats-modal">
+                <div class="help-header">
+                    <h2 id="friendStatsName">Friend Stats</h2>
+                    <button id="closeFriendStatsBtn" class="close-btn">✕</button>
+                </div>
+                <div class="help-content">
+                    <div class="friend-stats-container">
+                        <div class="friend-stats-avatar" id="friendStatsAvatar">👤</div>
+                        <div class="friend-stats-rank" id="friendStatsRank">Copper V</div>
+                        <div class="friend-stats-grid">
+                            <div class="friend-stat-item">
+                                <div class="friend-stat-label">Chips</div>
+                                <div class="friend-stat-value" id="friendStatChips">0</div>
+                            </div>
+                            <div class="friend-stat-item">
+                                <div class="friend-stat-label">Games Played</div>
+                                <div class="friend-stat-value" id="friendStatGamesPlayed">0</div>
+                            </div>
+                            <div class="friend-stat-item">
+                                <div class="friend-stat-label">Wins</div>
+                                <div class="friend-stat-value" id="friendStatWins">0</div>
+                            </div>
+                            <div class="friend-stat-item">
+                                <div class="friend-stat-label">Losses</div>
+                                <div class="friend-stat-value" id="friendStatLosses">0</div>
+                            </div>
+                            <div class="friend-stat-item">
+                                <div class="friend-stat-label">Win Rate</div>
+                                <div class="friend-stat-value" id="friendStatWinRate">0%</div>
+                            </div>
+                            <div class="friend-stat-item">
+                                <div class="friend-stat-label">Avg Guesses</div>
+                                <div class="friend-stat-value" id="friendStatAvgGuesses">-</div>
+                            </div>
+                            <div class="friend-stat-item">
+                                <div class="friend-stat-label">Win Streak</div>
+                                <div class="friend-stat-value" id="friendStatWinStreak">0</div>
+                            </div>
+                            <div class="friend-stat-item">
+                                <div class="friend-stat-label">Best Win Streak</div>
+                                <div class="friend-stat-value" id="friendStatBestWinStreak">0</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div id="gameOver" class="screen">
             <div class="game-over-content">
                 <div class="game-over-icon" id="gameOverIcon">🎉</div>
@@ -843,6 +893,19 @@
             <div class="game-message-title" id="gameMessageTitle"></div>
             <div class="game-message-text" id="gameMessageText"></div>
             <button class="game-message-button" id="gameMessageButton">Got it!</button>
+        </div>
+    </div>
+
+    <!-- Challenge Request Overlay -->
+    <div id="challengeRequestOverlay" class="game-message-overlay">
+        <div class="game-message-content">
+            <div class="game-message-icon">⚔️</div>
+            <div class="game-message-title" id="challengeRequestTitle">Challenge Request</div>
+            <div class="game-message-text" id="challengeRequestText"></div>
+            <div class="challenge-buttons">
+                <button class="game-message-button btn-accept" id="challengeAcceptBtn">Accept</button>
+                <button class="game-message-button btn-deny" id="challengeDenyBtn">Deny</button>
+            </div>
         </div>
     </div>
 

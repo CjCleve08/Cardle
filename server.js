@@ -677,6 +677,9 @@ const players = new Map();
 const spectators = new Map(); // gameId -> Set of socket IDs
 const userToGame = new Map(); // firebaseUid -> gameId (for friend status checking)
 const rematchRequests = new Map(); // gameId -> Set of player socket IDs who requested rematch
+const onlineUsers = new Map(); // socket.id -> firebaseUid (track all online users)
+const pendingChallenges = new Map(); // challengeId -> { challengerSocketId, challengerFirebaseUid, challengerName, targetFirebaseUid, targetName }
+const firebaseUidToSocket = new Map(); // firebaseUid -> socket.id (for finding socket by firebaseUid)
 
 // Matchmaking queue
 const matchmakingQueue = [];
@@ -1827,6 +1830,16 @@ function submitBotGuess(gameId, botId, guess, card) {
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
     
+    // Register user as online when they connect (if they have firebaseUid)
+    socket.on('registerOnline', (data) => {
+        if (data && data.firebaseUid) {
+            onlineUsers.set(socket.id, data.firebaseUid);
+            firebaseUidToSocket.set(data.firebaseUid, socket.id);
+            console.log('User', data.firebaseUid, 'registered as online (socket:', socket.id + ')');
+            console.log('Total online users:', onlineUsers.size);
+        }
+    });
+    
     // Debug: Allow clients to request the word for their game
     socket.on('getWord', () => {
         const playerData = players.get(socket.id);
@@ -1843,12 +1856,26 @@ io.on('connection', (socket) => {
         const playerName = data.playerName || 'Player';
         const firebaseUid = data.firebaseUid || null;
         
+        // Track user as online
+        if (firebaseUid) {
+            onlineUsers.set(socket.id, firebaseUid);
+            firebaseUidToSocket.set(firebaseUid, socket.id);
+            console.log('User', firebaseUid, 'connected (startTutorial) and added to onlineUsers');
+        }
+        
         // Create tutorial bot game
         createBotGame(socket, playerName, firebaseUid, true);
     });
     
     // Matchmaking handlers
     socket.on('findMatch', (data) => {
+        // Track user as online
+        if (data.firebaseUid) {
+            onlineUsers.set(socket.id, data.firebaseUid);
+            firebaseUidToSocket.set(data.firebaseUid, socket.id);
+            console.log('User', data.firebaseUid, 'connected and added to onlineUsers');
+        }
+        
         // Check if player is already in queue
         const existingIndex = matchmakingQueue.findIndex(p => p.id === socket.id);
         if (existingIndex !== -1) {
@@ -2036,6 +2063,13 @@ io.on('connection', (socket) => {
     });
     
     socket.on('createGame', (data) => {
+        // Track user as online
+        if (data.firebaseUid) {
+            onlineUsers.set(socket.id, data.firebaseUid);
+            firebaseUidToSocket.set(data.firebaseUid, socket.id);
+            console.log('User', data.firebaseUid, 'connected (createGame) and added to onlineUsers');
+        }
+        
         // Check if player is already in an active game (not finished)
         const playerData = players.get(socket.id);
         if (playerData) {
@@ -2086,6 +2120,13 @@ io.on('connection', (socket) => {
     });
     
     socket.on('joinGame', (data) => {
+        // Track user as online
+        if (data.firebaseUid) {
+            onlineUsers.set(socket.id, data.firebaseUid);
+            firebaseUidToSocket.set(data.firebaseUid, socket.id);
+            console.log('User', data.firebaseUid, 'connected (joinGame) and added to onlineUsers');
+        }
+        
         // Check if player is already in an active game (not finished)
         const playerData = players.get(socket.id);
         if (playerData) {
@@ -2176,22 +2217,30 @@ io.on('connection', (socket) => {
     });
     
     socket.on('checkFriendsInGames', async (data) => {
-        // Check which friends (by firebaseUid) are currently in games
+        // Check which friends (by firebaseUid) are currently online and in games
         console.log('checkFriendsInGames: Received request for', data.friendIds?.length || 0, 'friends');
         console.log('checkFriendsInGames: userToGame map has', userToGame.size, 'entries');
+        console.log('checkFriendsInGames: onlineUsers map has', onlineUsers.size, 'entries');
         console.log('checkFriendsInGames: Current games:', Array.from(games.keys()));
         
         if (!data.friendIds || !Array.isArray(data.friendIds)) {
-            socket.emit('friendsInGames', { friendsInGames: {} });
+            socket.emit('friendsInGames', { friendsInGames: {}, friendsOnline: {} });
             return;
         }
         
         const friendsInGames = {};
+        const friendsOnline = {};
         
-        // Check each friend's game status
+        // Check each friend's online status and game status
         data.friendIds.forEach(friendFirebaseUid => {
+            // Check if friend is online (has an active socket connection)
+            const onlineUserValues = Array.from(onlineUsers.values());
+            const isOnline = onlineUserValues.includes(friendFirebaseUid);
+            friendsOnline[friendFirebaseUid] = isOnline;
+            
             const gameId = userToGame.get(friendFirebaseUid);
-            console.log('checkFriendsInGames: Friend', friendFirebaseUid, 'is in game:', gameId);
+            console.log('checkFriendsInGames: Friend', friendFirebaseUid, 'is online:', isOnline, 'is in game:', gameId);
+            console.log('checkFriendsInGames: Online users list:', onlineUserValues);
             
             if (gameId) {
                 const game = games.get(gameId);
@@ -2216,8 +2265,8 @@ io.on('connection', (socket) => {
             }
         });
         
-        console.log('checkFriendsInGames: Returning', Object.keys(friendsInGames).length, 'friends in games');
-        socket.emit('friendsInGames', { friendsInGames: friendsInGames });
+        console.log('checkFriendsInGames: Returning', Object.keys(friendsInGames).length, 'friends in games,', Object.values(friendsOnline).filter(Boolean).length, 'friends online');
+        socket.emit('friendsInGames', { friendsInGames: friendsInGames, friendsOnline: friendsOnline });
     });
     
     socket.on('spectateGame', (data) => {
@@ -3924,6 +3973,22 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
         
+        // Remove from online users tracking
+        const firebaseUid = onlineUsers.get(socket.id);
+        if (firebaseUid) {
+            onlineUsers.delete(socket.id);
+            firebaseUidToSocket.delete(firebaseUid);
+            console.log('User', firebaseUid, 'disconnected and removed from onlineUsers');
+        }
+        
+        // Clean up pending challenges for this user
+        pendingChallenges.forEach((challenge, challengeId) => {
+            if (challenge.challengerSocketId === socket.id || 
+                (challenge.targetFirebaseUid === firebaseUid && firebaseUidToSocket.get(challenge.targetFirebaseUid) === socket.id)) {
+                pendingChallenges.delete(challengeId);
+            }
+        });
+        
         // Clear bot timeout if exists
         const timeout = matchmakingTimeouts.get(socket.id);
         if (timeout) {
@@ -3978,6 +4043,203 @@ io.on('connection', (socket) => {
             }
             players.delete(socket.id);
         }
+    });
+    
+    // Challenge system
+    socket.on('challengeFriend', (data) => {
+        const { challengerFirebaseUid, challengerName, targetFirebaseUid, targetName } = data;
+        
+        if (!challengerFirebaseUid || !targetFirebaseUid) {
+            socket.emit('error', { message: 'Invalid challenge data' });
+            return;
+        }
+        
+        // Check if target is online
+        const targetSocketId = firebaseUidToSocket.get(targetFirebaseUid);
+        if (!targetSocketId) {
+            socket.emit('error', { message: 'Friend is not online' });
+            return;
+        }
+        
+        // Check if challenger is already in a game
+        const challengerGameId = userToGame.get(challengerFirebaseUid);
+        if (challengerGameId) {
+            const challengerGame = games.get(challengerGameId);
+            if (challengerGame && challengerGame.status !== 'finished') {
+                socket.emit('error', { message: 'You are already in a game' });
+                return;
+            }
+        }
+        
+        // Check if target is already in a game
+        const targetGameId = userToGame.get(targetFirebaseUid);
+        if (targetGameId) {
+            const targetGame = games.get(targetGameId);
+            if (targetGame && targetGame.status !== 'finished') {
+                socket.emit('error', { message: 'Friend is already in a game' });
+                return;
+            }
+        }
+        
+        // Generate challenge ID
+        const challengeId = `challenge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        
+        // Store challenge
+        pendingChallenges.set(challengeId, {
+            challengerSocketId: socket.id,
+            challengerFirebaseUid: challengerFirebaseUid,
+            challengerName: challengerName,
+            targetFirebaseUid: targetFirebaseUid,
+            targetName: targetName
+        });
+        
+        // Send challenge request to target
+        const targetSocket = io.sockets.sockets.get(targetSocketId);
+        if (targetSocket) {
+            targetSocket.emit('challengeRequest', {
+                challengeId: challengeId,
+                challengerFirebaseUid: challengerFirebaseUid,
+                challengerName: challengerName
+            });
+            console.log('Challenge sent from', challengerName, 'to', targetName);
+        }
+    });
+    
+    socket.on('acceptChallenge', (data) => {
+        const { challengeId } = data;
+        const challenge = pendingChallenges.get(challengeId);
+        
+        if (!challenge) {
+            socket.emit('error', { message: 'Challenge not found or expired' });
+            return;
+        }
+        
+        // Verify this socket is the target
+        const targetFirebaseUid = onlineUsers.get(socket.id);
+        if (targetFirebaseUid !== challenge.targetFirebaseUid) {
+            socket.emit('error', { message: 'Unauthorized' });
+            return;
+        }
+        
+        // Get challenger socket
+        const challengerSocket = io.sockets.sockets.get(challenge.challengerSocketId);
+        if (!challengerSocket) {
+            socket.emit('error', { message: 'Challenger is no longer online' });
+            pendingChallenges.delete(challengeId);
+            return;
+        }
+        
+        // Remove challenge
+        pendingChallenges.delete(challengeId);
+        
+        // Create game between challenger and target
+        const gameId = generateGameId();
+        const word = getRandomWord();
+        
+        const game = {
+            gameId: gameId,
+            word: word,
+            players: [
+                {
+                    id: challenge.challengerSocketId,
+                    name: challenge.challengerName,
+                    firebaseUid: challenge.challengerFirebaseUid,
+                    guesses: [],
+                    row: 0
+                },
+                {
+                    id: socket.id,
+                    name: challenge.targetName,
+                    firebaseUid: challenge.targetFirebaseUid,
+                    guesses: [],
+                    row: 0
+                }
+            ],
+            currentTurn: challenge.challengerSocketId, // Challenger goes first
+            activeEffects: [],
+            status: 'waiting',
+            totalGuesses: 0,
+            lastPlayedCards: new Map(),
+            mirroredCards: new Map()
+        };
+        
+        games.set(gameId, game);
+        players.set(challenge.challengerSocketId, { gameId: gameId, playerId: challenge.challengerSocketId });
+        players.set(socket.id, { gameId: gameId, playerId: socket.id });
+        
+        // Track users' games
+        if (challenge.challengerFirebaseUid) {
+            userToGame.set(challenge.challengerFirebaseUid, gameId);
+        }
+        if (challenge.targetFirebaseUid) {
+            userToGame.set(challenge.targetFirebaseUid, gameId);
+        }
+        
+        challengerSocket.join(gameId);
+        socket.join(gameId);
+        
+        // Notify both players
+        challengerSocket.emit('challengeAccepted', { gameId: gameId });
+        socket.emit('challengeAccepted', { gameId: gameId });
+        
+        // Start the game
+        setTimeout(() => {
+            const gameStateForClients = {
+                gameId: game.gameId,
+                currentTurn: game.currentTurn,
+                players: game.players.map(p => ({
+                    id: p.id,
+                    name: p.name,
+                    firebaseUid: p.firebaseUid || null,
+                    guesses: p.guesses || [],
+                    row: p.row || 0,
+                    isBot: false
+                })),
+                status: 'playing',
+                activeEffects: game.activeEffects,
+                totalGuesses: game.totalGuesses
+            };
+            
+            game.status = 'playing';
+            game.players.forEach(player => {
+                const playerSocket = io.sockets.sockets.get(player.id);
+                if (playerSocket) {
+                    playerSocket.emit('gameStarted', {
+                        ...gameStateForClients,
+                        yourPlayerId: player.id
+                    });
+                }
+            });
+        }, 1000);
+        
+        console.log('Challenge accepted, game created:', gameId);
+    });
+    
+    socket.on('denyChallenge', (data) => {
+        const { challengeId } = data;
+        const challenge = pendingChallenges.get(challengeId);
+        
+        if (!challenge) {
+            return;
+        }
+        
+        // Verify this socket is the target
+        const targetFirebaseUid = onlineUsers.get(socket.id);
+        if (targetFirebaseUid !== challenge.targetFirebaseUid) {
+            return;
+        }
+        
+        // Get challenger socket
+        const challengerSocket = io.sockets.sockets.get(challenge.challengerSocketId);
+        if (challengerSocket) {
+            challengerSocket.emit('challengeDenied', {
+                targetName: challenge.targetName
+            });
+        }
+        
+        // Remove challenge
+        pendingChallenges.delete(challengeId);
+        console.log('Challenge denied:', challengeId);
     });
 });
 
