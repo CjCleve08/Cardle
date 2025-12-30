@@ -112,6 +112,12 @@ function showLobby() {
         updateStatsDisplay().catch(error => {
             console.error('Error loading stats:', error);
         });
+        // Update rank display
+        updateRankDisplay().catch(error => {
+            console.error('Error loading rank:', error);
+        });
+        // Generate rank ladder
+        generateRankLadder();
     }
 }
 
@@ -625,7 +631,10 @@ function getDefaultStats() {
         wins: 0,
         losses: 0,
         totalGuesses: 0,
-        gamesWithGuesses: 0
+        gamesWithGuesses: 0,
+        chipPoints: 0, // Starting chip points (rating system)
+        winStreak: 0, // Current consecutive wins
+        bestWinStreak: 0 // Best win streak achieved
     };
 }
 
@@ -692,15 +701,60 @@ async function savePlayerStats(stats) {
     }
 }
 
+// Calculate chip points based on game result
+function calculateChipPoints(won, guesses, currentChipPoints) {
+    // Initialize chip points if not set
+    if (currentChipPoints === undefined || currentChipPoints === null) {
+        currentChipPoints = 0;
+    }
+    
+    if (won) {
+        // Base points for winning: 20
+        let pointsEarned = 20;
+        
+        // Bonus for fewer guesses (efficiency bonus)
+        // Max 6 guesses for full bonus, 7+ gets no bonus
+        if (guesses > 0 && guesses <= 6) {
+            const efficiencyBonus = (7 - guesses) * 5; // 30 max bonus for 1 guess
+            pointsEarned += efficiencyBonus;
+        }
+        
+        return currentChipPoints + pointsEarned;
+    } else {
+        // Loss penalty: -15 points (minimum 0)
+        const pointsLost = 15;
+        return Math.max(0, currentChipPoints - pointsLost);
+    }
+}
+
 async function updateStats(gameResult) {
     const stats = await getPlayerStats();
+    
+    // Initialize new stats if they don't exist
+    if (stats.chipPoints === undefined || stats.chipPoints === null) {
+        stats.chipPoints = 0;
+    }
+    if (stats.winStreak === undefined || stats.winStreak === null) {
+        stats.winStreak = 0;
+    }
+    if (stats.bestWinStreak === undefined || stats.bestWinStreak === null) {
+        stats.bestWinStreak = 0;
+    }
     
     stats.gamesPlayed++;
     
     if (gameResult.won) {
         stats.wins++;
+        // Update win streak
+        stats.winStreak++;
+        // Update best win streak if current streak is better
+        if (stats.winStreak > stats.bestWinStreak) {
+            stats.bestWinStreak = stats.winStreak;
+        }
     } else {
         stats.losses++;
+        // Reset win streak on loss
+        stats.winStreak = 0;
     }
     
     if (gameResult.guesses > 0) {
@@ -708,8 +762,16 @@ async function updateStats(gameResult) {
         stats.gamesWithGuesses++;
     }
     
+    // Calculate and update chip points
+    stats.chipPoints = calculateChipPoints(
+        gameResult.won,
+        gameResult.guesses || 0,
+        stats.chipPoints
+    );
+    
     await savePlayerStats(stats);
     await updateStatsDisplay();
+    await updateRankDisplay();
 }
 
 async function updateStatsDisplay() {
@@ -719,13 +781,15 @@ async function updateStatsDisplay() {
     const winsEl = document.getElementById('statWins');
     const winRateEl = document.getElementById('statWinRate');
     const avgGuessesEl = document.getElementById('statAvgGuesses');
+    const chipPointsEl = document.getElementById('statChipPoints');
+    const winStreakEl = document.getElementById('statWinStreak');
     
     if (gamesPlayedEl) {
-        gamesPlayedEl.textContent = stats.gamesPlayed;
+        gamesPlayedEl.textContent = stats.gamesPlayed || 0;
     }
     
     if (winsEl) {
-        winsEl.textContent = stats.wins;
+        winsEl.textContent = stats.wins || 0;
     }
     
     if (winRateEl) {
@@ -745,11 +809,454 @@ async function updateStatsDisplay() {
             avgGuessesEl.textContent = '-';
         }
     }
+    
+    if (chipPointsEl) {
+        const chipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+        chipPointsEl.textContent = Math.round(chipPoints);
+    }
+    
+    if (winStreakEl) {
+        const winStreak = stats.winStreak !== undefined && stats.winStreak !== null ? stats.winStreak : 0;
+        winStreakEl.textContent = winStreak;
+    }
+    
+    // Also update rank display
+    updateRankDisplay().catch(error => {
+        console.error('Error updating rank display:', error);
+    });
 }
 
 // Clear cached stats when user changes (login/logout)
 function clearStatsCache() {
     cachedStats = null;
+}
+
+// Ranking System (Rainbow Six Siege style)
+const RANK_TIERS = [
+    { name: 'Copper', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 0, maxChips: 1199, color: '#8B4513' },
+    { name: 'Bronze', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 1200, maxChips: 2399, color: '#CD7F32' },
+    { name: 'Silver', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 2400, maxChips: 3599, color: '#C0C0C0' },
+    { name: 'Gold', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 3600, maxChips: 4799, color: '#FFD700' },
+    { name: 'Platinum', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 4800, maxChips: 5999, color: '#00CED1' },
+    { name: 'Diamond', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 6000, maxChips: 7999, color: '#B9F2FF' },
+    { name: 'Champion', subRanks: [], minChips: 8000, maxChips: Infinity, color: '#FF1493' }
+];
+
+function getRankFromChips(chipPoints) {
+    const chips = chipPoints || 0;
+    
+    for (const tier of RANK_TIERS) {
+        if (chips >= tier.minChips && chips <= tier.maxChips) {
+            if (tier.subRanks.length === 0) {
+                // Champion (no sub-ranks)
+                return {
+                    tier: tier.name,
+                    subRank: '',
+                    fullRank: tier.name,
+                    color: tier.color,
+                    chips: chips,
+                    progress: 0,
+                    nextRank: null
+                };
+            }
+            
+            // Calculate which sub-rank
+            const tierRange = tier.maxChips - tier.minChips;
+            const subRankRange = tierRange / tier.subRanks.length;
+            const chipsInTier = chips - tier.minChips;
+            const subRankIndex = Math.min(
+                Math.floor(chipsInTier / subRankRange),
+                tier.subRanks.length - 1
+            );
+            const subRank = tier.subRanks[subRankIndex];
+            
+            // Calculate progress to next sub-rank
+            const currentSubRankStart = tier.minChips + (subRankIndex * subRankRange);
+            const nextSubRankStart = tier.minChips + ((subRankIndex + 1) * subRankRange);
+            const progress = ((chips - currentSubRankStart) / (nextSubRankStart - currentSubRankStart)) * 100;
+            
+            // Determine next rank
+            let nextRank = null;
+            if (subRankIndex < tier.subRanks.length - 1) {
+                nextRank = {
+                    tier: tier.name,
+                    subRank: tier.subRanks[subRankIndex + 1],
+                    fullRank: `${tier.name} ${tier.subRanks[subRankIndex + 1]}`,
+                    chipsNeeded: Math.ceil(nextSubRankStart - chips)
+                };
+            } else if (tier !== RANK_TIERS[RANK_TIERS.length - 1]) {
+                // Next tier
+                const nextTier = RANK_TIERS[RANK_TIERS.findIndex(t => t.name === tier.name) + 1];
+                nextRank = {
+                    tier: nextTier.name,
+                    subRank: nextTier.subRanks[0] || '',
+                    fullRank: nextTier.name + (nextTier.subRanks[0] ? ` ${nextTier.subRanks[0]}` : ''),
+                    chipsNeeded: Math.ceil(nextTier.minChips - chips)
+                };
+            }
+            
+            return {
+                tier: tier.name,
+                subRank: subRank,
+                fullRank: `${tier.name} ${subRank}`,
+                color: tier.color,
+                chips: chips,
+                progress: Math.min(100, Math.max(0, progress)),
+                nextRank: nextRank
+            };
+        }
+    }
+    
+    // Fallback (shouldn't happen)
+    return {
+        tier: 'Copper',
+        subRank: 'V',
+        fullRank: 'Copper V',
+        color: '#8B4513',
+        chips: chips,
+        progress: 0,
+        nextRank: null
+    };
+}
+
+async function updateRankDisplay() {
+    const stats = await getPlayerStats();
+    const chipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+    const rank = getRankFromChips(chipPoints);
+    
+    // Update rank display in play tab
+    const rankDisplayEl = document.getElementById('currentRankDisplay');
+    const rankTierEl = document.getElementById('currentRankTier');
+    const rankSubRankEl = document.getElementById('currentRankSubRank');
+    const rankChipsEl = document.getElementById('currentRankChips');
+    const rankProgressBar = document.getElementById('rankProgressBar');
+    const rankProgressText = document.getElementById('rankProgressText');
+    
+    if (rankDisplayEl) {
+        rankDisplayEl.textContent = rank.fullRank;
+        rankDisplayEl.style.color = rank.color;
+    }
+    
+    if (rankTierEl) {
+        rankTierEl.textContent = rank.tier;
+        rankTierEl.style.color = rank.color;
+    }
+    
+    if (rankSubRankEl) {
+        rankSubRankEl.textContent = rank.subRank || '';
+        rankSubRankEl.style.color = rank.color;
+    }
+    
+    if (rankChipsEl) {
+        rankChipsEl.textContent = Math.round(chipPoints);
+    }
+    
+    if (rankProgressBar) {
+        rankProgressBar.style.width = `${rank.progress}%`;
+        rankProgressBar.style.backgroundColor = rank.color;
+    }
+    
+    if (rankProgressText && rank.nextRank) {
+        rankProgressText.textContent = `${Math.ceil(rank.nextRank.chipsNeeded)} chips to ${rank.nextRank.fullRank}`;
+    } else if (rankProgressText) {
+        rankProgressText.textContent = 'Max Rank Achieved!';
+    }
+    
+    // Update rank ladder highlighting
+    updateRankLadderHighlight(rank);
+}
+
+function updateRankLadderHighlight(currentRank) {
+    // This function is no longer needed for the new design
+    // The progress bar fill and indicator show the current rank
+}
+
+function generateGameOverRankProgress(beforeChips, afterChips) {
+    const markersContainer = document.getElementById('gameOverRankMarkers');
+    const progressBarFill = document.getElementById('gameOverRankProgressFill');
+    const currentRankBadge = document.getElementById('gameOverRankBadge');
+    const currentRankIndicator = document.getElementById('gameOverRankIndicator');
+    const progressBarTrack = document.getElementById('gameOverRankProgressTrack');
+    
+    if (!markersContainer || !progressBarFill || !currentRankBadge || !currentRankIndicator || !progressBarTrack) return;
+    
+    markersContainer.innerHTML = '';
+    
+    // Get before and after ranks
+    const beforeRank = getRankFromChips(beforeChips);
+    const afterRank = getRankFromChips(afterChips);
+    
+    // Find the tier that contains the current rank (use after rank, or before if they're in different tiers)
+    const currentTier = RANK_TIERS.find(tier => tier.name === afterRank.tier) || 
+                        RANK_TIERS.find(tier => tier.name === beforeRank.tier);
+    
+    if (!currentTier || currentTier.subRanks.length === 0) {
+        // Champion tier - special handling
+        const championTier = RANK_TIERS[RANK_TIERS.length - 1];
+        const tierRange = 2000; // Assume 2000 chip range for Champion (8000-10000)
+        const chipsInTier = Math.max(0, afterChips - championTier.minChips);
+        const beforeChipsInTier = Math.max(0, beforeChips - championTier.minChips);
+        const beforeFillPercentage = (beforeChipsInTier / tierRange) * 100;
+        const afterFillPercentage = (chipsInTier / tierRange) * 100;
+        
+        // Set initial position
+        progressBarFill.style.width = `${Math.min(100, beforeFillPercentage)}%`;
+        progressBarFill.style.background = `linear-gradient(90deg, ${beforeRank.color}, ${beforeRank.color})`;
+        currentRankIndicator.style.left = `${Math.min(100, beforeFillPercentage)}%`;
+        currentRankBadge.textContent = beforeRank.fullRank;
+        currentRankBadge.style.backgroundColor = beforeRank.color;
+        currentRankBadge.style.borderColor = beforeRank.color;
+        
+        // Add Champion marker
+        const marker = document.createElement('div');
+        marker.className = 'rank-marker';
+        marker.style.left = '100%';
+        marker.style.borderColor = championTier.color;
+        const markerLabel = document.createElement('div');
+        markerLabel.className = 'rank-marker-label';
+        markerLabel.textContent = 'Champion';
+        markerLabel.style.color = championTier.color;
+        marker.appendChild(markerLabel);
+        markersContainer.appendChild(marker);
+        
+        // Animate to new position
+        setTimeout(() => {
+            const changeColor = afterChips > beforeChips ? '#6aaa64' : '#c9b458';
+            const changeStart = Math.min(beforeFillPercentage, afterFillPercentage);
+            const changeEnd = Math.max(beforeFillPercentage, afterFillPercentage);
+            
+            progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
+            progressBarFill.style.background = `linear-gradient(90deg, 
+                ${beforeRank.color} 0%, 
+                ${beforeRank.color} ${changeStart}%, 
+                ${changeColor} ${changeStart}%, 
+                ${changeColor} ${changeEnd}%, 
+                ${afterRank.color} ${changeEnd}%, 
+                ${afterRank.color} 100%)`;
+            currentRankIndicator.style.left = `${Math.min(100, afterFillPercentage)}%`;
+            currentRankBadge.textContent = afterRank.fullRank;
+            currentRankBadge.style.backgroundColor = afterRank.color;
+            currentRankBadge.style.borderColor = afterRank.color;
+        }, 500);
+        return;
+    }
+    
+    // Calculate progress within the tier
+    const tierRange = currentTier.maxChips - currentTier.minChips;
+    const subRankRange = tierRange / currentTier.subRanks.length;
+    const beforeChipsInTier = Math.max(0, beforeChips - currentTier.minChips);
+    const afterChipsInTier = Math.max(0, afterChips - currentTier.minChips);
+    
+    // Calculate which sub-rank we're in
+    const beforeSubRankIndex = Math.min(
+        Math.floor(beforeChipsInTier / subRankRange),
+        currentTier.subRanks.length - 1
+    );
+    const afterSubRankIndex = Math.min(
+        Math.floor(afterChipsInTier / subRankRange),
+        currentTier.subRanks.length - 1
+    );
+    
+    // Calculate progress within current sub-rank range
+    const beforeSubRankStart = beforeSubRankIndex * subRankRange;
+    const afterSubRankStart = afterSubRankIndex * subRankRange;
+    const beforeProgressInSubRank = ((beforeChipsInTier - beforeSubRankStart) / subRankRange) * 100;
+    const afterProgressInSubRank = ((afterChipsInTier - afterSubRankStart) / subRankRange) * 100;
+    
+    // Calculate overall percentage within tier
+    const beforeFillPercentage = ((beforeSubRankIndex + (beforeProgressInSubRank / 100)) / currentTier.subRanks.length) * 100;
+    const afterFillPercentage = ((afterSubRankIndex + (afterProgressInSubRank / 100)) / currentTier.subRanks.length) * 100;
+    
+    // Set initial position (before)
+    progressBarFill.style.width = `${beforeFillPercentage}%`;
+    progressBarFill.style.background = `linear-gradient(90deg, ${beforeRank.color}, ${beforeRank.color})`;
+    currentRankIndicator.style.left = `${beforeFillPercentage}%`;
+    currentRankBadge.textContent = beforeRank.fullRank;
+    currentRankBadge.style.backgroundColor = beforeRank.color;
+    currentRankBadge.style.borderColor = beforeRank.color;
+    
+    // Create markers for each sub-rank in this tier
+    currentTier.subRanks.forEach((subRank, index) => {
+        const marker = document.createElement('div');
+        marker.className = 'rank-marker';
+        const markerPosition = (index / currentTier.subRanks.length) * 100;
+        marker.style.left = `${markerPosition}%`;
+        marker.style.borderColor = currentTier.color;
+        
+        const markerLabel = document.createElement('div');
+        markerLabel.className = 'rank-marker-label';
+        markerLabel.textContent = `${currentTier.name} ${subRank}`;
+        markerLabel.style.color = currentTier.color;
+        marker.appendChild(markerLabel);
+        
+        markersContainer.appendChild(marker);
+    });
+    
+    // Add marker at the end (next tier or end of tier)
+    const endMarker = document.createElement('div');
+    endMarker.className = 'rank-marker';
+    endMarker.style.left = '100%';
+    endMarker.style.borderColor = currentTier.color;
+    
+    // Check if there's a next tier
+    const currentTierIndex = RANK_TIERS.findIndex(t => t.name === currentTier.name);
+    const nextTier = currentTierIndex < RANK_TIERS.length - 1 ? RANK_TIERS[currentTierIndex + 1] : null;
+    
+    const endMarkerLabel = document.createElement('div');
+    endMarkerLabel.className = 'rank-marker-label';
+    if (nextTier) {
+        endMarkerLabel.textContent = nextTier.name;
+        endMarkerLabel.style.color = nextTier.color;
+        endMarker.style.borderColor = nextTier.color;
+    } else {
+        endMarkerLabel.textContent = 'Max';
+        endMarkerLabel.style.color = currentTier.color;
+    }
+    endMarker.appendChild(endMarkerLabel);
+    markersContainer.appendChild(endMarker);
+    
+    // Animate to new position after a short delay
+    setTimeout(() => {
+        const changeColor = afterChips > beforeChips ? '#6aaa64' : '#c9b458'; // Green for gain, yellow for loss
+        const changeStart = Math.min(beforeFillPercentage, afterFillPercentage);
+        const changeEnd = Math.max(beforeFillPercentage, afterFillPercentage);
+        
+        progressBarFill.style.width = `${afterFillPercentage}%`;
+        // Create gradient that shows the change in green/yellow
+        progressBarFill.style.background = `linear-gradient(90deg, 
+            ${beforeRank.color} 0%, 
+            ${beforeRank.color} ${changeStart}%, 
+            ${changeColor} ${changeStart}%, 
+            ${changeColor} ${changeEnd}%, 
+            ${afterRank.color} ${changeEnd}%, 
+            ${afterRank.color} 100%)`;
+        currentRankIndicator.style.left = `${afterFillPercentage}%`;
+        currentRankBadge.textContent = afterRank.fullRank;
+        currentRankBadge.style.backgroundColor = afterRank.color;
+        currentRankBadge.style.borderColor = afterRank.color;
+    }, 500);
+}
+
+function generateRankLadder() {
+    const markersContainer = document.getElementById('rankMarkers');
+    const progressBarFill = document.getElementById('rankProgressBarFill');
+    const currentRankBadge = document.getElementById('currentRankBadge');
+    const currentRankIndicator = document.getElementById('currentRankIndicator');
+    
+    if (!markersContainer || !progressBarFill || !currentRankBadge || !currentRankIndicator) return;
+    
+    markersContainer.innerHTML = '';
+    
+    // Calculate total number of ranks
+    let totalRanks = 0;
+    RANK_TIERS.forEach(tier => {
+        if (tier.subRanks.length > 0) {
+            totalRanks += tier.subRanks.length;
+        } else {
+            totalRanks += 1; // Champion
+        }
+    });
+    
+    // Get current rank
+    getPlayerStats().then(stats => {
+        const chipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+        const currentRank = getRankFromChips(chipPoints);
+        
+        // Calculate position based on actual rank structure (matching getRankFromChips logic)
+        let rankPosition = 0; // 0 to 1 (0% to 100%)
+        let rankCount = 0;
+        
+        for (const tier of RANK_TIERS) {
+            if (chipPoints >= tier.minChips && chipPoints <= tier.maxChips) {
+                // We're in this tier
+                if (tier.subRanks.length > 0) {
+                    const tierRange = tier.maxChips - tier.minChips;
+                    const subRankRange = tierRange / tier.subRanks.length;
+                    const chipsInTier = chipPoints - tier.minChips;
+                    const subRankIndex = Math.min(
+                        Math.floor(chipsInTier / subRankRange),
+                        tier.subRanks.length - 1
+                    );
+                    
+                    // Calculate progress within the current sub-rank
+                    const currentSubRankStart = subRankIndex * subRankRange;
+                    const nextSubRankStart = (subRankIndex + 1) * subRankRange;
+                    const progressInSubRank = ((chipsInTier - currentSubRankStart) / (nextSubRankStart - currentSubRankStart));
+                    
+                    // Position = (ranks before this tier + current sub-rank index + progress in sub-rank) / total ranks
+                    rankPosition = (rankCount + subRankIndex + progressInSubRank) / totalRanks;
+                    break;
+                } else {
+                    // Champion - at the end
+                    rankPosition = 1.0;
+                    break;
+                }
+            } else if (chipPoints > tier.maxChips) {
+                // We've passed this tier, add all its sub-ranks to the count
+                if (tier.subRanks.length > 0) {
+                    rankCount += tier.subRanks.length;
+                } else {
+                    rankCount += 1;
+                }
+            }
+        }
+        
+        const fillPercentage = rankPosition * 100;
+        const indicatorPosition = fillPercentage;
+        progressBarFill.style.width = `${fillPercentage}%`;
+        progressBarFill.style.background = `linear-gradient(90deg, ${currentRank.color}, ${currentRank.color})`;
+        
+        // Position current rank indicator
+        currentRankIndicator.style.left = `${indicatorPosition}%`;
+        currentRankBadge.textContent = currentRank.fullRank;
+        currentRankBadge.style.backgroundColor = currentRank.color;
+        currentRankBadge.style.borderColor = currentRank.color;
+        
+        // Create markers for each tier (not each sub-rank to avoid clutter)
+        RANK_TIERS.forEach((tier, tierIndex) => {
+            const marker = document.createElement('div');
+            marker.className = 'rank-marker';
+            
+            // Calculate position for this tier
+            let tierStartIndex = 0;
+            for (let i = 0; i < tierIndex; i++) {
+                if (RANK_TIERS[i].subRanks.length > 0) {
+                    tierStartIndex += RANK_TIERS[i].subRanks.length;
+                } else {
+                    tierStartIndex += 1;
+                }
+            }
+            
+            // Position at the start of the tier
+            const markerPosition = (tierStartIndex / (totalRanks - 1)) * 100;
+            marker.style.left = `${markerPosition}%`;
+            marker.style.borderColor = tier.color;
+            
+            const markerLabel = document.createElement('div');
+            markerLabel.className = 'rank-marker-label';
+            markerLabel.textContent = tier.name;
+            markerLabel.style.color = tier.color;
+            marker.appendChild(markerLabel);
+            
+            markersContainer.appendChild(marker);
+        });
+        
+        // Add Champion marker at the end
+        const championMarker = document.createElement('div');
+        championMarker.className = 'rank-marker';
+        championMarker.style.left = '100%';
+        championMarker.style.borderColor = RANK_TIERS[RANK_TIERS.length - 1].color;
+        
+        const championLabel = document.createElement('div');
+        championLabel.className = 'rank-marker-label';
+        championLabel.textContent = 'Champion';
+        championLabel.style.color = RANK_TIERS[RANK_TIERS.length - 1].color;
+        championMarker.appendChild(championLabel);
+        markersContainer.appendChild(championMarker);
+        
+    }).catch(error => {
+        console.error('Error generating rank ladder:', error);
+    });
 }
 
 // Clear cached decks when user changes (login/logout)
@@ -1441,9 +1948,11 @@ socket.on('gameStarted', (data) => {
         const vsPlayer2Name = document.getElementById('vsPlayer2Name');
         const vsPlayer1Avatar = document.getElementById('vsPlayer1Avatar');
         const vsPlayer2Avatar = document.getElementById('vsPlayer2Avatar');
-        const vsPlayer1Stat = document.getElementById('vsPlayer1Stat');
+        const vsPlayer1StatRank = document.getElementById('vsPlayer1StatRank');
+        const vsPlayer1StatChipPoints = document.getElementById('vsPlayer1StatChipPoints');
         const vsPlayer1StatWins = document.getElementById('vsPlayer1StatWins');
-        const vsPlayer2Stat = document.getElementById('vsPlayer2Stat');
+        const vsPlayer2StatRank = document.getElementById('vsPlayer2StatRank');
+        const vsPlayer2StatChipPoints = document.getElementById('vsPlayer2StatChipPoints');
         const vsPlayer2StatWins = document.getElementById('vsPlayer2StatWins');
         
         console.log('Setting VS screen names:', player1Name, 'vs', player2Name);
@@ -1471,19 +1980,32 @@ socket.on('gameStarted', (data) => {
         }
         
         // Update player 1 stats (my stats)
-        if (vsPlayer1Stat) {
-            getPlayerStats().then(stats => {
-                vsPlayer1Stat.textContent = `Games Played: ${stats.gamesPlayed || 0}`;
-                if (vsPlayer1StatWins) {
-                    vsPlayer1StatWins.textContent = `Games Won: ${stats.wins || 0}`;
-                }
-            }).catch(() => {
-                vsPlayer1Stat.textContent = 'Games Played: -';
-                if (vsPlayer1StatWins) {
-                    vsPlayer1StatWins.textContent = 'Games Won: -';
-                }
-            });
-        }
+        getPlayerStats().then(stats => {
+            const chipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+            const rank = getRankFromChips(chipPoints);
+            
+            if (vsPlayer1StatRank) {
+                vsPlayer1StatRank.textContent = `Rank: ${rank.fullRank}`;
+                vsPlayer1StatRank.style.color = rank.color;
+            }
+            if (vsPlayer1StatChipPoints) {
+                vsPlayer1StatChipPoints.textContent = `Chips: ${Math.round(chipPoints)}`;
+            }
+            if (vsPlayer1StatWins) {
+                vsPlayer1StatWins.textContent = `Games Won: ${stats.wins || 0}`;
+            }
+        }).catch(() => {
+            if (vsPlayer1StatRank) {
+                vsPlayer1StatRank.textContent = 'Rank: -';
+                vsPlayer1StatRank.style.color = '';
+            }
+            if (vsPlayer1StatChipPoints) {
+                vsPlayer1StatChipPoints.textContent = 'Chips: -';
+            }
+            if (vsPlayer1StatWins) {
+                vsPlayer1StatWins.textContent = 'Games Won: -';
+            }
+        });
         
         // Update player 2 (opponent) name
         if (vsPlayer2Name) {
@@ -1503,24 +2025,27 @@ socket.on('gameStarted', (data) => {
         }
         
         // Update player 2 stats (opponent stats)
-        if (vsPlayer2Stat) {
-            // Try to fetch opponent stats if they have a Firebase UID
-            console.log('Opponent data for stats:', opponentData);
-            if (opponentData && opponentData.firebaseUid && window.firebaseDb) {
-                console.log('Fetching opponent stats for firebaseUid:', opponentData.firebaseUid);
-                console.log('Current user authenticated?', !!window.firebaseAuth?.currentUser);
-                console.log('Current user UID:', window.firebaseAuth?.currentUser?.uid);
-                
-                // Check if user is authenticated before trying to fetch
-                if (!window.firebaseAuth || !window.firebaseAuth.currentUser) {
-                    console.warn('User not authenticated, cannot fetch opponent stats');
-                    vsPlayer2Stat.textContent = 'Games Played: -';
-                    if (vsPlayer2StatWins) {
-                        vsPlayer2StatWins.textContent = 'Games Won: -';
-                    }
-                    return;
+        // Try to fetch opponent stats if they have a Firebase UID
+        console.log('Opponent data for stats:', opponentData);
+        if (opponentData && opponentData.firebaseUid && window.firebaseDb) {
+            console.log('Fetching opponent stats for firebaseUid:', opponentData.firebaseUid);
+            console.log('Current user authenticated?', !!window.firebaseAuth?.currentUser);
+            console.log('Current user UID:', window.firebaseAuth?.currentUser?.uid);
+            
+            // Check if user is authenticated before trying to fetch
+            if (!window.firebaseAuth || !window.firebaseAuth.currentUser) {
+                console.warn('User not authenticated, cannot fetch opponent stats');
+                if (vsPlayer2StatRank) {
+                    vsPlayer2StatRank.textContent = 'Rank: -';
+                    vsPlayer2StatRank.style.color = '';
                 }
-                
+                if (vsPlayer2StatChipPoints) {
+                    vsPlayer2StatChipPoints.textContent = 'Chips: -';
+                }
+                if (vsPlayer2StatWins) {
+                    vsPlayer2StatWins.textContent = 'Games Won: -';
+                }
+            } else {
                 // Fetch opponent stats from Firestore
                 window.firebaseDb.collection('stats').doc(opponentData.firebaseUid).get()
                     .then(statsDoc => {
@@ -1528,19 +2053,30 @@ socket.on('gameStarted', (data) => {
                         if (statsDoc.exists) {
                             const opponentStats = statsDoc.data();
                             console.log('Opponent stats data:', opponentStats);
-                            console.log('Opponent gamesPlayed:', opponentStats.gamesPlayed);
-                            console.log('Opponent wins:', opponentStats.wins);
                             
-                            const gamesPlayed = opponentStats.gamesPlayed || opponentStats.gamesPlayed === 0 ? opponentStats.gamesPlayed : 0;
                             const wins = opponentStats.wins || opponentStats.wins === 0 ? opponentStats.wins : 0;
+                            const chipPoints = opponentStats.chipPoints !== undefined && opponentStats.chipPoints !== null ? opponentStats.chipPoints : 0;
+                            const rank = getRankFromChips(chipPoints);
                             
-                            vsPlayer2Stat.textContent = `Games Played: ${gamesPlayed}`;
+                            if (vsPlayer2StatRank) {
+                                vsPlayer2StatRank.textContent = `Rank: ${rank.fullRank}`;
+                                vsPlayer2StatRank.style.color = rank.color;
+                            }
+                            if (vsPlayer2StatChipPoints) {
+                                vsPlayer2StatChipPoints.textContent = `Chips: ${Math.round(chipPoints)}`;
+                            }
                             if (vsPlayer2StatWins) {
                                 vsPlayer2StatWins.textContent = `Games Won: ${wins}`;
                             }
                         } else {
                             console.log('Opponent stats doc does not exist for firebaseUid:', opponentData.firebaseUid);
-                            vsPlayer2Stat.textContent = 'Games Played: 0';
+                            if (vsPlayer2StatRank) {
+                                vsPlayer2StatRank.textContent = 'Rank: Copper V';
+                                vsPlayer2StatRank.style.color = '#8B4513';
+                            }
+                            if (vsPlayer2StatChipPoints) {
+                                vsPlayer2StatChipPoints.textContent = 'Chips: 0';
+                            }
                             if (vsPlayer2StatWins) {
                                 vsPlayer2StatWins.textContent = 'Games Won: 0';
                             }
@@ -1556,26 +2092,58 @@ socket.on('gameStarted', (data) => {
                             console.error('Permission denied - check Firestore security rules');
                         }
                         
-                        vsPlayer2Stat.textContent = 'Games Played: -';
+                        if (vsPlayer2StatRank) {
+                            vsPlayer2StatRank.textContent = 'Rank: -';
+                            vsPlayer2StatRank.style.color = '';
+                        }
+                        if (vsPlayer2StatChipPoints) {
+                            vsPlayer2StatChipPoints.textContent = 'Chips: -';
+                        }
                         if (vsPlayer2StatWins) {
                             vsPlayer2StatWins.textContent = 'Games Won: -';
                         }
                     });
-            } else if (opponentData && opponentData.isBot) {
-                // Bot - show "-" or "Bot"
-                console.log('Opponent is a bot');
-                vsPlayer2Stat.textContent = 'Games Played: -';
-                if (vsPlayer2StatWins) {
-                    vsPlayer2StatWins.textContent = 'Games Won: -';
-                }
-            } else {
-                // No Firebase UID available (guest player)
-                console.log('No firebaseUid for opponent. OpponentData:', opponentData);
-                console.log('Has firebaseDb?', !!window.firebaseDb);
-                vsPlayer2Stat.textContent = 'Games Played: -';
-                if (vsPlayer2StatWins) {
-                    vsPlayer2StatWins.textContent = 'Games Won: -';
-                }
+            }
+        } else if (opponentData && opponentData.isBot) {
+            // Bot - generate random stats
+            console.log('Opponent is a bot, generating random stats');
+            
+            // Generate random stats for bot
+            // Games played: 10-500
+            const gamesPlayed = Math.floor(Math.random() * 491) + 10;
+            // Win rate: 30-70% (realistic range)
+            const winRate = Math.random() * 0.4 + 0.3; // 0.3 to 0.7
+            const wins = Math.floor(gamesPlayed * winRate);
+            // Chip points: Based on performance, roughly 0-3000
+            // Higher win rate and more games = more chip points
+            const baseChipPoints = Math.floor((wins * 25) + (gamesPlayed * 2));
+            const chipPointsVariation = Math.floor(Math.random() * 500) - 250; // ±250 variation
+            const chipPoints = Math.max(0, baseChipPoints + chipPointsVariation);
+            const rank = getRankFromChips(chipPoints);
+            
+            if (vsPlayer2StatRank) {
+                vsPlayer2StatRank.textContent = `Rank: ${rank.fullRank}`;
+                vsPlayer2StatRank.style.color = rank.color;
+            }
+            if (vsPlayer2StatChipPoints) {
+                vsPlayer2StatChipPoints.textContent = `Chips: ${Math.round(chipPoints)}`;
+            }
+            if (vsPlayer2StatWins) {
+                vsPlayer2StatWins.textContent = `Games Won: ${wins}`;
+            }
+        } else {
+            // No Firebase UID available (guest player)
+            console.log('No firebaseUid for opponent. OpponentData:', opponentData);
+            console.log('Has firebaseDb?', !!window.firebaseDb);
+            if (vsPlayer2StatRank) {
+                vsPlayer2StatRank.textContent = 'Rank: -';
+                vsPlayer2StatRank.style.color = '';
+            }
+            if (vsPlayer2StatChipPoints) {
+                vsPlayer2StatChipPoints.textContent = 'Chips: -';
+            }
+            if (vsPlayer2StatWins) {
+                vsPlayer2StatWins.textContent = 'Games Won: -';
             }
         }
         
@@ -2360,6 +2928,35 @@ socket.on('gameOver', (data) => {
         }, 2000);
     }
     
+    // Calculate chip points change before updating stats
+    getPlayerStats().then(stats => {
+        const currentChipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+        const newChipPoints = calculateChipPoints(won, guesses, currentChipPoints);
+        const chipPointsChange = newChipPoints - currentChipPoints;
+        
+        // Display chip points change on game over screen
+        const chipPointsChangeEl = document.getElementById('gameOverChipPoints');
+        if (chipPointsChangeEl) {
+            if (chipPointsChange > 0) {
+                chipPointsChangeEl.textContent = `+${chipPointsChange} Chips`;
+                chipPointsChangeEl.classList.add('chip-points-gain');
+                chipPointsChangeEl.classList.remove('chip-points-loss');
+            } else if (chipPointsChange < 0) {
+                chipPointsChangeEl.textContent = `${chipPointsChange} Chips`;
+                chipPointsChangeEl.classList.add('chip-points-loss');
+                chipPointsChangeEl.classList.remove('chip-points-gain');
+            } else {
+                chipPointsChangeEl.textContent = '0 Chips';
+                chipPointsChangeEl.classList.remove('chip-points-gain', 'chip-points-loss');
+            }
+        }
+        
+        // Generate and animate rank progress bar
+        generateGameOverRankProgress(currentChipPoints, newChipPoints);
+    }).catch(error => {
+        console.error('Error calculating chip points change:', error);
+    });
+    
     // Update statistics (async, but don't wait for it)
     updateStats({
         won: won,
@@ -2526,12 +3123,13 @@ async function initializeGame(data) {
             tutorialWord = data.tutorialWord;
             console.log('Tutorial word set:', tutorialWord);
         }
-        // Show first tutorial message after a delay to ensure game is set up
+        // Show first tutorial message immediately to ensure it's first in queue
+        // Use a short delay to ensure game UI is ready
         setTimeout(() => {
             if (window.tutorialMode) {
                 queueTutorialMessage('welcome');
             }
-        }, 1500);
+        }, 500);
     } else {
         window.tutorialMode = false;
         tutorialWord = null;
@@ -2971,15 +3569,24 @@ function showCardSelection() {
         console.log('Card selection shown');
         
         // Show tutorial message if in tutorial mode (only once, when card selection first appears)
+        // Wait for welcome message to be shown first
         if (window.tutorialMode && !window.tutorialMessagesShown?.has('cardSelection')) {
-            console.log('Card selection shown, queueing tutorial message');
-            setTimeout(() => {
-                if (window.tutorialMode && !window.tutorialMessagesShown.has('cardSelection')) {
-                    queueTutorialMessage('cardSelection');
-                    window.tutorialStep = 1;
-                    console.log('Tutorial step updated to:', window.tutorialStep);
+            console.log('Card selection shown, waiting for welcome message before queueing cardSelection');
+            const checkWelcomeShown = () => {
+                if (window.tutorialMessagesShown?.has('welcome')) {
+                    // Welcome message has been shown, now queue cardSelection
+                    if (window.tutorialMode && !window.tutorialMessagesShown.has('cardSelection')) {
+                        queueTutorialMessage('cardSelection');
+                        window.tutorialStep = 1;
+                        console.log('Tutorial step updated to:', window.tutorialStep);
+                    }
+                } else {
+                    // Welcome not shown yet, check again in 200ms
+                    setTimeout(checkWelcomeShown, 200);
                 }
-            }, 800);
+            };
+            // Start checking after a short delay
+            setTimeout(checkWelcomeShown, 500);
         }
         
         // Check if player is card locked - if so, show cards but grayed out
@@ -5696,6 +6303,71 @@ function showTutorialMessage(messageKey) {
 document.getElementById('helpBtn').addEventListener('click', openHelp);
 document.getElementById('closeHelpBtn').addEventListener('click', closeHelp);
 document.getElementById('closeHelpBtnBottom').addEventListener('click', closeHelp);
+
+// Rank Ladder Popup
+function openRankLadder() {
+    const rankLadderOverlay = document.getElementById('rankLadderOverlay');
+    if (rankLadderOverlay) {
+        rankLadderOverlay.style.display = 'flex';
+        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        // Regenerate ladder to ensure current rank is highlighted
+        generateRankLadder();
+    }
+}
+
+function closeRankLadder() {
+    const rankLadderOverlay = document.getElementById('rankLadderOverlay');
+    if (rankLadderOverlay) {
+        rankLadderOverlay.style.display = 'none';
+        document.body.style.overflow = ''; // Restore scrolling
+    }
+}
+
+// Add event listeners for rank ladder (wait for DOM to be ready)
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const currentRankCard = document.getElementById('currentRankCard');
+        if (currentRankCard) {
+            currentRankCard.addEventListener('click', openRankLadder);
+        }
+
+        const closeRankLadderBtn = document.getElementById('closeRankLadderBtn');
+        if (closeRankLadderBtn) {
+            closeRankLadderBtn.addEventListener('click', closeRankLadder);
+        }
+
+        // Close rank ladder when clicking outside
+        const rankLadderOverlay = document.getElementById('rankLadderOverlay');
+        if (rankLadderOverlay) {
+            rankLadderOverlay.addEventListener('click', (e) => {
+                if (e.target.id === 'rankLadderOverlay') {
+                    closeRankLadder();
+                }
+            });
+        }
+    });
+} else {
+    // DOM already loaded
+    const currentRankCard = document.getElementById('currentRankCard');
+    if (currentRankCard) {
+        currentRankCard.addEventListener('click', openRankLadder);
+    }
+
+    const closeRankLadderBtn = document.getElementById('closeRankLadderBtn');
+    if (closeRankLadderBtn) {
+        closeRankLadderBtn.addEventListener('click', closeRankLadder);
+    }
+
+    // Close rank ladder when clicking outside
+    const rankLadderOverlay = document.getElementById('rankLadderOverlay');
+    if (rankLadderOverlay) {
+        rankLadderOverlay.addEventListener('click', (e) => {
+            if (e.target.id === 'rankLadderOverlay') {
+                closeRankLadder();
+            }
+        });
+    }
+}
 
 // Start Tutorial button
 document.getElementById('startTutorialBtn').addEventListener('click', async () => {

@@ -241,6 +241,31 @@
                         <div class="game-id" id="gameId"></div>
                         <div class="game-id-hint">Share this code with your friend to play together</div>
                     </div>
+                    
+                    <!-- Current Rank Display -->
+                    <div class="current-rank-section">
+                        <div class="current-rank-card" id="currentRankCard" style="cursor: pointer;">
+                            <div class="current-rank-header">
+                                <span class="rank-label">Current Rank</span>
+                            </div>
+                            <div class="current-rank-content">
+                                <div class="current-rank-main">
+                                    <span class="current-rank-tier" id="currentRankTier">Copper</span>
+                                    <span class="current-rank-subrank" id="currentRankSubRank">V</span>
+                                </div>
+                                <div class="current-rank-chips">
+                                    <span class="rank-chips-label">Chips:</span>
+                                    <span class="rank-chips-value" id="currentRankChips">0</span>
+                                </div>
+                                <div class="rank-progress-container">
+                                    <div class="rank-progress-bar">
+                                        <div class="rank-progress-fill" id="rankProgressBar"></div>
+                                    </div>
+                                    <div class="rank-progress-text" id="rankProgressText">0 chips to next rank</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                         </div>
                     </div>
                     
@@ -379,6 +404,14 @@
                                     <div class="stat-card">
                                         <div class="stat-label">Average Guesses</div>
                                         <div class="stat-value" id="statAvgGuesses">-</div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="stat-label">Chips</div>
+                                        <div class="stat-value" id="statChipPoints">0</div>
+                                    </div>
+                                    <div class="stat-card">
+                                        <div class="stat-label">Win Streak</div>
+                                        <div class="stat-value" id="statWinStreak">0</div>
                                     </div>
                                 </div>
                                 <div class="stats-note">
@@ -596,7 +629,8 @@
                         </div>
                         <div class="vs-player-name" id="vsPlayer1Name">You</div>
                         <div class="vs-player-label">Player 1</div>
-                        <div class="vs-player-stat" id="vsPlayer1Stat">Games Played: -</div>
+                        <div class="vs-player-stat" id="vsPlayer1StatRank">Rank: -</div>
+                        <div class="vs-player-stat" id="vsPlayer1StatChipPoints">Chips: -</div>
                         <div class="vs-player-stat" id="vsPlayer1StatWins">Games Won: -</div>
                     </div>
                     <div class="vs-vs-text">VS</div>
@@ -606,7 +640,8 @@
                         </div>
                         <div class="vs-player-name" id="vsPlayer2Name">Opponent</div>
                         <div class="vs-player-label">Player 2</div>
-                        <div class="vs-player-stat" id="vsPlayer2Stat">Games Played: -</div>
+                        <div class="vs-player-stat" id="vsPlayer2StatRank">Rank: -</div>
+                        <div class="vs-player-stat" id="vsPlayer2StatChipPoints">Chips: -</div>
                         <div class="vs-player-stat" id="vsPlayer2StatWins">Games Won: -</div>
                     </div>
                 </div>
@@ -747,12 +782,52 @@
         </div>
 
         <!-- Game Over Screen -->
+        <!-- Rank Ladder Overlay -->
+        <div id="rankLadderOverlay" class="help-overlay" style="display: none;">
+            <div class="help-modal rank-ladder-modal">
+                <div class="help-header">
+                    <h2>Rank Ladder</h2>
+                    <button id="closeRankLadderBtn" class="close-btn">✕</button>
+                </div>
+                <div class="help-content">
+                    <div class="rank-ladder-container">
+                        <div class="rank-progress-bar-container">
+                            <div class="rank-progress-bar-track" id="rankProgressBarTrack">
+                                <div class="rank-progress-bar-fill" id="rankProgressBarFill"></div>
+                                <div class="rank-markers" id="rankMarkers">
+                                    <!-- Rank markers will be generated dynamically -->
+                                </div>
+                            </div>
+                            <div class="current-rank-indicator" id="currentRankIndicator">
+                                <div class="current-rank-badge" id="currentRankBadge">Copper V</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div id="gameOver" class="screen">
             <div class="game-over-content">
                 <div class="game-over-icon" id="gameOverIcon">🎉</div>
                 <h2 id="gameOverTitle" class="game-over-title">Game Over</h2>
                 <p id="gameOverMessage" class="game-over-message"></p>
                 <div class="game-over-word" id="gameOverWord"></div>
+                <div class="game-over-chip-points" id="gameOverChipPoints"></div>
+                
+                <!-- Rank Progress Bar -->
+                <div class="game-over-rank-progress-container">
+                    <div class="game-over-rank-progress-track" id="gameOverRankProgressTrack">
+                        <div class="game-over-rank-progress-fill" id="gameOverRankProgressFill"></div>
+                        <div class="game-over-rank-markers" id="gameOverRankMarkers">
+                            <!-- Rank markers will be generated dynamically -->
+                        </div>
+                    </div>
+                    <div class="game-over-rank-indicator" id="gameOverRankIndicator">
+                        <div class="game-over-rank-badge" id="gameOverRankBadge">Copper V</div>
+                    </div>
+                </div>
+                
                 <div class="game-over-buttons">
                     <button id="rematchBtn" class="btn btn-primary game-over-button">Rematch</button>
                     <button id="backToLobbyBtn" class="btn btn-secondary game-over-button">Back to Lobby</button>

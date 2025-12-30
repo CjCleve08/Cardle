@@ -1,1 +1,1 @@
-add a tutorial system for new players 
+make a ban phase before game and players can pick between there 3 decks to play after ban phase

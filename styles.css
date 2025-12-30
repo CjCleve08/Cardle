@@ -1105,6 +1105,226 @@ header h1 {
 }
 
 /* Play Tab Styles */
+/* Current Rank Display */
+.current-rank-section {
+    margin-bottom: 32px;
+}
+
+.current-rank-card {
+    background: linear-gradient(135deg, rgba(26, 26, 27, 0.95), rgba(18, 18, 19, 0.95));
+    border: 1px solid rgba(58, 58, 60, 0.5);
+    border-radius: 16px;
+    padding: 24px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s ease;
+}
+
+.current-rank-card:hover {
+    background: linear-gradient(135deg, rgba(36, 36, 37, 0.95), rgba(28, 28, 29, 0.95));
+    border-color: rgba(106, 170, 100, 0.5);
+    box-shadow: 0 6px 24px rgba(106, 170, 100, 0.2);
+    transform: translateY(-2px);
+}
+
+.current-rank-header {
+    margin-bottom: 16px;
+}
+
+.rank-label {
+    font-size: 0.875rem;
+    color: #818384;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+}
+
+.current-rank-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.current-rank-main {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.current-rank-tier {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.current-rank-subrank {
+    font-size: 1.25rem;
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+.current-rank-chips {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9375rem;
+}
+
+.rank-chips-label {
+    color: #818384;
+}
+
+.rank-chips-value {
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.rank-progress-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.rank-progress-bar {
+    width: 100%;
+    height: 8px;
+    background: rgba(58, 58, 60, 0.5);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+}
+
+.rank-progress-fill {
+    height: 100%;
+    width: 0%;
+    transition: width 0.5s ease, background-color 0.3s ease;
+    border-radius: 4px;
+    box-shadow: 0 0 10px rgba(106, 170, 100, 0.5);
+}
+
+.rank-progress-text {
+    font-size: 0.8125rem;
+    color: #818384;
+    text-align: center;
+}
+
+/* Rank Ladder Modal */
+.rank-ladder-modal {
+    max-width: 900px;
+    max-height: 85vh;
+}
+
+.rank-ladder-container {
+    padding: 40px 30px;
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+/* Clash Royale Style Progress Bar */
+.rank-progress-bar-container {
+    position: relative;
+    width: 100%;
+    margin: 60px 0 40px 0;
+}
+
+.rank-progress-bar-track {
+    position: relative;
+    width: 100%;
+    height: 24px;
+    background: linear-gradient(90deg, 
+        rgba(58, 58, 60, 0.3) 0%,
+        rgba(58, 58, 60, 0.5) 50%,
+        rgba(58, 58, 60, 0.3) 100%);
+    border-radius: 12px;
+    overflow: visible;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.rank-progress-bar-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #8B4513, #CD7F32);
+    border-radius: 12px;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 20px rgba(106, 170, 100, 0.5);
+    z-index: 1;
+}
+
+.rank-markers {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.rank-marker {
+    position: absolute;
+    top: -8px;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 40px;
+    background: rgba(26, 26, 27, 0.9);
+    border: 2px solid;
+    border-radius: 2px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.rank-marker-label {
+    position: absolute;
+    top: -35px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.75rem;
+    font-weight: 700;
+    white-space: nowrap;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+    letter-spacing: 0.05em;
+}
+
+.current-rank-indicator {
+    position: absolute;
+    top: -60px;
+    transform: translateX(-50%);
+    z-index: 3;
+    transition: left 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.current-rank-badge {
+    background: linear-gradient(135deg, #8B4513, #CD7F32);
+    color: #ffffff;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 700;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    border: 2px solid;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    position: relative;
+}
+
+.current-rank-badge::after {
+    content: '';
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 8px solid;
+    border-top-color: inherit;
+}
+
 .play-actions {
     display: flex;
     flex-direction: column;
@@ -2306,7 +2526,7 @@ header h1 {
     font-weight: 700;
     color: #6aaa64;
     letter-spacing: 0.3em;
-    margin-bottom: 40px;
+    margin-bottom: 20px;
     padding: 20px 40px;
     background: rgba(106, 170, 100, 0.1);
     border: 2px solid #6aaa64;
@@ -2315,6 +2535,135 @@ header h1 {
     text-transform: uppercase;
     animation: wordReveal 0.6s ease-out 0.5s both;
     box-shadow: 0 4px 20px rgba(106, 170, 100, 0.2);
+}
+
+.game-over-chip-points {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 40px;
+    padding: 15px 30px;
+    border-radius: 10px;
+    animation: wordReveal 0.6s ease-out 0.7s both;
+    text-align: center;
+}
+
+.game-over-chip-points.chip-points-gain {
+    color: #6aaa64;
+    background: rgba(106, 170, 100, 0.15);
+    border: 2px solid #6aaa64;
+}
+
+.game-over-chip-points.chip-points-loss {
+    color: #c9b458;
+    background: rgba(201, 180, 88, 0.15);
+    border: 2px solid #c9b458;
+}
+
+/* Game Over Rank Progress Bar */
+.game-over-rank-progress-container {
+    position: relative;
+    width: 100%;
+    max-width: 800px;
+    margin: 30px auto 40px auto;
+    padding: 0 20px;
+}
+
+.game-over-rank-progress-track {
+    position: relative;
+    width: 100%;
+    height: 24px;
+    background: linear-gradient(90deg, 
+        rgba(58, 58, 60, 0.3) 0%,
+        rgba(58, 58, 60, 0.5) 50%,
+        rgba(58, 58, 60, 0.3) 100%);
+    border-radius: 12px;
+    overflow: visible;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.game-over-rank-progress-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #8B4513, #CD7F32);
+    border-radius: 12px;
+    transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.5s ease;
+    box-shadow: 0 0 20px rgba(106, 170, 100, 0.5);
+    z-index: 1;
+}
+
+.game-over-rank-markers {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.game-over-rank-indicator {
+    position: absolute;
+    top: -60px;
+    transform: translateX(-50%);
+    z-index: 3;
+    transition: left 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.game-over-rank-badge {
+    background: linear-gradient(135deg, #8B4513, #CD7F32);
+    color: #ffffff;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.875rem;
+    font-weight: 700;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    border: 2px solid;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    position: relative;
+    transition: background-color 0.5s ease, border-color 0.5s ease;
+}
+
+.game-over-rank-badge::after {
+    content: '';
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 8px solid;
+    border-top-color: inherit;
+}
+
+/* Rank markers in game over screen */
+.game-over-rank-markers .rank-marker {
+    position: absolute;
+    top: -8px;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 40px;
+    background: rgba(26, 26, 27, 0.9);
+    border: 2px solid;
+    border-radius: 2px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.game-over-rank-markers .rank-marker-label {
+    position: absolute;
+    top: -35px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.75rem;
+    font-weight: 700;
+    white-space: nowrap;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+    letter-spacing: 0.05em;
 }
 
 @keyframes wordReveal {
