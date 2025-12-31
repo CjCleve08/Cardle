@@ -2478,6 +2478,24 @@ header h1 {
     }
 }
 
+#gameOver.screen {
+    position: relative;
+    overflow: hidden;
+}
+
+.game-over-scaling-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(1);
+    -webkit-transform: translate(-50%, -50%) scale(1);
+    -ms-transform: translate(-50%, -50%) scale(1);
+    transform-origin: center center;
+    width: max-content;
+    height: max-content;
+    box-sizing: border-box;
+}
+
 .game-over-content {
     text-align: center;
     margin: auto;
@@ -2587,6 +2605,32 @@ header h1 {
     box-shadow: 0 4px 20px rgba(106, 170, 100, 0.2);
 }
 
+.game-over-definition {
+    font-size: 0.95rem;
+    color: #8e8e93;
+    margin-bottom: 15px;
+    padding: 8px 20px;
+    line-height: 1.4;
+    max-width: 500px;
+    text-align: center;
+    animation: wordReveal 0.6s ease-out 0.6s both;
+    font-style: italic;
+    opacity: 0.85;
+}
+
+.game-over-definition.loading {
+    color: #6e6e73;
+    font-style: normal;
+    font-size: 0.9rem;
+}
+
+.game-over-definition.error {
+    color: #6e6e73;
+    font-style: normal;
+    opacity: 0.6;
+    font-size: 0.9rem;
+}
+
 .game-over-chip-points {
     font-size: 1.5rem;
     font-weight: 600;
@@ -2626,7 +2670,7 @@ header h1 {
         rgba(58, 58, 60, 0.3) 0%,
         rgba(58, 58, 60, 0.5) 50%,
         rgba(58, 58, 60, 0.3) 100%);
-    border-radius: 12px;
+    border-radius: 0;
     overflow: visible;
     box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
 }
@@ -2638,10 +2682,35 @@ header h1 {
     height: 100%;
     width: 0%;
     background: linear-gradient(90deg, #8B4513, #CD7F32);
-    border-radius: 12px;
+    border-radius: 0;
     transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.5s ease;
     box-shadow: 0 0 20px rgba(106, 170, 100, 0.5);
     z-index: 1;
+}
+
+.game-over-rank-progress-change {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    width: 0%;
+    border-radius: 0;
+    transition: left 1.2s cubic-bezier(0.4, 0, 0.2, 1), width 1.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+    z-index: 1;
+    opacity: 0;
+}
+
+.game-over-rank-progress-change.show {
+    opacity: 1;
+}
+
+.game-over-rank-progress-change.gain {
+    background: #6aaa64;
+    box-shadow: 0 0 15px rgba(106, 170, 100, 0.6);
+}
+
+.game-over-rank-progress-change.loss {
+    background: rgba(80, 80, 80, 0.6);
+    box-shadow: 0 0 10px rgba(80, 80, 80, 0.3);
 }
 
 .game-over-rank-markers {
@@ -2657,6 +2726,7 @@ header h1 {
 .game-over-rank-indicator {
     position: absolute;
     top: -60px;
+    left: 0;
     transform: translateX(-50%);
     z-index: 3;
     transition: left 1.2s cubic-bezier(0.4, 0, 0.2, 1);

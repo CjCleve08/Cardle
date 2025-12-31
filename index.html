@@ -858,23 +858,26 @@
         </div>
 
         <div id="gameOver" class="screen">
+            <div class="game-over-scaling-container" id="gameOverScalingContainer">
             <div class="game-over-content">
                 <div class="game-over-icon" id="gameOverIcon">🎉</div>
                 <h2 id="gameOverTitle" class="game-over-title">Game Over</h2>
                 <p id="gameOverMessage" class="game-over-message"></p>
                 <div class="game-over-word" id="gameOverWord"></div>
+                <div class="game-over-definition" id="gameOverDefinition"></div>
                 <div class="game-over-chip-points" id="gameOverChipPoints"></div>
                 
                 <!-- Rank Progress Bar -->
                 <div class="game-over-rank-progress-container">
                     <div class="game-over-rank-progress-track" id="gameOverRankProgressTrack">
                         <div class="game-over-rank-progress-fill" id="gameOverRankProgressFill"></div>
+                        <div class="game-over-rank-progress-change" id="gameOverRankProgressChange"></div>
                         <div class="game-over-rank-markers" id="gameOverRankMarkers">
                             <!-- Rank markers will be generated dynamically -->
                         </div>
-                    </div>
-                    <div class="game-over-rank-indicator" id="gameOverRankIndicator">
-                        <div class="game-over-rank-badge" id="gameOverRankBadge">Copper V</div>
+                        <div class="game-over-rank-indicator" id="gameOverRankIndicator">
+                            <div class="game-over-rank-badge" id="gameOverRankBadge">Copper V</div>
+                        </div>
                     </div>
                 </div>
                 
@@ -882,6 +885,7 @@
                     <button id="rematchBtn" class="btn btn-primary game-over-button">Rematch</button>
                     <button id="backToLobbyBtn" class="btn btn-secondary game-over-button">Back to Lobby</button>
                 </div>
+            </div>
             </div>
         </div>
     </div>

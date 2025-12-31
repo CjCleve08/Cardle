@@ -979,11 +979,17 @@ function updateRankLadderHighlight(currentRank) {
 function generateGameOverRankProgress(beforeChips, afterChips) {
     const markersContainer = document.getElementById('gameOverRankMarkers');
     const progressBarFill = document.getElementById('gameOverRankProgressFill');
+    const progressBarChange = document.getElementById('gameOverRankProgressChange');
     const currentRankBadge = document.getElementById('gameOverRankBadge');
     const currentRankIndicator = document.getElementById('gameOverRankIndicator');
     const progressBarTrack = document.getElementById('gameOverRankProgressTrack');
     
-    if (!markersContainer || !progressBarFill || !currentRankBadge || !currentRankIndicator || !progressBarTrack) return;
+    if (!markersContainer || !progressBarFill || !progressBarChange || !currentRankBadge || !currentRankIndicator || !progressBarTrack) return;
+    
+    // Reset change overlay
+    progressBarChange.style.width = '0%';
+    progressBarChange.style.left = '0%';
+    progressBarChange.classList.remove('show', 'gain', 'loss');
     
     markersContainer.innerHTML = '';
     
@@ -1026,18 +1032,63 @@ function generateGameOverRankProgress(beforeChips, afterChips) {
         
         // Animate to new position
         setTimeout(() => {
-            const changeColor = afterChips > beforeChips ? '#6aaa64' : '#c9b458';
-            const changeStart = Math.min(beforeFillPercentage, afterFillPercentage);
-            const changeEnd = Math.max(beforeFillPercentage, afterFillPercentage);
+            if (afterChips > beforeChips) {
+                // Gain: Smoothly expand from before to after, green overlay on new portion
+                const changeWidth = afterFillPercentage - beforeFillPercentage;
+                
+                if (changeWidth > 0) {
+                    // Reset and position green overlay at the before position with 0 width
+                    progressBarChange.style.transition = 'none';
+                    progressBarChange.style.left = `${beforeFillPercentage}%`;
+                    progressBarChange.style.width = '0%';
+                    progressBarChange.classList.add('show', 'gain');
+                    
+                    // Force reflow to apply initial state
+                    void progressBarChange.offsetWidth;
+                    
+                    // Re-enable transition and animate
+                    progressBarChange.style.transition = 'left 1.2s cubic-bezier(0.4, 0, 0.2, 1), width 1.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
+                    
+                    // Animate both fill expansion and green overlay expansion simultaneously
+                    progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
+                    progressBarFill.style.background = afterRank.color;
+                    progressBarChange.style.width = `${changeWidth}%`;
+                } else {
+                    progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
+                    progressBarFill.style.background = afterRank.color;
+                }
+            } else if (afterChips < beforeChips) {
+                // Loss: Smoothly shrink from before to after, gray overlay on lost portion
+                const lossWidth = beforeFillPercentage - afterFillPercentage;
+                
+                if (lossWidth > 0) {
+                    // Reset and position gray overlay at the after position with 0 width
+                    progressBarChange.style.transition = 'none';
+                    progressBarChange.style.left = `${afterFillPercentage}%`;
+                    progressBarChange.style.width = '0%';
+                    progressBarChange.classList.add('show', 'loss');
+                    
+                    // Force reflow to apply initial state
+                    void progressBarChange.offsetWidth;
+                    
+                    // Re-enable transition and animate
+                    progressBarChange.style.transition = 'left 1.2s cubic-bezier(0.4, 0, 0.2, 1), width 1.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
+                    
+                    // Animate fill shrinking and gray overlay expanding to show lost portion
+                    progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
+                    progressBarFill.style.background = afterRank.color;
+                    progressBarChange.style.width = `${lossWidth}%`;
+                } else {
+                    progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
+                    progressBarFill.style.background = afterRank.color;
+                }
+            } else {
+                // No change
+                progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
+                progressBarFill.style.background = afterRank.color;
+            }
             
-            progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
-            progressBarFill.style.background = `linear-gradient(90deg, 
-                ${beforeRank.color} 0%, 
-                ${beforeRank.color} ${changeStart}%, 
-                ${changeColor} ${changeStart}%, 
-                ${changeColor} ${changeEnd}%, 
-                ${afterRank.color} ${changeEnd}%, 
-                ${afterRank.color} 100%)`;
+            // Position marker at exact fill position
             currentRankIndicator.style.left = `${Math.min(100, afterFillPercentage)}%`;
             currentRankBadge.textContent = afterRank.fullRank;
             currentRankBadge.style.backgroundColor = afterRank.color;
@@ -1122,19 +1173,63 @@ function generateGameOverRankProgress(beforeChips, afterChips) {
     
     // Animate to new position after a short delay
     setTimeout(() => {
-        const changeColor = afterChips > beforeChips ? '#6aaa64' : '#c9b458'; // Green for gain, yellow for loss
-        const changeStart = Math.min(beforeFillPercentage, afterFillPercentage);
-        const changeEnd = Math.max(beforeFillPercentage, afterFillPercentage);
+        if (afterChips > beforeChips) {
+            // Gain: Smoothly expand from before to after, green overlay on new portion
+            const changeWidth = afterFillPercentage - beforeFillPercentage;
+            
+            if (changeWidth > 0) {
+                // Reset and position green overlay at the before position with 0 width
+                progressBarChange.style.transition = 'none';
+                progressBarChange.style.left = `${beforeFillPercentage}%`;
+                progressBarChange.style.width = '0%';
+                progressBarChange.classList.add('show', 'gain');
+                
+                // Force reflow to apply initial state
+                void progressBarChange.offsetWidth;
+                
+                // Re-enable transition and animate
+                progressBarChange.style.transition = 'left 1.2s cubic-bezier(0.4, 0, 0.2, 1), width 1.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
+                
+                // Animate both fill expansion and green overlay expansion simultaneously
+                progressBarFill.style.width = `${afterFillPercentage}%`;
+                progressBarFill.style.background = afterRank.color;
+                progressBarChange.style.width = `${changeWidth}%`;
+            } else {
+                progressBarFill.style.width = `${afterFillPercentage}%`;
+                progressBarFill.style.background = afterRank.color;
+            }
+        } else if (afterChips < beforeChips) {
+            // Loss: Smoothly shrink from before to after, gray overlay on lost portion
+            const lossWidth = beforeFillPercentage - afterFillPercentage;
+            
+            if (lossWidth > 0) {
+                // Reset and position gray overlay at the after position with 0 width
+                progressBarChange.style.transition = 'none';
+                progressBarChange.style.left = `${afterFillPercentage}%`;
+                progressBarChange.style.width = '0%';
+                progressBarChange.classList.add('show', 'loss');
+                
+                // Force reflow to apply initial state
+                void progressBarChange.offsetWidth;
+                
+                // Re-enable transition and animate
+                progressBarChange.style.transition = 'left 1.2s cubic-bezier(0.4, 0, 0.2, 1), width 1.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
+                
+                // Animate fill shrinking and gray overlay expanding to show lost portion
+                progressBarFill.style.width = `${afterFillPercentage}%`;
+                progressBarFill.style.background = afterRank.color;
+                progressBarChange.style.width = `${lossWidth}%`;
+            } else {
+                progressBarFill.style.width = `${afterFillPercentage}%`;
+                progressBarFill.style.background = afterRank.color;
+            }
+        } else {
+            // No change
+            progressBarFill.style.width = `${afterFillPercentage}%`;
+            progressBarFill.style.background = afterRank.color;
+        }
         
-        progressBarFill.style.width = `${afterFillPercentage}%`;
-        // Create gradient that shows the change in green/yellow
-        progressBarFill.style.background = `linear-gradient(90deg, 
-            ${beforeRank.color} 0%, 
-            ${beforeRank.color} ${changeStart}%, 
-            ${changeColor} ${changeStart}%, 
-            ${changeColor} ${changeEnd}%, 
-            ${afterRank.color} ${changeEnd}%, 
-            ${afterRank.color} 100%)`;
+        // Position marker at exact fill position
         currentRankIndicator.style.left = `${afterFillPercentage}%`;
         currentRankBadge.textContent = afterRank.fullRank;
         currentRankBadge.style.backgroundColor = afterRank.color;
@@ -2875,6 +2970,49 @@ function displayOpponentHandForSteal(cards, opponentName, gameId) {
     button.addEventListener('click', closeHandReveal);
 }
 
+// Fetch word definition from dictionary API
+async function fetchWordDefinition(word) {
+    const definitionEl = document.getElementById('gameOverDefinition');
+    if (!definitionEl) return;
+    
+    // Clear previous definition
+    definitionEl.textContent = '';
+    definitionEl.classList.remove('error', 'loading');
+    
+    // Show loading state
+    definitionEl.classList.add('loading');
+    definitionEl.textContent = 'Loading definition...';
+    
+    try {
+        // Use Dictionary API (free, no API key required)
+        const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word.toLowerCase()}`);
+        
+        if (!response.ok) {
+            throw new Error('Definition not found');
+        }
+        
+        const data = await response.json();
+        
+        if (data && data.length > 0 && data[0].meanings && data[0].meanings.length > 0) {
+            // Get the first meaning and first definition
+            const firstMeaning = data[0].meanings[0];
+            if (firstMeaning.definitions && firstMeaning.definitions.length > 0) {
+                const definition = firstMeaning.definitions[0].definition;
+                definitionEl.textContent = definition;
+                definitionEl.classList.remove('loading');
+                return;
+            }
+        }
+        
+        throw new Error('No definition available');
+    } catch (error) {
+        console.log('Could not fetch word definition:', error);
+        definitionEl.textContent = 'Definition not available';
+        definitionEl.classList.remove('loading');
+        definitionEl.classList.add('error');
+    }
+}
+
 socket.on('gameOver', (data) => {
     console.log('gameOver event received:', data);
     // Prepare UI elements first
@@ -2934,6 +3072,9 @@ socket.on('gameOver', (data) => {
         }
     }
     
+    // Fetch and display word definition
+    fetchWordDefinition(data.word);
+    
     // Show tutorial message if in tutorial mode (only once, when game ends)
     if (window.tutorialMode && !window.tutorialMessagesShown?.has('gameOver')) {
         setTimeout(() => {
@@ -2985,6 +3126,11 @@ socket.on('gameOver', (data) => {
         console.error('Failed to show gameOver screen!');
         return;
     }
+    
+    // Scale game over screen to fit
+    setTimeout(() => {
+        scaleGameOverScreen();
+    }, 100);
     
     // Reset rematch button state
     const rematchBtn = document.getElementById('rematchBtn');
@@ -3285,13 +3431,74 @@ function scaleGameBoard() {
 let resizeTimeout;
 window.addEventListener('resize', () => {
     const gameScreen = document.getElementById('game');
+    const gameOverScreen = document.getElementById('gameOver');
     if (gameScreen && gameScreen.classList.contains('active')) {
         clearTimeout(resizeTimeout);
         resizeTimeout = setTimeout(() => {
             scaleGameBoard();
         }, 100);
     }
+    if (gameOverScreen && gameOverScreen.classList.contains('active')) {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            scaleGameOverScreen();
+        }, 100);
+    }
 });
+
+// Scale game over screen to fit viewport
+function scaleGameOverScreen() {
+    const gameOverScreen = document.getElementById('gameOver');
+    const scalingContainer = document.getElementById('gameOverScalingContainer');
+    
+    if (!gameOverScreen || !scalingContainer) return;
+    
+    // Temporarily set transform to just centering (no scale) to measure natural size accurately
+    scalingContainer.style.transform = 'translate(-50%, -50%) scale(1)';
+    scalingContainer.style.webkitTransform = 'translate(-50%, -50%) scale(1)';
+    scalingContainer.style.msTransform = 'translate(-50%, -50%) scale(1)';
+    scalingContainer.style.width = 'auto';
+    scalingContainer.style.height = 'auto';
+    scalingContainer.style.minWidth = '0';
+    scalingContainer.style.minHeight = '0';
+    
+    // Force browser to recalculate layout
+    void scalingContainer.offsetWidth;
+    void scalingContainer.offsetHeight;
+    
+    // Get the natural (unscaled) dimensions of the content
+    const contentWidth = scalingContainer.scrollWidth;
+    const contentHeight = scalingContainer.scrollHeight;
+    
+    // Get available space from the parent container
+    const padding = 20; // Safety padding on all sides
+    const availableWidth = gameOverScreen.clientWidth - (padding * 2);
+    const availableHeight = gameOverScreen.clientHeight - (padding * 2);
+    
+    // Only proceed if we have valid dimensions
+    if (availableWidth <= 0 || availableHeight <= 0 || contentWidth <= 0 || contentHeight <= 0) {
+        return;
+    }
+    
+    // Calculate scale factors for both dimensions
+    const scaleX = availableWidth / contentWidth;
+    const scaleY = availableHeight / contentHeight;
+    
+    // Use the smaller scale to ensure everything fits in both dimensions
+    let scale = Math.min(scaleX, scaleY);
+    
+    // Apply a small safety margin (0.98) to prevent edge touching
+    scale = scale * 0.98;
+    
+    // Ensure minimum and maximum scale limits for usability
+    scale = Math.max(0.3, Math.min(scale, 2.0));
+    
+    // Apply the transform with centering and scaling
+    scalingContainer.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    scalingContainer.style.webkitTransform = `translate(-50%, -50%) scale(${scale})`;
+    scalingContainer.style.msTransform = `translate(-50%, -50%) scale(${scale})`;
+    scalingContainer.style.transformOrigin = 'center center';
+}
 
 function createBoard() {
     const container = document.getElementById('boardContainer');
