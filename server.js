@@ -1180,12 +1180,14 @@ function createBotGame(humanSocket, humanName, firebaseUid = null, isTutorial = 
                 id: humanSocket.id,
                 name: humanName,
                 firebaseUid: firebaseUid || null,
+                photoURL: null, // Bot games don't have photoURL initially
                 guesses: [],
                 row: 0
             },
             {
                 id: botId,
                 name: botName,
+                photoURL: null,
                 guesses: [],
                 row: 0,
                 isBot: true
@@ -1903,7 +1905,8 @@ io.on('connection', (socket) => {
         const player = {
             id: socket.id,
             name: data.playerName,
-            firebaseUid: data.firebaseUid || null
+            firebaseUid: data.firebaseUid || null,
+            photoURL: data.photoURL || null
         };
         
         matchmakingQueue.push(player);
@@ -1956,6 +1959,7 @@ io.on('connection', (socket) => {
                         id: player1.id,
                         name: player1.name,
                         firebaseUid: player1.firebaseUid || null,
+                        photoURL: player1.photoURL || null,
                         guesses: [],
                         row: 0
                     },
@@ -1963,6 +1967,7 @@ io.on('connection', (socket) => {
                         id: player2.id,
                         name: player2.name,
                         firebaseUid: player2.firebaseUid || null,
+                        photoURL: player2.photoURL || null,
                         guesses: [],
                         row: 0
                     }
@@ -2020,6 +2025,7 @@ io.on('connection', (socket) => {
                         id: p.id,
                         name: p.name,
                         firebaseUid: p.firebaseUid || null,
+                        photoURL: p.photoURL || null,
                         guesses: p.guesses || [],
                         row: p.row || 0,
                         isBot: p.isBot || false
@@ -2098,6 +2104,7 @@ io.on('connection', (socket) => {
                 id: socket.id,
                 name: data.playerName,
                 firebaseUid: data.firebaseUid || null,
+                photoURL: data.photoURL || null,
                 guesses: [],
                 row: 0
             }],
@@ -2166,6 +2173,7 @@ io.on('connection', (socket) => {
             id: socket.id,
             name: data.playerName,
             firebaseUid: data.firebaseUid || null,
+            photoURL: data.photoURL || null,
             guesses: [],
             row: 0
         });
@@ -2189,6 +2197,7 @@ io.on('connection', (socket) => {
                         id: p.id,
                         name: p.name,
                         firebaseUid: p.firebaseUid || null,
+                        photoURL: p.photoURL || null,
                         guesses: p.guesses || [],
                         row: p.row || 0,
                         isBot: p.isBot || false
@@ -2483,6 +2492,7 @@ io.on('connection', (socket) => {
                         id: p.id,
                         name: p.name,
                         firebaseUid: p.firebaseUid || null,
+                        photoURL: p.photoURL || null,
                         guesses: p.guesses || [],
                         row: p.row || 0,
                         isBot: p.isBot || false
@@ -3552,9 +3562,15 @@ io.on('connection', (socket) => {
         
         const guess = data.guess.toUpperCase();
         
-        // Validate word (simple check - in production, use a dictionary)
+        // Validate word format
         if (guess.length !== 5 || !/^[A-Z]+$/.test(guess)) {
             socket.emit('error', { message: 'Invalid word' });
+            return;
+        }
+        
+        // Validate word exists in dictionary
+        if (!WORDS.includes(guess)) {
+            socket.emit('error', { message: "You can't guess that word. Please enter a valid 5-letter word." });
             return;
         }
         
@@ -4068,31 +4084,105 @@ io.on('connection', (socket) => {
         if (playerData) {
             const game = games.get(playerData.gameId);
             if (game) {
-                game.players = game.players.filter(p => p.id !== socket.id);
+                const disconnectedPlayer = game.players.find(p => p.id === socket.id);
+                const remainingPlayer = game.players.find(p => p.id !== socket.id);
                 
-                // Clean up user-to-game tracking
-                const player = game.players.find(p => p.id === socket.id);
-                if (player && player.firebaseUid) {
-                    userToGame.delete(player.firebaseUid);
-                }
+                console.log(`Disconnect handler: Game ${playerData.gameId}, status: ${game.status}, disconnected player: ${socket.id}, remaining player: ${remainingPlayer ? remainingPlayer.id : 'none'}`);
                 
-                // Clean up bot games
-                if (game.isBotGame) {
-                    botGames.delete(game.gameId);
-                }
-                
-                if (game.players.length === 0) {
-                    games.delete(playerData.gameId);
-                    userToGame.forEach((gameIdForUser, firebaseUid) => {
-                        if (gameIdForUser === playerData.gameId) {
-                            userToGame.delete(firebaseUid);
+                // If game is active (playing or waiting) and there's a remaining player, award win to remaining player
+                if ((game.status === 'playing' || game.status === 'waiting') && remainingPlayer && !remainingPlayer.isBot) {
+                    console.log(`Player ${socket.id} disconnected during active game. Awarding win to ${remainingPlayer.id}`);
+                    
+                    // Mark game as finished
+                    game.status = 'finished';
+                    
+                    // Clean up user-to-game tracking
+                    if (disconnectedPlayer && disconnectedPlayer.firebaseUid) {
+                        userToGame.delete(disconnectedPlayer.firebaseUid);
+                    }
+                    if (remainingPlayer && remainingPlayer.firebaseUid) {
+                        userToGame.delete(remainingPlayer.firebaseUid);
+                    }
+                    
+                    // Clean up bot games
+                    if (game.isBotGame) {
+                        botGames.delete(game.gameId);
+                    }
+                    
+                    // Send gameOver to remaining player
+                    const remainingSocket = io.sockets.sockets.get(remainingPlayer.id);
+                    if (remainingSocket) {
+                        const remainingPlayerGuesses = remainingPlayer.guesses ? remainingPlayer.guesses.length : 0;
+                        
+                        // Calculate chip changes for ranked games
+                        let chipChangeWinner = 0;
+                        let chipChangeLoser = 0;
+                        
+                        if (game.isRanked) {
+                            // Winner gets normal win chips (calculated client-side, but we'll send the info)
+                            // For disconnect wins, use a standard amount (20 base + efficiency bonus if applicable)
+                            const baseWinChips = 20;
+                            let efficiencyBonus = 0;
+                            if (remainingPlayerGuesses > 0 && remainingPlayerGuesses <= 6) {
+                                efficiencyBonus = (7 - remainingPlayerGuesses) * 5;
+                            }
+                            chipChangeWinner = baseWinChips + efficiencyBonus;
+                            
+                            // Loser loses 50 chips
+                            chipChangeLoser = -50;
                         }
-                    });
+                        
+                        console.log(`Sending gameOver to remaining player ${remainingPlayer.id} with chipChange: ${chipChangeWinner}`);
+                        remainingSocket.emit('gameOver', {
+                            winner: remainingPlayer.id,
+                            word: game.word,
+                            gameId: game.gameId,
+                            disconnected: true,
+                            chipChange: chipChangeWinner,
+                            guesses: remainingPlayerGuesses
+                        });
+                    } else {
+                        console.error(`Could not find socket for remaining player ${remainingPlayer.id}`);
+                    }
+                    
+                    // Remove players from tracking
+                    players.delete(socket.id);
+                    if (remainingPlayer.id) {
+                        players.delete(remainingPlayer.id);
+                    }
+                    
+                    // Delete game
+                    games.delete(playerData.gameId);
                 } else {
-                    io.to(playerData.gameId).emit('playerLeft', {});
+                    // Game not active or no remaining player - normal cleanup
+                    game.players = game.players.filter(p => p.id !== socket.id);
+                    
+                    // Clean up user-to-game tracking
+                    const player = game.players.find(p => p.id === socket.id);
+                    if (player && player.firebaseUid) {
+                        userToGame.delete(player.firebaseUid);
+                    }
+                    
+                    // Clean up bot games
+                    if (game.isBotGame) {
+                        botGames.delete(game.gameId);
+                    }
+                    
+                    if (game.players.length === 0) {
+                        games.delete(playerData.gameId);
+                        userToGame.forEach((gameIdForUser, firebaseUid) => {
+                            if (gameIdForUser === playerData.gameId) {
+                                userToGame.delete(firebaseUid);
+                            }
+                        });
+                    } else {
+                        io.to(playerData.gameId).emit('playerLeft', {});
+                    }
+                    players.delete(socket.id);
                 }
+            } else {
+                players.delete(socket.id);
             }
-            players.delete(socket.id);
         }
     });
     
@@ -4140,8 +4230,10 @@ io.on('connection', (socket) => {
             challengerSocketId: socket.id,
             challengerFirebaseUid: challengerFirebaseUid,
             challengerName: challengerName,
+            challengerPhotoURL: data.challengerPhotoURL || null,
             targetFirebaseUid: targetFirebaseUid,
-            targetName: targetName
+            targetName: targetName,
+            targetPhotoURL: data.targetPhotoURL || null
         });
         
         // Send challenge request to target
@@ -4195,6 +4287,7 @@ io.on('connection', (socket) => {
                     id: challenge.challengerSocketId,
                     name: challenge.challengerName,
                     firebaseUid: challenge.challengerFirebaseUid,
+                    photoURL: challenge.challengerPhotoURL || null,
                     guesses: [],
                     row: 0
                 },
@@ -4202,6 +4295,7 @@ io.on('connection', (socket) => {
                     id: socket.id,
                     name: challenge.targetName,
                     firebaseUid: challenge.targetFirebaseUid,
+                    photoURL: challenge.targetPhotoURL || null,
                     guesses: [],
                     row: 0
                 }
@@ -4239,19 +4333,20 @@ io.on('connection', (socket) => {
             const gameStateForClients = {
                 gameId: game.gameId,
                 currentTurn: game.currentTurn,
-                players: game.players.map(p => ({
-                    id: p.id,
-                    name: p.name,
-                    firebaseUid: p.firebaseUid || null,
-                    guesses: p.guesses || [],
-                    row: p.row || 0,
-                    isBot: false
-                })),
-                status: 'playing',
-                activeEffects: game.activeEffects,
-                totalGuesses: game.totalGuesses,
-                isRanked: game.isRanked || false
-            };
+                    players: game.players.map(p => ({
+                        id: p.id,
+                        name: p.name,
+                        firebaseUid: p.firebaseUid || null,
+                        photoURL: p.photoURL || null,
+                        guesses: p.guesses || [],
+                        row: p.row || 0,
+                        isBot: false
+                    })),
+                    status: 'playing',
+                    activeEffects: game.activeEffects,
+                    totalGuesses: game.totalGuesses,
+                    isRanked: game.isRanked || false
+                };
             
             game.status = 'playing';
             game.players.forEach(player => {

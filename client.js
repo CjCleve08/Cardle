@@ -460,20 +460,46 @@ function updateLobbyUserInfo() {
             profileAccountType.textContent = provider === 'google.com' ? 'Google Account' : 'Email Account';
         }
         if (profileAvatar) {
-            if (currentUser.photoURL) {
-                profileAvatar.style.backgroundImage = `url(${currentUser.photoURL})`;
-                profileAvatar.style.backgroundSize = 'cover';
-                profileAvatar.style.backgroundPosition = 'center';
-                profileAvatar.textContent = '';
-            } else {
-                profileAvatar.textContent = displayName.charAt(0).toUpperCase();
+            // Prefer Firestore photoURL if available
+            const applyAvatar = (url) => {
+                if (url) {
+                    profileAvatar.style.backgroundImage = `url(${url})`;
+                    profileAvatar.style.backgroundSize = 'cover';
+                    profileAvatar.style.backgroundPosition = 'center';
+                    profileAvatar.textContent = '';
+                } else {
+                    profileAvatar.style.backgroundImage = '';
+                    profileAvatar.style.backgroundSize = '';
+                    profileAvatar.style.backgroundPosition = '';
+                    profileAvatar.textContent = displayName.charAt(0).toUpperCase();
+                }
+            };
+            // Default to Auth photoURL while we fetch Firestore
+            const initialPhoto = currentUser.photoURL || null;
+            window.currentUserPhotoURL = initialPhoto;
+            applyAvatar(initialPhoto);
+            // Fetch Firestore user doc for photoURL override
+            if (window.firebaseDb && currentUser.uid) {
+                window.firebaseDb.collection('users').doc(currentUser.uid).get().then(doc => {
+                    if (doc.exists) {
+                        const docPhoto = doc.data().photoURL || null;
+                        window.currentUserPhotoURL = docPhoto || initialPhoto || null;
+                        applyAvatar(window.currentUserPhotoURL);
+                    }
+                }).catch(() => {
+                    // Ignore Firestore errors here, keep initial photo
+                });
             }
         }
         
-        // Show edit button for authenticated users
+        // Show edit buttons for authenticated users
         const editUsernameBtn = document.getElementById('editUsernameBtn');
         if (editUsernameBtn) {
             editUsernameBtn.style.display = 'inline-flex';
+        }
+        const editPictureBtn = document.getElementById('editPictureBtn');
+        if (editPictureBtn) {
+            editPictureBtn.style.display = 'inline-flex';
         }
     } else {
         // Not signed in
@@ -770,12 +796,18 @@ async function updateStats(gameResult) {
     // Only update chip points (rank) if this is a ranked game
     const isRanked = gameState && gameState.isRanked === true;
     if (isRanked) {
-        // Calculate and update chip points
-        stats.chipPoints = calculateChipPoints(
-            gameResult.won,
-            gameResult.guesses || 0,
-            stats.chipPoints
-        );
+        // If chipPoints is provided (e.g., from disconnect scenario), use it directly
+        // Otherwise calculate normally
+        if (gameResult.chipPoints !== undefined) {
+            stats.chipPoints = gameResult.chipPoints;
+        } else {
+            // Calculate and update chip points
+            stats.chipPoints = calculateChipPoints(
+                gameResult.won,
+                gameResult.guesses || 0,
+                stats.chipPoints
+            );
+        }
     }
     
     await savePlayerStats(stats);
@@ -2085,8 +2117,9 @@ socket.on('gameStarted', (data) => {
         
         // Update player 1 avatar
         if (vsPlayer1Avatar) {
-            if (currentUser && currentUser.photoURL) {
-                vsPlayer1Avatar.style.backgroundImage = `url(${currentUser.photoURL})`;
+            const myPhoto = window.currentUserPhotoURL || (currentUser ? currentUser.photoURL : null) || null;
+            if (myPhoto) {
+                vsPlayer1Avatar.style.backgroundImage = `url(${myPhoto})`;
                 vsPlayer1Avatar.style.backgroundSize = 'cover';
                 vsPlayer1Avatar.style.backgroundPosition = 'center';
                 vsPlayer1Avatar.textContent = '';
@@ -2134,14 +2167,43 @@ socket.on('gameStarted', (data) => {
         
         // Update player 2 avatar
         if (vsPlayer2Avatar) {
-            // For opponent, we might not have photoURL in the data
-            // If opponent has a user ID and we can fetch their profile, we could do that
-            // For now, just use first letter or emoji
-            vsPlayer2Avatar.style.backgroundImage = '';
-            vsPlayer2Avatar.style.backgroundSize = '';
-            vsPlayer2Avatar.style.backgroundPosition = '';
-            const initial = player2Name.charAt(0).toUpperCase();
-            vsPlayer2Avatar.textContent = initial || '👤';
+            // Check if opponent has photoURL in the game data
+            if (opponentData && opponentData.photoURL) {
+                vsPlayer2Avatar.style.backgroundImage = `url(${opponentData.photoURL})`;
+                vsPlayer2Avatar.style.backgroundSize = 'cover';
+                vsPlayer2Avatar.style.backgroundPosition = 'center';
+                vsPlayer2Avatar.textContent = '';
+            } else if (opponentData && opponentData.firebaseUid && window.firebaseDb) {
+                // Try to fetch from Firestore if we have firebaseUid
+                window.firebaseDb.collection('users').doc(opponentData.firebaseUid).get()
+                    .then(userDoc => {
+                        if (userDoc.exists && userDoc.data().photoURL) {
+                            vsPlayer2Avatar.style.backgroundImage = `url(${userDoc.data().photoURL})`;
+                            vsPlayer2Avatar.style.backgroundSize = 'cover';
+                            vsPlayer2Avatar.style.backgroundPosition = 'center';
+                            vsPlayer2Avatar.textContent = '';
+                        } else {
+                            vsPlayer2Avatar.style.backgroundImage = '';
+                            vsPlayer2Avatar.style.backgroundSize = '';
+                            vsPlayer2Avatar.style.backgroundPosition = '';
+                            const initial = player2Name.charAt(0).toUpperCase();
+                            vsPlayer2Avatar.textContent = initial || '👤';
+                        }
+                    })
+                    .catch(() => {
+                        vsPlayer2Avatar.style.backgroundImage = '';
+                        vsPlayer2Avatar.style.backgroundSize = '';
+                        vsPlayer2Avatar.style.backgroundPosition = '';
+                        const initial = player2Name.charAt(0).toUpperCase();
+                        vsPlayer2Avatar.textContent = initial || '👤';
+                    });
+            } else {
+                vsPlayer2Avatar.style.backgroundImage = '';
+                vsPlayer2Avatar.style.backgroundSize = '';
+                vsPlayer2Avatar.style.backgroundPosition = '';
+                const initial = player2Name.charAt(0).toUpperCase();
+                vsPlayer2Avatar.textContent = initial || '👤';
+            }
         }
         
         // Update player 2 stats (opponent stats)
@@ -2620,7 +2682,12 @@ socket.on('guessSubmitted', (data) => {
             }
         }
     } else if (data.playerId === currentPlayer) {
-        // This is my guess
+        // This is my guess - clear input and card since it was successfully submitted
+        document.getElementById('wordInput').value = '';
+        currentGuess = '';
+        selectedCard = null;
+        cardChainActive = false;
+        
         if (data.hidden || !data.guess || !data.feedback) {
             // Guess is hidden from player (Gambler's Card, Rem-Job, or Blind Guess effect)
             displayOpponentGuessHidden(data.row);
@@ -3075,9 +3142,9 @@ socket.on('gameOver', (data) => {
     }
     
     const won = data.winner === currentPlayer;
-    // Get guess count - use player's row (individual guess count) if available
-    let guesses = 0;
-    if (gameState && gameState.players) {
+    // Get guess count - use provided guesses or calculate from player data
+    let guesses = data.guesses || 0;
+    if (guesses === 0 && gameState && gameState.players) {
         const player = gameState.players.find(p => p.id === currentPlayer);
         if (player) {
             // Use player.row which tracks individual player's guesses
@@ -3089,29 +3156,59 @@ socket.on('gameOver', (data) => {
         }
     }
     
-    if (won) {
-        titleEl.textContent = 'You Win!';
-        titleEl.classList.add('win');
-        titleEl.classList.remove('lose');
-        messageEl.textContent = 'Congratulations! You guessed the word!';
-        iconEl.textContent = '🎉';
-        wordEl.textContent = data.word;
-        
-        // Play win sound
-        if (typeof soundManager !== 'undefined') {
-            soundManager.playGameWin();
+    // Handle disconnect scenario
+    if (data.disconnected) {
+        if (won) {
+            titleEl.textContent = 'You Win!';
+            titleEl.classList.add('win');
+            titleEl.classList.remove('lose');
+            messageEl.textContent = 'Your opponent disconnected. You win!';
+            iconEl.textContent = '🏆';
+            wordEl.textContent = data.word;
+            
+            // Play win sound
+            if (typeof soundManager !== 'undefined') {
+                soundManager.playGameWin();
+            }
+        } else {
+            titleEl.textContent = 'You Lost!';
+            titleEl.classList.add('lose');
+            titleEl.classList.remove('win');
+            messageEl.textContent = 'You disconnected. The word was:';
+            iconEl.textContent = '😔';
+            wordEl.textContent = data.word;
+            
+            // Play lose sound
+            if (typeof soundManager !== 'undefined') {
+                soundManager.playGameLose();
+            }
         }
     } else {
-        titleEl.textContent = 'You Lost!';
-        titleEl.classList.add('lose');
-        titleEl.classList.remove('win');
-        messageEl.textContent = 'Better luck next time! The word was:';
-        iconEl.textContent = '😔';
-        wordEl.textContent = data.word;
-        
-        // Play lose sound
-        if (typeof soundManager !== 'undefined') {
-            soundManager.playGameLose();
+        // Normal game end
+        if (won) {
+            titleEl.textContent = 'You Win!';
+            titleEl.classList.add('win');
+            titleEl.classList.remove('lose');
+            messageEl.textContent = 'Congratulations! You guessed the word!';
+            iconEl.textContent = '🎉';
+            wordEl.textContent = data.word;
+            
+            // Play win sound
+            if (typeof soundManager !== 'undefined') {
+                soundManager.playGameWin();
+            }
+        } else {
+            titleEl.textContent = 'You Lost!';
+            titleEl.classList.add('lose');
+            titleEl.classList.remove('win');
+            messageEl.textContent = 'Better luck next time! The word was:';
+            iconEl.textContent = '😔';
+            wordEl.textContent = data.word;
+            
+            // Play lose sound
+            if (typeof soundManager !== 'undefined') {
+                soundManager.playGameLose();
+            }
         }
     }
     
@@ -3127,6 +3224,17 @@ socket.on('gameOver', (data) => {
         }, 2000);
     }
     
+    // Transition to game over screen immediately (don't wait for stats calculations)
+    if (!ScreenManager.show('gameOver')) {
+        console.error('Failed to show gameOver screen!');
+        return;
+    }
+    
+    // Scale game over screen to fit
+    setTimeout(() => {
+        scaleGameOverScreen();
+    }, 100);
+    
     // Calculate chip points change before updating stats (only for ranked games)
     const isRanked = gameState && gameState.isRanked === true;
     
@@ -3139,8 +3247,20 @@ socket.on('gameOver', (data) => {
     if (isRanked) {
         getPlayerStats().then(stats => {
             const currentChipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
-            const newChipPoints = calculateChipPoints(won, guesses, currentChipPoints);
-            const chipPointsChange = newChipPoints - currentChipPoints;
+            
+            // If disconnect scenario, use provided chipChange, otherwise calculate normally
+            let chipPointsChange = 0;
+            let newChipPoints = currentChipPoints;
+            
+            if (data.disconnected && data.chipChange !== undefined) {
+                // Use server-provided chip change for disconnect scenarios
+                chipPointsChange = data.chipChange;
+                newChipPoints = Math.max(0, currentChipPoints + chipPointsChange);
+            } else {
+                // Normal calculation
+                newChipPoints = calculateChipPoints(won, guesses, currentChipPoints);
+                chipPointsChange = newChipPoints - currentChipPoints;
+            }
             
             // Display chip points change on game over screen
             const chipPointsChangeEl = document.getElementById('gameOverChipPoints');
@@ -3161,6 +3281,15 @@ socket.on('gameOver', (data) => {
             
             // Generate and animate rank progress bar
             generateGameOverRankProgress(currentChipPoints, newChipPoints);
+            
+            // Update stats with the calculated chip change
+            updateStats({
+                won: won,
+                guesses: guesses,
+                chipPoints: newChipPoints  // Pass the new chip points directly
+            }).catch(error => {
+                console.error('Error updating stats:', error);
+            });
         }).catch(error => {
             console.error('Error calculating chip points change:', error);
         });
@@ -3171,26 +3300,15 @@ socket.on('gameOver', (data) => {
             chipPointsChangeEl.textContent = '';
             chipPointsChangeEl.classList.remove('chip-points-gain', 'chip-points-loss');
         }
+        
+        // Update statistics for non-ranked games
+        updateStats({
+            won: won,
+            guesses: guesses
+        }).catch(error => {
+            console.error('Error updating stats:', error);
+        });
     }
-    
-    // Update statistics (async, but don't wait for it)
-    updateStats({
-        won: won,
-        guesses: guesses
-    }).catch(error => {
-        console.error('Error updating stats:', error);
-    });
-    
-    // Transition to game over screen immediately (server already delayed by 2 seconds)
-    if (!ScreenManager.show('gameOver')) {
-        console.error('Failed to show gameOver screen!');
-        return;
-    }
-    
-    // Scale game over screen to fit
-    setTimeout(() => {
-        scaleGameOverScreen();
-    }, 100);
     
     // Reset rematch button state
     const rematchBtn = document.getElementById('rematchBtn');
@@ -3238,7 +3356,12 @@ socket.on('rematchCancelled', () => {
 });
 
 socket.on('error', (data) => {
-    showGameMessage('⚠️', 'Error', data.message);
+    // Play error sound
+    if (typeof soundManager !== 'undefined') {
+        soundManager.playError();
+    }
+    showGameMessage('⚠️', 'Invalid Word', data.message);
+    // Don't clear input/card on error - let player fix their guess
 });
 
 socket.on('matchmakingStatus', (data) => {
@@ -6246,7 +6369,8 @@ document.getElementById('findMatchBtn').addEventListener('click', async () => {
     }
     
     const firebaseUid = currentUser ? currentUser.uid : null;
-    socket.emit('findMatch', { playerName: name, firebaseUid: firebaseUid });
+    const photoURL = window.currentUserPhotoURL || (currentUser ? currentUser.photoURL : null);
+    socket.emit('findMatch', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL });
 });
 
 document.getElementById('cancelMatchmakingBtn').addEventListener('click', () => {
@@ -6287,7 +6411,8 @@ document.getElementById('createGameBtn').addEventListener('click', async () => {
         }
         
         const firebaseUid = currentUser ? currentUser.uid : null;
-        socket.emit('createGame', { playerName: name, firebaseUid: firebaseUid });
+        const photoURL = window.currentUserPhotoURL || (currentUser ? currentUser.photoURL : null);
+        socket.emit('createGame', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL });
     } else {
         showGameMessage('⚠️', 'Sign In Required', 'Please sign in to create a game');
     }
@@ -7404,7 +7529,7 @@ function hideSearchResults() {
 }
 
 // Challenge a friend
-function challengeFriend(friendFirebaseUid, friendName, event) {
+async function challengeFriend(friendFirebaseUid, friendName, event) {
     // Prevent event propagation to avoid triggering friend stats popup
     if (event) {
         event.stopPropagation();
@@ -7428,11 +7553,26 @@ function challengeFriend(friendFirebaseUid, friendName, event) {
     }
     
     console.log('Challenging friend:', friendFirebaseUid, friendName);
+    const challengerPhotoURL = currentUser ? currentUser.photoURL : null;
+    // Try to get target photoURL from Firestore
+    let targetPhotoURL = null;
+    if (window.firebaseDb && friendFirebaseUid) {
+        try {
+            const targetUserDoc = await window.firebaseDb.collection('users').doc(friendFirebaseUid).get();
+            if (targetUserDoc.exists) {
+                targetPhotoURL = targetUserDoc.data().photoURL || null;
+            }
+        } catch (error) {
+            console.error('Error fetching target photoURL:', error);
+        }
+    }
     socket.emit('challengeFriend', {
         challengerFirebaseUid: currentUser.uid,
         challengerName: playerName,
+        challengerPhotoURL: challengerPhotoURL,
         targetFirebaseUid: friendFirebaseUid,
-        targetName: friendName
+        targetName: friendName,
+        targetPhotoURL: targetPhotoURL
     });
     
     showGameMessage('⚔️', 'Challenge Sent', `Challenge sent to ${friendName}!`, 2000);
@@ -7959,6 +8099,122 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
+    // Profile picture change functionality
+    const editPictureBtn = document.getElementById('editPictureBtn');
+    const savePictureBtn = document.getElementById('savePictureBtn');
+    const cancelPictureBtn = document.getElementById('cancelPictureBtn');
+    const pictureUrlInput = document.getElementById('pictureUrlInput');
+    const pictureFileInput = document.getElementById('pictureFileInput');
+    const pictureFileInputForm = document.getElementById('pictureFileInputForm');
+    const pictureError = document.getElementById('pictureError');
+    const pictureSuccess = document.getElementById('pictureSuccess');
+    const pictureSection = document.getElementById('profilePictureSection');
+    
+    if (editPictureBtn) {
+        editPictureBtn.addEventListener('click', () => {
+            if (pictureSection) {
+                pictureSection.style.display = 'block';
+                // Set current photoURL as placeholder
+                if (pictureUrlInput && currentUser) {
+                    pictureUrlInput.value = '';
+                    pictureUrlInput.placeholder = currentUser.photoURL ? `Current: ${currentUser.photoURL}` : 'Enter image URL';
+                    setTimeout(() => pictureUrlInput.focus(), 100);
+                }
+            }
+        });
+    }
+    
+    // Handle file input change (direct upload)
+    if (pictureFileInput) {
+        pictureFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleFileUpload(file);
+            }
+        });
+    }
+    
+    // Handle file input from form
+    if (pictureFileInputForm) {
+        pictureFileInputForm.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                // Validate file type
+                if (!file.type.startsWith('image/')) {
+                    if (pictureError) {
+                        pictureError.textContent = 'Please select an image file';
+                        pictureError.style.display = 'block';
+                    }
+                    pictureFileInputForm.value = '';
+                    return;
+                }
+                
+                // Validate file size (max 5MB)
+                if (file.size > 5 * 1024 * 1024) {
+                    if (pictureError) {
+                        pictureError.textContent = 'File size must be less than 5MB';
+                        pictureError.style.display = 'block';
+                    }
+                    pictureFileInputForm.value = '';
+                    return;
+                }
+                
+                // Clear any previous errors
+                if (pictureError) pictureError.style.display = 'none';
+                
+                // Convert file to data URL and set in URL input
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    if (pictureUrlInput) {
+                        pictureUrlInput.value = event.target.result;
+                        // Show success message that file is ready
+                        if (pictureSuccess) {
+                            pictureSuccess.textContent = 'File loaded! Click Save to update your profile picture.';
+                            pictureSuccess.style.display = 'block';
+                        }
+                    }
+                };
+                reader.onerror = () => {
+                    if (pictureError) {
+                        pictureError.textContent = 'Error reading file. Please try again.';
+                        pictureError.style.display = 'block';
+                    }
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+    
+    if (savePictureBtn) {
+        savePictureBtn.addEventListener('click', handleChangePicture);
+    }
+    
+    if (cancelPictureBtn) {
+        cancelPictureBtn.addEventListener('click', () => {
+            if (pictureSection) {
+                pictureSection.style.display = 'none';
+            }
+            if (pictureUrlInput) {
+                pictureUrlInput.value = '';
+            }
+            if (pictureFileInputForm) {
+                pictureFileInputForm.value = '';
+            }
+            if (pictureError) pictureError.style.display = 'none';
+            if (pictureSuccess) pictureSuccess.style.display = 'none';
+        });
+    }
+    
+    if (pictureUrlInput) {
+        pictureUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleChangePicture();
+            } else if (e.key === 'Escape') {
+                if (cancelPictureBtn) cancelPictureBtn.click();
+            }
+        });
+    }
+    
     if (usernameInput) {
         usernameInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
@@ -8089,7 +8345,8 @@ document.getElementById('joinWithIdBtn').addEventListener('click', async () => {
         }
         
         const firebaseUid = currentUser ? currentUser.uid : null;
-        socket.emit('joinGame', { playerName: name, gameId: gameId, firebaseUid: firebaseUid });
+        const photoURL = window.currentUserPhotoURL || (currentUser ? currentUser.photoURL : null);
+        socket.emit('joinGame', { playerName: name, gameId: gameId, firebaseUid: firebaseUid, photoURL: photoURL });
     } else {
         showGameMessage('⚠️', 'Sign In Required', 'Please sign in and enter a game ID');
     }
@@ -8357,6 +8614,11 @@ function submitGuess() {
         soundManager.playWordSubmit();
     }
     
+    // Store the guess and card before sending (in case we need to restore on error)
+    const submittedGuess = guess;
+    const submittedCard = selectedCard;
+    const submittedCardChain = cardChainActive;
+    
     socket.emit('submitGuess', {
         gameId: gameState.gameId,
         playerId: currentPlayer,
@@ -8364,10 +8626,9 @@ function submitGuess() {
         card: selectedCard
     });
     
-    document.getElementById('wordInput').value = '';
-    currentGuess = '';
-    selectedCard = null;
-    cardChainActive = false; // Reset card chain flag after submitting
+    // Don't clear input/card immediately - wait for server confirmation
+    // This allows the player to fix their guess if it's invalid
+    // The input/card will be cleared when guessSubmitted event is received
 }
 
 // Username change functionality
@@ -8567,4 +8828,296 @@ socket.on('usernameUpdateResult', (data) => {
         saveUsernameBtn.innerHTML = '<span class="btn-icon">✓</span><span>Save</span>';
     }
 });
+
+// Profile picture change functionality
+async function handleChangePicture() {
+    const pictureUrlInput = document.getElementById('pictureUrlInput');
+    const pictureError = document.getElementById('pictureError');
+    const pictureSuccess = document.getElementById('pictureSuccess');
+    const savePictureBtn = document.getElementById('savePictureBtn');
+    const pictureSection = document.getElementById('profilePictureSection');
+    
+    if (!pictureUrlInput || !currentUser || !window.firebaseAuth || !window.firebaseDb) {
+        if (pictureError) {
+            pictureError.textContent = 'Please sign in to change your profile picture';
+            pictureError.style.display = 'block';
+        }
+        return;
+    }
+    
+    let newPhotoURL = pictureUrlInput.value.trim();
+    
+    // If empty, check if there's a file selected and convert it
+    if (!newPhotoURL) {
+        const pictureFileInputForm = document.getElementById('pictureFileInputForm');
+        if (pictureFileInputForm && pictureFileInputForm.files && pictureFileInputForm.files[0]) {
+            const file = pictureFileInputForm.files[0];
+            
+            // Validate file type
+            if (!file.type.startsWith('image/')) {
+                if (pictureError) {
+                    pictureError.textContent = 'Please select an image file';
+                    pictureError.style.display = 'block';
+                }
+                if (pictureSuccess) pictureSuccess.style.display = 'none';
+                return;
+            }
+            
+            // Validate file size (max 5MB)
+            if (file.size > 5 * 1024 * 1024) {
+                if (pictureError) {
+                    pictureError.textContent = 'File size must be less than 5MB';
+                    pictureError.style.display = 'block';
+                }
+                if (pictureSuccess) pictureSuccess.style.display = 'none';
+                return;
+            }
+            
+            // Convert file to data URL
+            try {
+                newPhotoURL = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (event) => resolve(event.target.result);
+                    reader.onerror = () => reject(new Error('Failed to read file'));
+                    reader.readAsDataURL(file);
+                });
+                
+                // Update the input field with the data URL
+                if (pictureUrlInput) {
+                    pictureUrlInput.value = newPhotoURL;
+                }
+            } catch (error) {
+                console.error('Error converting file to data URL:', error);
+                if (pictureError) {
+                    pictureError.textContent = 'Error processing file. Please try again.';
+                    pictureError.style.display = 'block';
+                }
+                if (pictureSuccess) pictureSuccess.style.display = 'none';
+                return;
+            }
+        } else {
+            // No URL and no file selected
+            if (pictureError) {
+                pictureError.textContent = 'Please enter an image URL or upload a file';
+                pictureError.style.display = 'block';
+            }
+            if (pictureSuccess) pictureSuccess.style.display = 'none';
+            return;
+        }
+    }
+    
+    // Validate URL format (skip validation for data URLs)
+    if (newPhotoURL && !newPhotoURL.startsWith('data:image/') && !isValidImageUrl(newPhotoURL)) {
+        if (pictureError) {
+            pictureError.textContent = 'Please enter a valid image URL (must start with http:// or https://) or upload a file';
+            pictureError.style.display = 'block';
+        }
+        if (pictureSuccess) pictureSuccess.style.display = 'none';
+        return;
+    }
+    
+    // Disable button during update
+    if (savePictureBtn) {
+        savePictureBtn.disabled = true;
+        savePictureBtn.innerHTML = '<span>Saving...</span>';
+    }
+    
+    try {
+        // If data URL, skip Auth update (Auth may reject long/embedded URLs). Store in Firestore only.
+        const isDataUrl = !!(newPhotoURL && newPhotoURL.startsWith('data:image/'));
+        if (!isDataUrl) {
+            // Try to update Firebase Auth photoURL for http(s) URLs
+            await window.firebaseAuth.currentUser.updateProfile({
+                photoURL: newPhotoURL || null
+            });
+        }
+        // Always persist to Firestore (source of truth for avatars)
+        await window.firebaseDb.collection('users').doc(currentUser.uid).set({
+            photoURL: newPhotoURL || null,
+            photoURLUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        
+        // Update local override immediately without waiting for reload
+        window.currentUserPhotoURL = newPhotoURL || null;
+        
+        // Reload user (best effort) to refresh Auth photoURL if we set it
+        try {
+            await window.firebaseAuth.currentUser.reload();
+            currentUser = window.firebaseAuth.currentUser;
+        } catch (_) {}
+        
+        // Update UI
+        updateLobbyUserInfo();
+        
+        // Show success message
+        if (pictureSuccess) {
+            pictureSuccess.textContent = newPhotoURL ? 'Profile picture updated successfully!' : 'Profile picture removed successfully!';
+            pictureSuccess.style.display = 'block';
+        }
+        if (pictureError) pictureError.style.display = 'none';
+        
+        // Clear inputs and hide form after a delay
+        pictureUrlInput.value = '';
+        const pictureFileInputForm = document.getElementById('pictureFileInputForm');
+        if (pictureFileInputForm) {
+            pictureFileInputForm.value = '';
+        }
+        
+        // Re-enable button
+        if (savePictureBtn) {
+            savePictureBtn.disabled = false;
+            savePictureBtn.innerHTML = '<span class="btn-icon">✓</span><span>Save</span>';
+        }
+        
+        // Hide form and success message after 2 seconds
+        setTimeout(() => {
+            if (pictureSection) {
+                pictureSection.style.display = 'none';
+            }
+            if (pictureSuccess) pictureSuccess.style.display = 'none';
+        }, 2000);
+        
+    } catch (error) {
+        console.error('Error updating profile picture:', error);
+        console.error('Error details:', error.code, error.message);
+        
+        let errorMessage = 'Failed to update profile picture. Please try again.';
+        
+        // Provide more specific error messages
+        if (error.code === 'auth/invalid-photo-url') {
+            errorMessage = 'Invalid image URL. Please use a valid image URL or upload a file.';
+        } else if (error.message && error.message.includes('photoURL')) {
+            errorMessage = 'The image URL is too long or invalid. Please try a smaller image or a different URL.';
+        }
+        
+        if (pictureError) {
+            pictureError.textContent = errorMessage;
+            pictureError.style.display = 'block';
+        }
+        if (pictureSuccess) pictureSuccess.style.display = 'none';
+        
+        // Re-enable button
+        if (savePictureBtn) {
+            savePictureBtn.disabled = false;
+            savePictureBtn.innerHTML = '<span class="btn-icon">✓</span><span>Save</span>';
+        }
+    }
+}
+
+function isValidImageUrl(url) {
+    try {
+        const urlObj = new URL(url);
+        return urlObj.protocol === 'http:' || urlObj.protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
+// Handle direct file upload (when clicking edit button)
+async function handleFileUpload(file) {
+    if (!file) return;
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+        const pictureError = document.getElementById('pictureError');
+        if (pictureError) {
+            pictureError.textContent = 'Please select an image file';
+            pictureError.style.display = 'block';
+        }
+        return;
+    }
+    
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+        const pictureError = document.getElementById('pictureError');
+        if (pictureError) {
+            pictureError.textContent = 'File size must be less than 5MB';
+            pictureError.style.display = 'block';
+        }
+        return;
+    }
+    
+    const pictureError = document.getElementById('pictureError');
+    const pictureSuccess = document.getElementById('pictureSuccess');
+    
+    if (pictureError) pictureError.style.display = 'none';
+    
+    try {
+        // Convert file to data URL
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            const dataURL = event.target.result;
+            
+            if (!currentUser || !window.firebaseAuth || !window.firebaseDb) {
+                if (pictureError) {
+                    pictureError.textContent = 'Please sign in to change your profile picture';
+                    pictureError.style.display = 'block';
+                }
+                return;
+            }
+            
+            try {
+                // Update Firebase Auth photoURL
+                await window.firebaseAuth.currentUser.updateProfile({
+                    photoURL: dataURL
+                });
+                
+                // Update Firestore user document
+                await window.firebaseDb.collection('users').doc(currentUser.uid).set({
+                    photoURL: dataURL,
+                    photoURLUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                }, { merge: true });
+                
+                // Reload user to get updated photoURL
+                await window.firebaseAuth.currentUser.reload();
+                currentUser = window.firebaseAuth.currentUser;
+                
+                // Update UI
+                updateLobbyUserInfo();
+                
+                // Show success message
+                if (pictureSuccess) {
+                    pictureSuccess.textContent = 'Profile picture updated successfully!';
+                    pictureSuccess.style.display = 'block';
+                }
+                if (pictureError) pictureError.style.display = 'none';
+                
+                // Clear file input
+                const pictureFileInput = document.getElementById('pictureFileInput');
+                if (pictureFileInput) {
+                    pictureFileInput.value = '';
+                }
+                
+                // Hide success message after 2 seconds
+                setTimeout(() => {
+                    if (pictureSuccess) pictureSuccess.style.display = 'none';
+                }, 2000);
+                
+            } catch (error) {
+                console.error('Error updating profile picture:', error);
+                if (pictureError) {
+                    pictureError.textContent = 'Failed to update profile picture. Please try again.';
+                    pictureError.style.display = 'block';
+                }
+                if (pictureSuccess) pictureSuccess.style.display = 'none';
+            }
+        };
+        
+        reader.onerror = () => {
+            if (pictureError) {
+                pictureError.textContent = 'Error reading file. Please try again.';
+                pictureError.style.display = 'block';
+            }
+        };
+        
+        reader.readAsDataURL(file);
+        
+    } catch (error) {
+        console.error('Error handling file upload:', error);
+        if (pictureError) {
+            pictureError.textContent = 'Failed to process file. Please try again.';
+            pictureError.style.display = 'block';
+        }
+    }
+}
 

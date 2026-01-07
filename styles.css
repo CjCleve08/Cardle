@@ -1811,6 +1811,16 @@ header h1 {
     flex: 1;
 }
 
+.picture-form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.picture-form-actions .btn {
+    flex: 1;
+}
+
 .error-message {
     color: #ff6b6b;
     font-size: 0.875rem;
@@ -1825,6 +1835,11 @@ header h1 {
     display: none;
 }
 
+.profile-avatar-container {
+    position: relative;
+    display: inline-block;
+}
+
 .profile-avatar {
     width: 120px;
     height: 120px;
@@ -1837,6 +1852,35 @@ header h1 {
     font-size: 4rem;
     overflow: hidden;
     position: relative;
+}
+
+.btn-edit-picture {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #6aaa64;
+    border: 2px solid #1a1a1a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    z-index: 10;
+}
+
+.btn-edit-picture:hover {
+    background: #5a9a54;
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.btn-edit-picture .edit-icon {
+    font-size: 18px;
+    color: #ffffff;
 }
 
 .avatar-placeholder {

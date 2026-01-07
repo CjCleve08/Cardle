@@ -352,8 +352,14 @@
                         <div class="tab-panel-inner">
                             <h2 class="tab-panel-title">Profile</h2>
                             <div class="profile-content">
-                                <div class="profile-avatar" id="profileAvatar">
-                                    <div class="avatar-placeholder">👤</div>
+                                <div class="profile-avatar-container">
+                                    <div class="profile-avatar" id="profileAvatar">
+                                        <div class="avatar-placeholder">👤</div>
+                                    </div>
+                                    <button id="editPictureBtn" class="btn-edit-picture" style="display: none;" title="Edit Profile Picture">
+                                        <span class="edit-icon">✏️</span>
+                                    </button>
+                                    <input type="file" id="pictureFileInput" accept="image/*" style="display: none;">
                                 </div>
                                 <div class="profile-info">
                                     <div class="profile-name-container">
@@ -380,6 +386,29 @@
                                             <span>Save</span>
                                         </button>
                                         <button id="cancelUsernameBtn" class="btn btn-secondary">
+                                            <span>Cancel</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="profile-picture-section" id="profilePictureSection" style="display: none;">
+                                <div class="picture-change-form">
+                                    <div class="input-group">
+                                        <label for="pictureUrlInput" class="input-label">Profile Picture URL (or upload a file below)</label>
+                                        <input type="url" id="pictureUrlInput" class="input-field" placeholder="Enter image URL" maxlength="500">
+                                    </div>
+                                    <div class="input-group" style="margin-top: 16px;">
+                                        <label for="pictureFileInputForm" class="input-label">Upload from Computer</label>
+                                        <input type="file" id="pictureFileInputForm" class="input-field" accept="image/*">
+                                    </div>
+                                    <div id="pictureError" class="error-message" style="display: none;"></div>
+                                    <div id="pictureSuccess" class="success-message" style="display: none;"></div>
+                                    <div class="picture-form-actions">
+                                        <button id="savePictureBtn" class="btn btn-primary">
+                                            <span class="btn-icon">✓</span>
+                                            <span>Save</span>
+                                        </button>
+                                        <button id="cancelPictureBtn" class="btn btn-secondary">
                                             <span>Cancel</span>
                                         </button>
                                     </div>
