@@ -767,12 +767,16 @@ async function updateStats(gameResult) {
         stats.gamesWithGuesses++;
     }
     
-    // Calculate and update chip points
-    stats.chipPoints = calculateChipPoints(
-        gameResult.won,
-        gameResult.guesses || 0,
-        stats.chipPoints
-    );
+    // Only update chip points (rank) if this is a ranked game
+    const isRanked = gameState && gameState.isRanked === true;
+    if (isRanked) {
+        // Calculate and update chip points
+        stats.chipPoints = calculateChipPoints(
+            gameResult.won,
+            gameResult.guesses || 0,
+            stats.chipPoints
+        );
+    }
     
     await savePlayerStats(stats);
     await updateStatsDisplay();
@@ -2022,6 +2026,12 @@ socket.on('gameStarted', (data) => {
         console.log('Tutorial mode set in gameState:', gameState.isTutorial);
     }
     
+    // Ensure isRanked is preserved in gameState
+    if (data.isRanked !== undefined) {
+        gameState.isRanked = data.isRanked;
+        console.log('Ranked mode set in gameState:', gameState.isRanked);
+    }
+    
     // Ensure gameId is set in gameState (it might be in the data)
     if (data.gameId && !gameState.gameId) {
         gameState.gameId = data.gameId;
@@ -2766,6 +2776,39 @@ socket.on('requestHandForBlock', (data) => {
     });
 });
 
+socket.on('requestHandForSpectator', (data) => {
+    // Spectator is requesting to see our hand
+    // Ensure we have cards in hand - generate them if needed
+    if (!window.playerCardHand || window.playerCardHand.length < 3) {
+        // Initialize deck pool if needed
+        if (!window.deckPool || window.deckPool.length === 0) {
+            initializeDeckPoolSync();
+        }
+        
+        // Draw cards to fill hand
+        if (!window.playerCardHand) {
+            window.playerCardHand = [];
+        }
+        while (window.playerCardHand.length < 3) {
+            const newCard = drawCardFromDeck();
+            window.playerCardHand.push(newCard);
+        }
+    }
+    
+    // Send current hand to server (up to 3 cards)
+    const handToSend = window.playerCardHand.slice(0, 3).map(card => ({
+        id: card.id,
+        title: card.title,
+        description: card.description
+    }));
+    
+    socket.emit('sendHandForSpectator', {
+        gameId: data.gameId,
+        spectatorId: data.spectatorId,
+        cards: handToSend
+    });
+});
+
 socket.on('cardBlocked', (data) => {
     // A card in our hand has been blocked
     window.blockedCardId = data.blockedCardId;
@@ -3084,34 +3127,51 @@ socket.on('gameOver', (data) => {
         }, 2000);
     }
     
-    // Calculate chip points change before updating stats
-    getPlayerStats().then(stats => {
-        const currentChipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
-        const newChipPoints = calculateChipPoints(won, guesses, currentChipPoints);
-        const chipPointsChange = newChipPoints - currentChipPoints;
-        
-        // Display chip points change on game over screen
+    // Calculate chip points change before updating stats (only for ranked games)
+    const isRanked = gameState && gameState.isRanked === true;
+    
+    // Show/hide rank progress bar based on ranked status
+    const rankProgressContainer = document.getElementById('gameOverRankProgressTrack');
+    if (rankProgressContainer) {
+        rankProgressContainer.style.display = isRanked ? 'block' : 'none';
+    }
+    
+    if (isRanked) {
+        getPlayerStats().then(stats => {
+            const currentChipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+            const newChipPoints = calculateChipPoints(won, guesses, currentChipPoints);
+            const chipPointsChange = newChipPoints - currentChipPoints;
+            
+            // Display chip points change on game over screen
+            const chipPointsChangeEl = document.getElementById('gameOverChipPoints');
+            if (chipPointsChangeEl) {
+                if (chipPointsChange > 0) {
+                    chipPointsChangeEl.textContent = `+${chipPointsChange} Chips`;
+                    chipPointsChangeEl.classList.add('chip-points-gain');
+                    chipPointsChangeEl.classList.remove('chip-points-loss');
+                } else if (chipPointsChange < 0) {
+                    chipPointsChangeEl.textContent = `${chipPointsChange} Chips`;
+                    chipPointsChangeEl.classList.add('chip-points-loss');
+                    chipPointsChangeEl.classList.remove('chip-points-gain');
+                } else {
+                    chipPointsChangeEl.textContent = '0 Chips';
+                    chipPointsChangeEl.classList.remove('chip-points-gain', 'chip-points-loss');
+                }
+            }
+            
+            // Generate and animate rank progress bar
+            generateGameOverRankProgress(currentChipPoints, newChipPoints);
+        }).catch(error => {
+            console.error('Error calculating chip points change:', error);
+        });
+    } else {
+        // Hide chip points change for non-ranked games
         const chipPointsChangeEl = document.getElementById('gameOverChipPoints');
         if (chipPointsChangeEl) {
-            if (chipPointsChange > 0) {
-                chipPointsChangeEl.textContent = `+${chipPointsChange} Chips`;
-                chipPointsChangeEl.classList.add('chip-points-gain');
-                chipPointsChangeEl.classList.remove('chip-points-loss');
-            } else if (chipPointsChange < 0) {
-                chipPointsChangeEl.textContent = `${chipPointsChange} Chips`;
-                chipPointsChangeEl.classList.add('chip-points-loss');
-                chipPointsChangeEl.classList.remove('chip-points-gain');
-            } else {
-                chipPointsChangeEl.textContent = '0 Chips';
-                chipPointsChangeEl.classList.remove('chip-points-gain', 'chip-points-loss');
-            }
+            chipPointsChangeEl.textContent = '';
+            chipPointsChangeEl.classList.remove('chip-points-gain', 'chip-points-loss');
         }
-        
-        // Generate and animate rank progress bar
-        generateGameOverRankProgress(currentChipPoints, newChipPoints);
-    }).catch(error => {
-        console.error('Error calculating chip points change:', error);
-    });
+    }
     
     // Update statistics (async, but don't wait for it)
     updateStats({
@@ -7623,24 +7683,108 @@ function initializeSpectatorView(data) {
         }
     }
     
-    // Hide input controls for spectators
+    // Disable all interactive elements for spectators (but keep them visible to match player view)
     const wordInput = document.getElementById('wordInput');
     const submitBtn = document.getElementById('submitBtn');
     const cardsContainer = document.getElementById('cardsContainer');
     const cardSelectionPanel = document.getElementById('cardSelection');
+    const keyboard = document.getElementById('keyboard');
     
     if (wordInput) {
-        wordInput.style.display = 'none';
         wordInput.disabled = true;
+        wordInput.style.pointerEvents = 'none';
+        wordInput.style.opacity = '0.6';
+        wordInput.placeholder = 'Spectating...';
     }
-    if (submitBtn) submitBtn.style.display = 'none';
-    if (cardsContainer) cardsContainer.style.display = 'none';
-    if (cardSelectionPanel) cardSelectionPanel.style.display = 'none';
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.style.pointerEvents = 'none';
+        submitBtn.style.opacity = '0.6';
+    }
+    if (cardsContainer) {
+        cardsContainer.style.pointerEvents = 'none';
+        cardsContainer.style.opacity = '0.6';
+    }
+    if (cardSelectionPanel) {
+        cardSelectionPanel.style.display = 'none'; // Hide card selection (not part of normal view)
+    }
+    if (keyboard) {
+        // Disable keyboard clicks but keep it visible
+        const keyboardButtons = keyboard.querySelectorAll('button');
+        keyboardButtons.forEach(btn => {
+            btn.disabled = true;
+            btn.style.pointerEvents = 'none';
+            btn.style.opacity = '0.6';
+        });
+    }
     
-    // Also hide hand panel for spectators
+    // Show hand panel for spectators (will be populated when hand is received)
     const handPanel = document.querySelector('.hand-panel');
-    if (handPanel) handPanel.style.display = 'none';
+    if (handPanel) {
+        handPanel.style.display = 'block';
+        // Initialize empty hand for spectator
+        window.spectatedPlayerHand = [];
+        updateSpectatorHandPanel();
+    }
+    
+    // Set currentPlayer to spectated player ID so the view matches exactly
+    if (window.spectatedPlayerId) {
+        currentPlayer = window.spectatedPlayerId;
+    }
 }
+
+// Store spectated player's hand
+window.spectatedPlayerHand = [];
+
+// Update hand panel for spectators
+function updateSpectatorHandPanel() {
+    const handCardsContainer = document.getElementById('handCards');
+    const nextCardContainer = document.getElementById('nextCardContainer');
+    
+    if (!handCardsContainer || !nextCardContainer) {
+        return;
+    }
+    
+    // Clear existing content
+    handCardsContainer.innerHTML = '';
+    
+    // Display spectated player's hand (up to 3 cards)
+    if (window.spectatedPlayerHand && window.spectatedPlayerHand.length > 0) {
+        window.spectatedPlayerHand.slice(0, 3).forEach((card) => {
+            const cardElement = document.createElement('div');
+            cardElement.className = 'hand-card-item';
+            cardElement.style.pointerEvents = 'none'; // Disable interaction
+            cardElement.style.opacity = '0.8'; // Slightly dimmed to show it's not interactive
+            
+            // Create image element for the card
+            const cardImage = document.createElement('img');
+            cardImage.src = getCardImagePath(card.id);
+            cardImage.alt = card.title || 'Unknown Card';
+            cardImage.className = 'hand-card-image';
+            cardElement.appendChild(cardImage);
+            
+            handCardsContainer.appendChild(cardElement);
+        });
+    } else {
+        // Show empty state
+        const emptyState = document.createElement('div');
+        emptyState.className = 'hand-card-item';
+        emptyState.style.opacity = '0.5';
+        emptyState.innerHTML = '<div class="hand-card-description">Loading hand...</div>';
+        handCardsContainer.appendChild(emptyState);
+    }
+    
+    // Don't show next card for spectators (they don't need to know)
+    nextCardContainer.innerHTML = '';
+}
+
+// Listen for spectated player's hand
+socket.on('spectatedPlayerHand', (data) => {
+    if (window.isSpectator && data.gameId === window.spectatorGameId && data.playerId === window.spectatedPlayerId) {
+        window.spectatedPlayerHand = data.cards || [];
+        updateSpectatorHandPanel();
+    }
+});
 
 // Listen for turn changes while spectating (this runs after the main turnChanged handler)
 // We need a separate handler because the main one has an early return for spectators
@@ -7677,6 +7821,27 @@ socket.on('cardPlayed', (data) => {
     if (window.isSpectator && window.spectatorGameId) {
         // Show card splash for spectators too
         queueCardSplash(data.card, data.playerName);
+        
+        // If the spectated player played a card, remove it from their hand and request updated hand
+        if (data.playerId === window.spectatedPlayerId && window.spectatedPlayerHand) {
+            // Remove the played card from hand (find by ID)
+            const cardIndex = window.spectatedPlayerHand.findIndex(c => c.id === data.card.id);
+            if (cardIndex !== -1) {
+                window.spectatedPlayerHand.splice(cardIndex, 1);
+                updateSpectatorHandPanel();
+            }
+            
+            // Request updated hand from spectated player after a short delay (to allow card draw)
+            setTimeout(() => {
+                if (window.isSpectator && window.spectatorGameId && window.spectatedPlayerId) {
+                    // Request hand update through server
+                    socket.emit('requestHandForSpectatorUpdate', {
+                        gameId: window.spectatorGameId,
+                        spectatedPlayerId: window.spectatedPlayerId
+                    });
+                }
+            }, 500);
+        }
     }
 });
 

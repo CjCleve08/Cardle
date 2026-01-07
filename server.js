@@ -1163,7 +1163,7 @@ function botSelectCard(game, botId, botHand) {
 }
 
 // Create a bot game
-function createBotGame(humanSocket, humanName, firebaseUid = null, isTutorial = false) {
+function createBotGame(humanSocket, humanName, firebaseUid = null, isTutorial = false, isRanked = false) {
     const botId = 'BOT_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
     const botName = isTutorial ? 'Bot' : getRandomBotName();
     const gameId = generateGameId();
@@ -1198,7 +1198,8 @@ function createBotGame(humanSocket, humanName, firebaseUid = null, isTutorial = 
         lastPlayedCards: new Map(),
         mirroredCards: new Map(),
         isBotGame: true,
-        isTutorial: isTutorial
+        isTutorial: isTutorial,
+        isRanked: isRanked
     };
     
     games.set(gameId, game);
@@ -1248,7 +1249,8 @@ function createBotGame(humanSocket, humanName, firebaseUid = null, isTutorial = 
             })),
             status: game.status,
             activeEffects: game.activeEffects,
-            totalGuesses: game.totalGuesses
+            totalGuesses: game.totalGuesses,
+            isRanked: game.isRanked || false
         };
         
         console.log('Bot game starting. Players with firebaseUid:', gameStateForClients.players.map(p => ({ name: p.name, firebaseUid: p.firebaseUid })));
@@ -1919,7 +1921,7 @@ io.on('connection', (socket) => {
             matchmakingTimeouts.delete(socket.id);
             
             console.log(`No match found for ${data.playerName}, creating bot game...`);
-            createBotGame(socket, data.playerName, queuedPlayer.firebaseUid || null);
+            createBotGame(socket, data.playerName, queuedPlayer.firebaseUid || null, false, true); // isTutorial=false, isRanked=true
         }, 20000); // 20 second timeout
         
         matchmakingTimeouts.set(socket.id, botTimeout);
@@ -1970,7 +1972,8 @@ io.on('connection', (socket) => {
                 status: 'waiting',
                 totalGuesses: 0,
                 lastPlayedCards: new Map(),  // Track last card played by each player
-                mirroredCards: new Map()  // Track what card each Card Mirror actually mirrored (playerId -> card)
+                mirroredCards: new Map(),  // Track what card each Card Mirror actually mirrored (playerId -> card)
+                isRanked: true  // Games created via findMatch are ranked
             };
             
             games.set(gameId, game);
@@ -2023,7 +2026,8 @@ io.on('connection', (socket) => {
                     })),
                     status: game.status,
                     activeEffects: game.activeEffects,
-                    totalGuesses: game.totalGuesses
+                    totalGuesses: game.totalGuesses,
+                    isRanked: game.isRanked || false
                 };
                 
                 game.players.forEach(player => {
@@ -2191,7 +2195,8 @@ io.on('connection', (socket) => {
                     })),
                     status: game.status,
                     activeEffects: game.activeEffects,
-                    totalGuesses: game.totalGuesses
+                    totalGuesses: game.totalGuesses,
+                    isRanked: game.isRanked || false  // Private games are not ranked
                 };
                 // Send gameStarted to all players, but include each player's own ID
                 game.status = 'playing';
@@ -2321,10 +2326,24 @@ io.on('connection', (socket) => {
             totalGuesses: game.totalGuesses,
             activeEffects: game.activeEffects,
             word: game.word, // Spectators can see the word
-            isSpectator: true
+            isSpectator: true,
+            spectatedPlayerId: game.players[0]?.id || null  // Default to first player
         };
         
         socket.emit('gameStateForSpectator', spectatorGameState);
+        
+        // Request hand from spectated player to send to spectator
+        const spectatedPlayerId = game.players[0]?.id;
+        if (spectatedPlayerId) {
+            const spectatedPlayerSocket = io.sockets.sockets.get(spectatedPlayerId);
+            if (spectatedPlayerSocket) {
+                // Request the spectated player's hand
+                spectatedPlayerSocket.emit('requestHandForSpectator', {
+                    gameId: data.gameId,
+                    spectatorId: socket.id
+                });
+            }
+        }
         
         console.log(`Spectator ${socket.id} (${spectatorName}) joined game ${data.gameId}`);
     });
@@ -2417,7 +2436,8 @@ io.on('connection', (socket) => {
                 totalGuesses: 0,
                 lastPlayedCards: new Map(),
                 mirroredCards: new Map(),
-                spectators: []
+                spectators: [],
+                isRanked: game.isRanked || false  // Preserve ranked status from original game
             };
             
             games.set(newGameId, newGame);
@@ -2469,7 +2489,8 @@ io.on('connection', (socket) => {
                     })),
                     status: newGame.status,
                     activeEffects: newGame.activeEffects,
-                    totalGuesses: newGame.totalGuesses
+                    totalGuesses: newGame.totalGuesses,
+                    isRanked: newGame.isRanked || false
                 };
                 
                 console.log('Rematch game starting. Players with firebaseUid:', gameStateForClients.players.map(p => ({ name: p.name, firebaseUid: p.firebaseUid })));
@@ -3085,6 +3106,36 @@ io.on('connection', (socket) => {
             // Notify the opponent that a card has been blocked (but don't tell them which one)
             socket.emit('cardBlocked', {
                 blockedCardId: blockedCardId
+            });
+        }
+    });
+    
+    socket.on('sendHandForSpectator', (data) => {
+        // Player is sending their hand to a spectator
+        const game = games.get(data.gameId);
+        if (!game) return;
+        
+        const spectatorSocket = io.sockets.sockets.get(data.spectatorId);
+        if (spectatorSocket) {
+            spectatorSocket.emit('spectatedPlayerHand', {
+                gameId: data.gameId,
+                cards: data.cards,
+                playerId: socket.id
+            });
+        }
+    });
+    
+    socket.on('requestHandForSpectatorUpdate', (data) => {
+        // Spectator is requesting an updated hand from the spectated player
+        const game = games.get(data.gameId);
+        if (!game) return;
+        
+        const spectatedPlayerSocket = io.sockets.sockets.get(data.spectatedPlayerId);
+        if (spectatedPlayerSocket) {
+            // Request the spectated player's hand
+            spectatedPlayerSocket.emit('requestHandForSpectator', {
+                gameId: data.gameId,
+                spectatorId: socket.id
             });
         }
     });
@@ -4160,7 +4211,8 @@ io.on('connection', (socket) => {
             status: 'waiting',
             totalGuesses: 0,
             lastPlayedCards: new Map(),
-            mirroredCards: new Map()
+            mirroredCards: new Map(),
+            isRanked: false  // Challenge games are not ranked
         };
         
         games.set(gameId, game);
@@ -4197,7 +4249,8 @@ io.on('connection', (socket) => {
                 })),
                 status: 'playing',
                 activeEffects: game.activeEffects,
-                totalGuesses: game.totalGuesses
+                totalGuesses: game.totalGuesses,
+                isRanked: game.isRanked || false
             };
             
             game.status = 'playing';
