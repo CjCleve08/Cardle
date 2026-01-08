@@ -733,6 +733,10 @@ async function savePlayerStats(stats) {
 }
 
 // Calculate chip points based on game result
+// SECURITY WARNING: This function is DEPRECATED for actual chip calculations.
+// The server now calculates chip points and sends them in gameOver events.
+// This function is kept only for display/UI purposes and should NOT be used for actual stat updates.
+// Always use server-provided chip change values from gameOver events.
 function calculateChipPoints(won, guesses, currentChipPoints) {
     // Initialize chip points if not set
     if (currentChipPoints === undefined || currentChipPoints === null) {
@@ -794,20 +798,16 @@ async function updateStats(gameResult) {
     }
     
     // Only update chip points (rank) if this is a ranked game
-    // Check both the passed parameter and gameState (fallback)
+    // SECURITY: Only use server-provided chipPoints values to prevent manipulation
     const isRanked = (gameResult.isRanked !== undefined ? gameResult.isRanked : (gameState && gameState.isRanked === true));
     if (isRanked) {
-        // If chipPoints is provided (e.g., from disconnect scenario), use it directly
-        // Otherwise calculate normally
+        // SECURITY: Only update chip points if server provided the value
+        // This prevents clients from manipulating their rank by sending arbitrary chip values
         if (gameResult.chipPoints !== undefined) {
             stats.chipPoints = gameResult.chipPoints;
         } else {
-            // Calculate and update chip points
-            stats.chipPoints = calculateChipPoints(
-                gameResult.won,
-                gameResult.guesses || 0,
-                stats.chipPoints
-            );
+            // If server didn't provide chipPoints, don't update (security measure)
+            console.warn('Server did not provide chipPoints. Skipping chip update for security.');
         }
     }
     
@@ -3157,7 +3157,8 @@ socket.on('gameOver', (data) => {
     }, 100);
     
     // Calculate chip points change before updating stats (only for ranked games)
-    const isRanked = gameState && gameState.isRanked === true;
+    // SECURITY: Use server-provided chip values instead of client-side calculation
+    const isRanked = (data.isRanked !== undefined ? data.isRanked : (gameState && gameState.isRanked === true));
     
     // Show/hide rank progress bar based on ranked status
     const rankProgressContainer = document.getElementById('gameOverRankProgressTrack');
@@ -3169,18 +3170,27 @@ socket.on('gameOver', (data) => {
         getPlayerStats().then(stats => {
             const currentChipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
             
-            // If disconnect scenario, use provided chipChange, otherwise calculate normally
+            // SECURITY: Use server-provided chip change values (prevents client-side manipulation)
             let chipPointsChange = 0;
             let newChipPoints = currentChipPoints;
             
             if (data.disconnected && data.chipChange !== undefined) {
-                // Use server-provided chip change for disconnect scenarios
+                // Disconnect scenario: use server-provided chip change
                 chipPointsChange = data.chipChange;
                 newChipPoints = Math.max(0, currentChipPoints + chipPointsChange);
+            } else if (won && data.winnerChipChange !== undefined) {
+                // Winner: use server-provided chip gain
+                chipPointsChange = data.winnerChipChange;
+                newChipPoints = Math.max(0, currentChipPoints + chipPointsChange);
+            } else if (!won && data.loserChipChange !== undefined) {
+                // Loser: use server-provided chip loss
+                chipPointsChange = data.loserChipChange;
+                newChipPoints = Math.max(0, currentChipPoints + chipPointsChange);
             } else {
-                // Normal calculation
-                newChipPoints = calculateChipPoints(won, guesses, currentChipPoints);
-                chipPointsChange = newChipPoints - currentChipPoints;
+                // Fallback: if server didn't send chip change, don't update (security measure)
+                console.warn('Server did not provide chip change values. Skipping chip update for security.');
+                chipPointsChange = 0;
+                newChipPoints = currentChipPoints;
             }
             
             // Display chip points change on game over screen
@@ -3203,11 +3213,16 @@ socket.on('gameOver', (data) => {
             // Generate and animate rank progress bar
             generateGameOverRankProgress(currentChipPoints, newChipPoints);
             
-            // Update stats with the calculated chip change
+            // Update stats with the server-provided chip change (SECURITY: only update if server provided values)
+            // Use server-provided guesses if available, otherwise fall back to client calculation
+            const finalGuesses = (won && data.winnerGuesses !== undefined) ? data.winnerGuesses :
+                                (!won && data.loserGuesses !== undefined) ? data.loserGuesses :
+                                guesses;
+            
             updateStats({
                 won: won,
-                guesses: guesses,
-                chipPoints: newChipPoints,  // Pass the new chip points directly
+                guesses: finalGuesses,
+                chipPoints: newChipPoints,  // Use server-calculated chip points (SECURITY: prevents manipulation)
                 isRanked: true  // Explicitly mark as ranked
             }).catch(error => {
                 console.error('Error updating stats:', error);

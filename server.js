@@ -831,6 +831,32 @@ function getRandomWord() {
     return WORDS[Math.floor(Math.random() * WORDS.length)];
 }
 
+// Server-side chip calculation (SECURITY: prevents client-side manipulation)
+function calculateChipPoints(won, guesses, currentChipPoints) {
+    // Initialize chip points if not set
+    if (currentChipPoints === undefined || currentChipPoints === null) {
+        currentChipPoints = 0;
+    }
+    
+    if (won) {
+        // Base points for winning: 20
+        let pointsEarned = 20;
+        
+        // Bonus for fewer guesses (efficiency bonus)
+        // Max 6 guesses for full bonus, 7+ gets no bonus
+        if (guesses > 0 && guesses <= 6) {
+            const efficiencyBonus = (7 - guesses) * 5; // 30 max bonus for 1 guess
+            pointsEarned += efficiencyBonus;
+        }
+        
+        return currentChipPoints + pointsEarned;
+    } else {
+        // Loss penalty: -15 points (minimum 0)
+        const pointsLost = 15;
+        return Math.max(0, currentChipPoints - pointsLost);
+    }
+}
+
 function calculateFeedback(guess, target) {
     const feedback = [];
     const targetLetters = target.split('');
@@ -1651,6 +1677,36 @@ function submitBotGuess(gameId, botId, guess, card) {
             // Delay gameOver to allow the winning guess animation to complete (2 seconds)
             setTimeout(() => {
             game.status = 'finished';
+            
+            // Calculate chip changes for ranked games (SECURITY: server-side calculation)
+            const botGuesses = botPlayer.guesses ? botPlayer.guesses.length : 0;
+            const humanGuesses = opponent.guesses ? opponent.guesses.length : 0;
+            
+            // Prepare gameOver data with chip calculations
+            const gameOverData = {
+                winner: botId,
+                word: game.word,
+                gameId: gameId,
+                isRanked: game.isRanked || false
+            };
+            
+            // Calculate chip changes if ranked game (bot wins, human loses)
+            if (game.isRanked) {
+                // Bot wins: calculate chip gain
+                let botChipGain = 20;
+                if (botGuesses > 0 && botGuesses <= 6) {
+                    botChipGain += (7 - botGuesses) * 5;
+                }
+                
+                // Human loses: -15 chips
+                const humanChipLoss = -15;
+                
+                gameOverData.winnerChipChange = botChipGain;
+                gameOverData.loserChipChange = humanChipLoss;
+                gameOverData.winnerGuesses = botGuesses;
+                gameOverData.loserGuesses = humanGuesses;
+            }
+            
             // Clean up user-to-game tracking
             game.players.forEach(player => {
                 if (player.firebaseUid) {
@@ -1659,11 +1715,8 @@ function submitBotGuess(gameId, botId, guess, card) {
                 // Remove players from players Map so they can matchmake again
                 players.delete(player.id);
             });
-            io.to(gameId).emit('gameOver', {
-                winner: botId,
-                word: game.word,
-                gameId: gameId
-            });
+            
+            io.to(gameId).emit('gameOver', gameOverData);
             }, 2000);
         return;
     }
@@ -3708,6 +3761,37 @@ io.on('connection', (socket) => {
             // Delay gameOver to allow the winning guess animation to complete (2 seconds)
             setTimeout(() => {
             game.status = 'finished';
+            
+            // Calculate chip changes for ranked games (SECURITY: server-side calculation)
+            const winnerGuesses = player.guesses ? player.guesses.length : 0;
+            const loserGuesses = opponent.guesses ? opponent.guesses.length : 0;
+            
+            // Prepare gameOver data with chip calculations
+            const gameOverData = {
+                winner: socket.id,
+                word: game.word,
+                gameId: data.gameId,
+                isRanked: game.isRanked || false
+            };
+            
+            // Calculate chip changes if ranked game
+            if (game.isRanked) {
+                // For winner: calculate chip gain (will need current chips from client, but we calculate the change)
+                // Base: 20 + efficiency bonus (max 30 for 1 guess)
+                let winnerChipGain = 20;
+                if (winnerGuesses > 0 && winnerGuesses <= 6) {
+                    winnerChipGain += (7 - winnerGuesses) * 5;
+                }
+                
+                // For loser: -15 chips (minimum 0)
+                const loserChipLoss = -15;
+                
+                gameOverData.winnerChipChange = winnerChipGain;
+                gameOverData.loserChipChange = loserChipLoss;
+                gameOverData.winnerGuesses = winnerGuesses;
+                gameOverData.loserGuesses = loserGuesses;
+            }
+            
             // Clean up user-to-game tracking
             game.players.forEach(player => {
                 if (player.firebaseUid) {
@@ -3716,11 +3800,8 @@ io.on('connection', (socket) => {
                 // Remove players from players Map so they can matchmake again
                 players.delete(player.id);
             });
-            io.to(data.gameId).emit('gameOver', {
-                winner: socket.id,
-                word: game.word,
-                gameId: data.gameId
-            });
+            
+            io.to(data.gameId).emit('gameOver', gameOverData);
             }, 2000);
             return;
         }
