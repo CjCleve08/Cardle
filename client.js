@@ -7083,7 +7083,8 @@ async function loadFriends() {
                     return {
                         ...friend,
                         name: userDoc.data().displayName || 'Unknown',
-                        email: userDoc.data().email || ''
+                        email: userDoc.data().email || '',
+                        photoURL: userDoc.data().photoURL || null
                     };
                 }
                 return friend;
@@ -7101,7 +7102,8 @@ async function loadFriends() {
                     return {
                         ...request,
                         senderName: userDoc.data().displayName || 'Unknown',
-                        senderEmail: userDoc.data().email || ''
+                        senderEmail: userDoc.data().email || '',
+                        senderPhotoURL: userDoc.data().photoURL || null
                     };
                 }
                 return request;
@@ -7268,9 +7270,13 @@ function renderFriendsList(friends) {
     
     friendsList.innerHTML = friends.map(friend => {
         const isActive = friendsActivityStatus[friend.id]?.isActive || false;
+        const avatarInitial = friend.name ? friend.name.charAt(0).toUpperCase() : '👤';
+        const avatarStyle = friend.photoURL 
+            ? `background-image: url(${friend.photoURL}); background-size: cover; background-position: center;` 
+            : '';
         return `
         <div class="friend-item" data-friend-id="${friend.id || ''}" data-friend-name="${friend.name || 'Unknown'}" data-friend-email="${friend.email || ''}">
-            <div class="friend-avatar">${friend.name ? friend.name.charAt(0).toUpperCase() : '👤'}</div>
+            <div class="friend-avatar" style="${avatarStyle}">${friend.photoURL ? '' : avatarInitial}</div>
             <div class="friend-info">
                 <div class="friend-name-container">
                     <div class="friend-name">${friend.name || 'Unknown'}</div>
@@ -7316,9 +7322,14 @@ function renderFriendRequests(requests) {
         return;
     }
     
-    requestsList.innerHTML = requests.map(request => `
+    requestsList.innerHTML = requests.map(request => {
+        const avatarInitial = request.senderName ? request.senderName.charAt(0).toUpperCase() : '👤';
+        const avatarStyle = request.senderPhotoURL 
+            ? `background-image: url(${request.senderPhotoURL}); background-size: cover; background-position: center;` 
+            : '';
+        return `
         <div class="friend-item">
-            <div class="friend-avatar">${request.senderName ? request.senderName.charAt(0).toUpperCase() : '👤'}</div>
+            <div class="friend-avatar" style="${avatarStyle}">${request.senderPhotoURL ? '' : avatarInitial}</div>
             <div class="friend-info">
                 <div class="friend-name">${request.senderName || 'Unknown'}</div>
                 <div class="friend-status">${request.senderEmail || ''}</div>
@@ -7334,7 +7345,8 @@ function renderFriendRequests(requests) {
                 </button>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 // Fetch friend stats from Firestore
@@ -7687,7 +7699,10 @@ function showSearchResults(users) {
         };
     })).then(usersWithStatus => {
         searchResultsList.innerHTML = usersWithStatus.map(user => {
-            const avatarText = user.displayName ? user.displayName.charAt(0).toUpperCase() : '👤';
+            const avatarInitial = user.displayName ? user.displayName.charAt(0).toUpperCase() : '👤';
+            const avatarStyle = user.photoURL 
+                ? `background-image: url(${user.photoURL}); background-size: cover; background-position: center;` 
+                : '';
             let actionButton = '';
             
             if (user.relationshipStatus === 'friends') {
@@ -7703,7 +7718,7 @@ function showSearchResults(users) {
             
             return `
                 <div class="friend-search-result-item">
-                    <div class="friend-avatar">${avatarText}</div>
+                    <div class="friend-avatar" style="${avatarStyle}">${user.photoURL ? '' : avatarInitial}</div>
                     <div class="friend-info">
                         <div class="friend-name">${user.displayName || 'Unknown'}</div>
                         <div class="friend-status">${user.email || ''}</div>
