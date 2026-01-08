@@ -511,6 +511,70 @@
                         </div>
                     </div>
                     
+                    <!-- Community Tab -->
+                    <div id="communityTab" class="tab-panel">
+                        <div class="tab-panel-inner">
+                            <h2 class="tab-panel-title">Community</h2>
+                            
+                            <!-- Community Header -->
+                            <div class="community-header">
+                                <div class="community-header-actions">
+                                    <button id="createPostBtn" class="btn btn-primary">
+                                        <span class="btn-icon">✏️</span>
+                                        <span>Create Post</span>
+                                    </button>
+                                </div>
+                                <div class="community-category-filter">
+                                    <button class="category-filter-btn active" data-category="all">
+                                        <span>All</span>
+                                    </button>
+                                    <button class="category-filter-btn" data-category="fixes">
+                                        <span>🔧 Fixes</span>
+                                    </button>
+                                    <button class="category-filter-btn" data-category="cards">
+                                        <span>🃏 Cards</span>
+                                    </button>
+                                    <button class="category-filter-btn" data-category="ideas">
+                                        <span>💡 Game Ideas</span>
+                                    </button>
+                                    <button class="category-filter-btn" data-category="feedback">
+                                        <span>💬 Feedback</span>
+                                    </button>
+                                    <button class="category-filter-btn" data-category="general">
+                                        <span>💭 General</span>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Bulletin Board Section (Creator Posts) -->
+                            <div class="community-section bulletin-section">
+                                <div class="community-section-header">
+                                    <h3 class="community-section-title">
+                                        <span class="section-icon">📌</span>
+                                        <span>Bulletin Board</span>
+                                        <span class="section-subtitle">Official Updates from the Creator</span>
+                                    </h3>
+                                </div>
+                                <div id="bulletinBoardPosts" class="community-posts-list">
+                                    <div class="community-loading">Loading bulletin board...</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Community Posts Section -->
+                            <div class="community-section">
+                                <div class="community-section-header">
+                                    <h3 class="community-section-title">
+                                        <span class="section-icon">💬</span>
+                                        <span>Community Posts</span>
+                                    </h3>
+                                </div>
+                                <div id="communityPostsList" class="community-posts-list">
+                                    <div class="community-loading">Loading posts...</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <!-- Settings Tab -->
                     <div id="settingsTab" class="tab-panel">
                         <div class="tab-panel-inner">
@@ -558,24 +622,34 @@
                         </div>
                         <span class="tab-label">Friends</span>
                     </button>
-                    <button class="lobby-tab" data-tab="leaderboard">
+                    <button class="lobby-tab" data-tab="community">
                         <div class="tab-icon-wrapper">
-                            <span class="tab-icon">🏆</span>
+                            <span class="tab-icon">💬</span>
                         </div>
-                        <span class="tab-label">Leaderboard</span>
+                        <span class="tab-label">Community</span>
                     </button>
-                    <button class="lobby-tab" data-tab="profile">
-                        <div class="tab-icon-wrapper">
-                            <span class="tab-icon">👤</span>
+                    <div class="lobby-tab-more-container">
+                        <button class="lobby-tab lobby-tab-more" id="moreTabBtn">
+                            <div class="tab-icon-wrapper">
+                                <span class="tab-icon">⋯</span>
+                            </div>
+                            <span class="tab-label">More</span>
+                        </button>
+                        <div id="moreTabMenu" class="more-tab-menu" style="display: none;">
+                            <button class="more-tab-item" data-tab="leaderboard">
+                                <span class="more-tab-icon">🏆</span>
+                                <span class="more-tab-label">Leaderboard</span>
+                            </button>
+                            <button class="more-tab-item" data-tab="profile">
+                                <span class="more-tab-icon">👤</span>
+                                <span class="more-tab-label">Profile</span>
+                            </button>
+                            <button class="more-tab-item" data-tab="settings">
+                                <span class="more-tab-icon">⚙️</span>
+                                <span class="more-tab-label">Settings</span>
+                            </button>
                         </div>
-                        <span class="tab-label">Profile</span>
-                    </button>
-                    <button class="lobby-tab" data-tab="settings">
-                        <div class="tab-icon-wrapper">
-                            <span class="tab-icon">⚙️</span>
-                        </div>
-                        <span class="tab-label">Settings</span>
-                    </button>
+                    </div>
                 </div>
                 
                 <!-- Help Overlay -->
@@ -1025,6 +1099,67 @@
         <div class="card-info-content">
             <button class="card-info-close" id="cardInfoClose">×</button>
             <img id="cardInfoImage" class="card-info-image" src="" alt="Card">
+        </div>
+    </div>
+    
+    <!-- Create Post Modal -->
+    <div id="createPostModal" class="community-modal-overlay" style="display: none;">
+        <div class="community-modal">
+            <div class="community-modal-header">
+                <h3>Create New Post</h3>
+                <button class="community-modal-close" id="closeCreatePostModal">×</button>
+            </div>
+            <div class="community-modal-content">
+                <div class="input-group">
+                    <label for="postTitleInput" class="input-label">Title</label>
+                    <input type="text" id="postTitleInput" class="input-field" placeholder="Enter post title" maxlength="100">
+                </div>
+                <div class="input-group">
+                    <label for="postCategorySelect" class="input-label">Category</label>
+                    <select id="postCategorySelect" class="input-field">
+                        <option value="fixes">🔧 Fixes</option>
+                        <option value="cards">🃏 Cards</option>
+                        <option value="ideas">💡 Game Ideas</option>
+                        <option value="feedback">💬 Feedback</option>
+                        <option value="general">💭 General</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="postContentInput" class="input-label">Content</label>
+                    <textarea id="postContentInput" class="input-field textarea-field" placeholder="Share your thoughts..." maxlength="2000" rows="8"></textarea>
+                </div>
+                <div id="createPostError" class="error-message" style="display: none;"></div>
+                <div class="community-modal-actions">
+                    <button id="submitPostBtn" class="btn btn-primary">
+                        <span class="btn-icon">✓</span>
+                        <span>Post</span>
+                    </button>
+                    <button id="cancelPostBtn" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Post Detail Modal -->
+    <div id="postDetailModal" class="community-modal-overlay" style="display: none;">
+        <div class="community-modal community-modal-large">
+            <div class="community-modal-header">
+                <h3 id="postDetailTitle"></h3>
+                <button class="community-modal-close" id="closePostDetailModal">×</button>
+            </div>
+            <div class="community-modal-content">
+                <div id="postDetailContent"></div>
+                <div id="postDetailComments" class="post-comments-section">
+                    <h4>Comments</h4>
+                    <div id="postCommentsList" class="comments-list"></div>
+                    <div class="comment-input-section">
+                        <textarea id="newCommentInput" class="input-field textarea-field" placeholder="Write a comment..." maxlength="500" rows="3"></textarea>
+                        <button id="submitCommentBtn" class="btn btn-primary btn-small">
+                            <span>Comment</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

@@ -6630,6 +6630,41 @@ document.getElementById('joinGameBtn').addEventListener('click', () => {
     document.getElementById('joinGroup').style.display = 'block';
 });
 
+// More tab menu functionality
+let moreTabMenuOpen = false;
+
+function updateMoreMenuActiveState() {
+    const moreMenuItems = document.querySelectorAll('.more-tab-item');
+    moreMenuItems.forEach(item => {
+        const tabName = item.getAttribute('data-tab');
+        const tabPanel = document.getElementById(`${tabName}Tab`);
+        if (tabPanel && tabPanel.classList.contains('active')) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
+}
+
+function toggleMoreTabMenu() {
+    const moreMenu = document.getElementById('moreTabMenu');
+    if (!moreMenu) return;
+    
+    moreTabMenuOpen = !moreTabMenuOpen;
+    moreMenu.style.display = moreTabMenuOpen ? 'block' : 'none';
+    
+    // Update active state of items in more menu
+    updateMoreMenuActiveState();
+}
+
+function closeMoreTabMenu() {
+    const moreMenu = document.getElementById('moreTabMenu');
+    if (!moreMenu) return;
+    
+    moreTabMenuOpen = false;
+    moreMenu.style.display = 'none';
+}
+
 // Tab switching functionality
 function switchTab(tabName) {
     // Remove active class from all tabs and panels
@@ -6641,11 +6676,14 @@ function switchTab(tabName) {
     });
     
     // Add active class to selected tab and panel
-    const selectedTab = document.querySelector(`[data-tab="${tabName}"]`);
+    const selectedTab = document.querySelector(`.lobby-tab[data-tab="${tabName}"]`);
     const selectedPanel = document.getElementById(`${tabName}Tab`);
     
     if (selectedTab) selectedTab.classList.add('active');
     if (selectedPanel) selectedPanel.classList.add('active');
+    
+    // Update active state in more menu
+    updateMoreMenuActiveState();
     
     // If switching to deck tab, initialize deck builder
     if (tabName === 'deck') {
@@ -6671,6 +6709,11 @@ function switchTab(tabName) {
     // If switching to settings tab, initialize settings
     if (tabName === 'settings') {
         initializeSettings();
+    }
+    
+    // If switching to community tab, load community posts
+    if (tabName === 'community') {
+        loadCommunityPosts();
     }
     
     // If switching to friends tab, load friends and check game status
@@ -6921,10 +6964,43 @@ function updateDeckCount() {
 }
 
 // Tab switching event listeners
-document.querySelectorAll('.lobby-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-        const tabName = tab.getAttribute('data-tab');
-        switchTab(tabName);
+document.addEventListener('DOMContentLoaded', () => {
+    // Main tab buttons
+    document.querySelectorAll('.lobby-tab[data-tab]').forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tabName = tab.getAttribute('data-tab');
+            switchTab(tabName);
+            // Close more menu if open
+            closeMoreTabMenu();
+        });
+    });
+    
+    // More tab button click handler
+    const moreTabBtn = document.getElementById('moreTabBtn');
+    if (moreTabBtn) {
+        moreTabBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleMoreTabMenu();
+        });
+    }
+    
+    // More menu item click handlers
+    document.querySelectorAll('.more-tab-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tabName = item.getAttribute('data-tab');
+            switchTab(tabName);
+            closeMoreTabMenu();
+        });
+    });
+    
+    // Close more menu when clicking outside
+    document.addEventListener('click', (e) => {
+        const moreContainer = document.querySelector('.lobby-tab-more-container');
+        if (moreContainer && !moreContainer.contains(e.target)) {
+            closeMoreTabMenu();
+        }
     });
 });
 
@@ -9559,4 +9635,845 @@ async function handleFileUpload(file) {
         }
     }
 }
+
+// Community functionality
+// Creator identifier - can be email or Firebase UID
+let currentCommunityCategory = 'all';
+let currentPostDetailId = null;
+
+// Check if current user is the creator
+function isCreator() {
+    if (!currentUser) return false;
+    const email = currentUser.email?.toLowerCase() || '';
+    // Only cjcleve2008@gmail.com is the creator
+    return email === 'cjcleve2008@gmail.com';
+}
+
+// Load community posts
+async function loadCommunityPosts() {
+    if (!window.firebaseDb || !currentUser) {
+        console.log('User not authenticated or Firebase not available');
+        return;
+    }
+    
+    const bulletinPostsList = document.getElementById('bulletinBoardPosts');
+    const communityPostsList = document.getElementById('communityPostsList');
+    
+    if (!bulletinPostsList || !communityPostsList) return;
+    
+    // Show loading state
+    bulletinPostsList.innerHTML = '<div class="community-loading">Loading bulletin board...</div>';
+    communityPostsList.innerHTML = '<div class="community-loading">Loading posts...</div>';
+    
+    try {
+        // Load all posts and filter/sort client-side to avoid composite index requirements
+        // Use a simple query without orderBy first, then sort client-side
+        // This avoids needing any indexes
+        let allPostsSnapshot;
+        try {
+            // Try with orderBy first (more efficient if index exists)
+            const allPostsQuery = window.firebaseDb.collection('communityPosts')
+                .orderBy('createdAt', 'desc')
+                .limit(200);
+            allPostsSnapshot = await allPostsQuery.get();
+        } catch (indexError) {
+            // If index doesn't exist, load all posts without orderBy and sort client-side
+            console.log('Index not found, loading all posts and sorting client-side');
+            const allPostsQuery = window.firebaseDb.collection('communityPosts')
+                .limit(500);
+            allPostsSnapshot = await allPostsQuery.get();
+        }
+        
+        // Separate bulletin and community posts
+        const bulletinPosts = [];
+        const communityPosts = [];
+        
+        for (const doc of allPostsSnapshot.docs) {
+            const data = doc.data();
+            const authorInfo = await getUserInfo(data.authorId);
+            
+            const postData = {
+                id: doc.id,
+                ...data,
+                authorName: authorInfo.name,
+                authorPhotoURL: authorInfo.photoURL
+            };
+            
+            // Separate bulletin posts from community posts
+            if (data.isBulletin === true) {
+                bulletinPosts.push(postData);
+            } else {
+                // Filter by category client-side if not 'all'
+                if (currentCommunityCategory === 'all' || data.category === currentCommunityCategory) {
+                    communityPosts.push(postData);
+                }
+            }
+        }
+        
+        // Sort both arrays by createdAt (most recent first) - always sort client-side to ensure proper ordering
+        bulletinPosts.sort((a, b) => {
+            const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+            const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+            return bTime.getTime() - aTime.getTime();
+        });
+        
+        communityPosts.sort((a, b) => {
+            const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+            const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+            return bTime.getTime() - aTime.getTime();
+        });
+        
+        // Limit bulletin posts to 10 most recent
+        const limitedBulletinPosts = bulletinPosts.slice(0, 10);
+        
+        renderPosts(limitedBulletinPosts, bulletinPostsList, true);
+        renderPosts(communityPosts, communityPostsList, false);
+        
+    } catch (error) {
+        console.error('Error loading community posts:', error);
+        bulletinPostsList.innerHTML = '<div class="empty-state"><div class="empty-state-text">Error loading posts</div></div>';
+        communityPostsList.innerHTML = '<div class="empty-state"><div class="empty-state-text">Error loading posts</div></div>';
+    }
+}
+
+// Get user info helper
+async function getUserInfo(userId) {
+    try {
+        if (!userId || !window.firebaseDb) {
+            return { name: 'Unknown', photoURL: null };
+        }
+        const userDoc = await window.firebaseDb.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+            const data = userDoc.data();
+            return {
+                name: data.displayName || 'Unknown',
+                photoURL: data.photoURL || null
+            };
+        }
+    } catch (error) {
+        console.error('Error fetching user info:', error);
+    }
+    return { name: 'Unknown', photoURL: null };
+}
+
+// Render posts
+function renderPosts(posts, container, isBulletin) {
+    if (!container) return;
+    
+    if (posts.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💭</div><div class="empty-state-text">No posts yet</div></div>';
+        return;
+    }
+    
+    container.innerHTML = posts.map(post => {
+        const timeAgo = formatTimeAgo(post.createdAt?.toDate?.() || new Date(post.createdAt));
+        const authorInitial = post.authorName ? post.authorName.charAt(0).toUpperCase() : '?';
+        const avatarStyle = post.authorPhotoURL 
+            ? `background-image: url(${post.authorPhotoURL}); background-size: cover; background-position: center;` 
+            : '';
+        const isBulletinPost = post.isBulletin || isBulletin;
+        
+        return `
+            <div class="community-post ${isBulletinPost ? 'bulletin-post' : ''}" data-post-id="${post.id}" onclick="openPostDetail('${post.id}', event)">
+                <div class="post-header">
+                    <div class="post-author-avatar ${isBulletinPost ? 'bulletin' : ''}" style="${avatarStyle}">${post.authorPhotoURL ? '' : authorInitial}</div>
+                    <div class="post-header-info">
+                        <div class="post-author-name ${isBulletinPost ? 'bulletin' : ''}">${escapeHtml(post.authorName || 'Unknown')}</div>
+                        <div class="post-meta">
+                            <span class="post-category ${isBulletinPost ? 'bulletin' : ''}">${getCategoryDisplayName(post.category || 'general')}</span>
+                            <span class="post-time">${timeAgo}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="post-title">${escapeHtml(post.title || 'Untitled')}</div>
+                <div class="post-content">${escapeHtml(post.content || '')}</div>
+                <div class="post-footer">
+                    <div class="post-actions">
+                        <button class="post-action like-action ${post.likedBy && post.likedBy.includes(currentUser?.uid) ? 'liked' : ''}" 
+                                onclick="likePost('${post.id}', event)" data-likes="${post.likes || 0}">
+                            <span class="post-action-icon">${post.likedBy && post.likedBy.includes(currentUser?.uid) ? '❤️' : '🤍'}</span>
+                            <span>${post.likes || 0}</span>
+                        </button>
+                        <button class="post-action comment-action" onclick="openPostDetail('${post.id}', event)">
+                            <span class="post-action-icon">💬</span>
+                            <span>${post.commentCount || 0}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Format time ago
+function formatTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    const weeks = Math.floor(days / 7);
+    if (weeks < 4) return `${weeks}w ago`;
+    const months = Math.floor(days / 30);
+    return `${months}mo ago`;
+}
+
+// Get category display name
+function getCategoryDisplayName(category) {
+    const categories = {
+        'bulletin': '📌 Bulletin Board',
+        'fixes': '🔧 Fixes',
+        'cards': '🃏 Cards',
+        'ideas': '💡 Game Ideas',
+        'feedback': '💬 Feedback',
+        'general': '💭 General'
+    };
+    return categories[category] || category;
+}
+
+// Escape HTML helper
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Create post
+async function createPost(title, content, category) {
+    if (!window.firebaseDb || !currentUser) {
+        console.error('User not authenticated or Firebase not available');
+        const errorEl = document.getElementById('createPostError');
+        if (errorEl) {
+            errorEl.textContent = 'Please sign in to create a post';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+    
+    if (!title.trim() || !content.trim()) {
+        const errorEl = document.getElementById('createPostError');
+        if (errorEl) {
+            errorEl.textContent = 'Title and content are required';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+    
+    // Prevent non-creators from posting to bulletin
+    if (category === 'bulletin' && !isCreator()) {
+        const errorEl = document.getElementById('createPostError');
+        if (errorEl) {
+            errorEl.textContent = 'Only the creator can post to the bulletin board';
+            errorEl.style.display = 'block';
+        }
+        return;
+    }
+    
+    try {
+        // Determine if this is a bulletin post (creator only, and category must be 'bulletin')
+        const isBulletin = category === 'bulletin' && isCreator();
+        
+        // Get user info
+        const userDoc = await window.firebaseDb.collection('users').doc(currentUser.uid).get();
+        const userData = userDoc.exists ? userDoc.data() : {};
+        
+        const postData = {
+            title: title.trim(),
+            content: content.trim(),
+            category: category, // Keep the selected category
+            authorId: currentUser.uid,
+            authorName: userData.displayName || currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
+            isBulletin: isBulletin, // Set to true if creator selected bulletin
+            likes: 0,
+            likedBy: [],
+            commentCount: 0,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        await window.firebaseDb.collection('communityPosts').add(postData);
+        
+        // Close modal and reload posts
+        closeCreatePostModal();
+        loadCommunityPosts();
+        
+    } catch (error) {
+        console.error('Error creating post:', error);
+        const errorEl = document.getElementById('createPostError');
+        if (errorEl) {
+            errorEl.textContent = 'Failed to create post. Please try again.';
+            errorEl.style.display = 'block';
+        }
+    }
+}
+
+// Like/unlike post
+async function likePost(postId, event) {
+    event.stopPropagation();
+    
+    if (!window.firebaseDb || !currentUser) {
+        console.error('User not authenticated or Firebase not available');
+        return;
+    }
+    
+    try {
+        const postRef = window.firebaseDb.collection('communityPosts').doc(postId);
+        const postDoc = await postRef.get();
+        
+        if (!postDoc.exists) {
+            console.error('Post not found');
+            return;
+        }
+        
+        const postData = postDoc.data();
+        const likedBy = postData.likedBy || [];
+        const isLiked = likedBy.includes(currentUser.uid);
+        
+        if (isLiked) {
+            // Unlike
+            await postRef.update({
+                likes: firebase.firestore.FieldValue.increment(-1),
+                likedBy: firebase.firestore.FieldValue.arrayRemove(currentUser.uid)
+            });
+        } else {
+            // Like
+            await postRef.update({
+                likes: firebase.firestore.FieldValue.increment(1),
+                likedBy: firebase.firestore.FieldValue.arrayUnion(currentUser.uid)
+            });
+        }
+        
+        // Reload posts to update UI
+        loadCommunityPosts();
+        
+        // If post detail is open, reload it
+        if (currentPostDetailId === postId) {
+            openPostDetail(postId, event);
+        }
+        
+    } catch (error) {
+        console.error('Error liking post:', error);
+    }
+}
+
+// Open post detail modal
+async function openPostDetail(postId, event) {
+    if (event) event.stopPropagation();
+    
+    if (!window.firebaseDb || !currentUser) {
+        console.error('User not authenticated or Firebase not available');
+        return;
+    }
+    
+    currentPostDetailId = postId;
+    
+    const modal = document.getElementById('postDetailModal');
+    const titleEl = document.getElementById('postDetailTitle');
+    const contentEl = document.getElementById('postDetailContent');
+    const commentsListEl = document.getElementById('postCommentsList');
+    
+    if (!modal || !titleEl || !contentEl || !commentsListEl) return;
+    
+    try {
+        // Load post data
+        const postDoc = await window.firebaseDb.collection('communityPosts').doc(postId).get();
+        
+        if (!postDoc.exists) {
+            console.error('Post not found');
+            return;
+        }
+        
+        const postData = postDoc.data();
+        const authorInfo = await getUserInfo(postData.authorId);
+        const timeAgo = formatTimeAgo(postData.createdAt?.toDate?.() || new Date(postData.createdAt));
+        const isBulletinPost = postData.isBulletin;
+        
+        // Render post detail header
+        const authorInitial = authorInfo.name ? authorInfo.name.charAt(0).toUpperCase() : '?';
+        const avatarStyle = authorInfo.photoURL 
+            ? `background-image: url(${authorInfo.photoURL}); background-size: cover; background-position: center;` 
+            : '';
+        
+        // Check if current user is the post author (for delete button)
+        const isPostAuthor = postData.authorId === currentUser.uid;
+        
+        titleEl.innerHTML = `
+            <div class="post-detail-header">
+                <div class="post-header">
+                    <div class="post-author-avatar ${isBulletinPost ? 'bulletin' : ''}" style="${avatarStyle}">${authorInfo.photoURL ? '' : authorInitial}</div>
+                    <div class="post-header-info">
+                        <div class="post-author-name ${isBulletinPost ? 'bulletin' : ''}">${escapeHtml(authorInfo.name)}</div>
+                        <div class="post-meta">
+                            <span class="post-category ${isBulletinPost ? 'bulletin' : ''}">${getCategoryDisplayName(postData.category || 'general')}</span>
+                            <span class="post-time">${timeAgo}</span>
+                        </div>
+                    </div>
+                    ${isPostAuthor ? `
+                    <button class="post-delete-btn" onclick="deletePost('${postId}', event)" title="Delete Post">
+                        <span class="post-delete-icon">🗑️</span>
+                    </button>
+                    ` : ''}
+                </div>
+                <div class="post-title" style="margin-top: 16px;">${escapeHtml(postData.title || 'Untitled')}</div>
+            </div>
+        `;
+        
+        contentEl.innerHTML = `
+            <div class="post-detail-content">${escapeHtml(postData.content || '').replace(/\n/g, '<br>')}</div>
+            <div class="post-footer">
+                <div class="post-actions">
+                    <button class="post-action like-action ${postData.likedBy && postData.likedBy.includes(currentUser.uid) ? 'liked' : ''}" 
+                            onclick="likePost('${postId}', event)" data-likes="${postData.likes || 0}">
+                        <span class="post-action-icon">${postData.likedBy && postData.likedBy.includes(currentUser.uid) ? '❤️' : '🤍'}</span>
+                        <span>${postData.likes || 0}</span>
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // Clear comment input
+        const commentInput = document.getElementById('newCommentInput');
+        if (commentInput) commentInput.value = '';
+        
+        // Load comments
+        await loadComments(postId);
+        
+        // Show modal
+        modal.style.display = 'flex';
+        
+    } catch (error) {
+        console.error('Error loading post detail:', error);
+    }
+}
+
+// Load comments for a post
+async function loadComments(postId) {
+    const commentsListEl = document.getElementById('postCommentsList');
+    if (!commentsListEl || !window.firebaseDb) return;
+    
+    try {
+        // Try with orderBy first, fallback to no orderBy if index doesn't exist
+        let commentsSnapshot;
+        try {
+            const commentsQuery = window.firebaseDb.collection('communityPosts')
+                .doc(postId)
+                .collection('comments')
+                .orderBy('createdAt', 'asc');
+            commentsSnapshot = await commentsQuery.get();
+        } catch (indexError) {
+            // If index doesn't exist, load without orderBy and sort client-side
+            console.log('Comments index not found, loading and sorting client-side');
+            const commentsQuery = window.firebaseDb.collection('communityPosts')
+                .doc(postId)
+                .collection('comments');
+            commentsSnapshot = await commentsQuery.get();
+        }
+        const comments = [];
+        
+        for (const doc of commentsSnapshot.docs) {
+            const data = doc.data();
+            const authorInfo = await getUserInfo(data.authorId);
+            comments.push({
+                id: doc.id,
+                ...data,
+                authorName: authorInfo.name,
+                authorPhotoURL: authorInfo.photoURL,
+                createdAt: data.createdAt // Preserve timestamp for sorting
+            });
+        }
+        
+        // Sort by createdAt (oldest first) if we loaded without orderBy
+        comments.sort((a, b) => {
+            const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+            const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+            return aTime.getTime() - bTime.getTime();
+        });
+        
+        if (comments.length === 0) {
+            commentsListEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💭</div><div class="empty-state-text">No comments yet</div></div>';
+            return;
+        }
+        
+        commentsListEl.innerHTML = comments.map(comment => {
+            const timeAgo = formatTimeAgo(comment.createdAt?.toDate?.() || new Date(comment.createdAt));
+            const authorInitial = comment.authorName ? comment.authorName.charAt(0).toUpperCase() : '?';
+            const avatarStyle = comment.authorPhotoURL 
+                ? `background-image: url(${comment.authorPhotoURL}); background-size: cover; background-position: center;` 
+                : '';
+            
+            return `
+                <div class="comment-item">
+                    <div class="comment-header">
+                        <div class="comment-author-avatar" style="${avatarStyle}">${comment.authorPhotoURL ? '' : authorInitial}</div>
+                        <div class="comment-author-name">${escapeHtml(comment.authorName || 'Unknown')}</div>
+                        <div class="comment-time">${timeAgo}</div>
+                    </div>
+                    <div class="comment-content">${escapeHtml(comment.content || '').replace(/\n/g, '<br>')}</div>
+                </div>
+            `;
+        }).join('');
+        
+    } catch (error) {
+        console.error('Error loading comments:', error);
+        commentsListEl.innerHTML = '<div class="empty-state"><div class="empty-state-text">Error loading comments</div></div>';
+    }
+}
+
+// Add comment to post
+async function addComment(postId, content) {
+    if (!window.firebaseDb || !currentUser) {
+        console.error('User not authenticated or Firebase not available');
+        return;
+    }
+    
+    if (!content.trim()) {
+        return;
+    }
+    
+    try {
+        const commentData = {
+            authorId: currentUser.uid,
+            content: content.trim(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        // Add comment to subcollection
+        await window.firebaseDb.collection('communityPosts')
+            .doc(postId)
+            .collection('comments')
+            .add(commentData);
+        
+        // Update comment count
+        await window.firebaseDb.collection('communityPosts').doc(postId).update({
+            commentCount: firebase.firestore.FieldValue.increment(1)
+        });
+        
+        // Clear input and reload comments
+        const commentInput = document.getElementById('newCommentInput');
+        if (commentInput) commentInput.value = '';
+        
+        await loadComments(postId);
+        loadCommunityPosts(); // Refresh post list to update comment counts
+        
+    } catch (error) {
+        console.error('Error adding comment:', error);
+        alert('Failed to add comment. Please try again.');
+    }
+}
+
+// Delete post (only creator can delete)
+async function deletePost(postId, event) {
+    if (event) event.stopPropagation();
+    
+    if (!window.firebaseDb || !currentUser) {
+        console.error('User not authenticated or Firebase not available');
+        return;
+    }
+    
+    // Confirm deletion
+    if (!confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        // Verify user is the author before deleting
+        const postDoc = await window.firebaseDb.collection('communityPosts').doc(postId).get();
+        if (!postDoc.exists) {
+            alert('Post not found');
+            return;
+        }
+        
+        const postData = postDoc.data();
+        if (postData.authorId !== currentUser.uid) {
+            alert('You can only delete your own posts');
+            return;
+        }
+        
+        // Delete all comments first (batch delete)
+        const commentsRef = window.firebaseDb.collection('communityPosts')
+            .doc(postId)
+            .collection('comments');
+        
+        const commentsSnapshot = await commentsRef.get();
+        const batch = window.firebaseDb.batch();
+        
+        commentsSnapshot.docs.forEach(doc => {
+            batch.delete(doc.ref);
+        });
+        
+        await batch.commit();
+        
+        // Delete the post
+        await window.firebaseDb.collection('communityPosts').doc(postId).delete();
+        
+        // Close modal and reload posts
+        closePostDetailModal();
+        await loadCommunityPosts();
+        
+    } catch (error) {
+        console.error('Error deleting post:', error);
+        alert('Failed to delete post. Please try again.');
+    }
+}
+
+// Modal functions
+function openCreatePostModal() {
+    const modal = document.getElementById('createPostModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        // Reset form
+        const titleInput = document.getElementById('postTitleInput');
+        const contentInput = document.getElementById('postContentInput');
+        const categorySelect = document.getElementById('postCategorySelect');
+        const errorEl = document.getElementById('createPostError');
+        if (titleInput) titleInput.value = '';
+        if (contentInput) contentInput.value = '';
+        if (errorEl) errorEl.style.display = 'none';
+        
+        // Update category select - add bulletin option if creator, remove if not
+        if (categorySelect) {
+            const existingBulletinOption = categorySelect.querySelector('option[value="bulletin"]');
+            
+            if (isCreator()) {
+                // Add bulletin option if creator and it doesn't exist
+                if (!existingBulletinOption) {
+                    const bulletinOption = document.createElement('option');
+                    bulletinOption.value = 'bulletin';
+                    bulletinOption.textContent = '📌 Bulletin Board';
+                    categorySelect.insertBefore(bulletinOption, categorySelect.firstChild);
+                }
+            } else {
+                // Remove bulletin option if not creator
+                if (existingBulletinOption) {
+                    existingBulletinOption.remove();
+                }
+            }
+            
+            // Add event listeners for dropdown arrow animation
+            const inputGroup = categorySelect.closest('.input-group');
+            if (inputGroup) {
+                // Add class to identify this input-group has a select (for browsers without :has() support)
+                inputGroup.classList.add('has-select');
+                
+                // Remove existing listeners if any (prevent duplicates)
+                const handleFocus = () => {
+                    inputGroup.classList.add('has-focus');
+                };
+                const handleBlur = () => {
+                    // Delay blur to allow selection to complete
+                    setTimeout(() => {
+                        if (document.activeElement !== categorySelect) {
+                            inputGroup.classList.remove('has-focus');
+                        }
+                    }, 100);
+                };
+                const handleMouseDown = () => {
+                    inputGroup.classList.add('has-focus');
+                };
+                
+                categorySelect.addEventListener('focus', handleFocus);
+                categorySelect.addEventListener('blur', handleBlur);
+                categorySelect.addEventListener('mousedown', handleMouseDown);
+            }
+        }
+    }
+}
+
+function closeCreatePostModal() {
+    const modal = document.getElementById('createPostModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function closePostDetailModal() {
+    const modal = document.getElementById('postDetailModal');
+    if (modal) {
+        modal.style.display = 'none';
+        currentPostDetailId = null;
+        // Clear comment input when closing
+        const commentInput = document.getElementById('newCommentInput');
+        if (commentInput) commentInput.value = '';
+    }
+}
+
+// Category filter handler
+function filterCommunityPosts(category) {
+    currentCommunityCategory = category;
+    
+    // Update active state
+    document.querySelectorAll('.category-filter-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.category === category) {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Reload only community posts section (not bulletin board)
+    reloadCommunityPostsOnly();
+}
+
+// Reload only community posts (when filtering)
+async function reloadCommunityPostsOnly() {
+    if (!window.firebaseDb || !currentUser) return;
+    
+    const communityPostsList = document.getElementById('communityPostsList');
+    if (!communityPostsList) return;
+    
+    try {
+        // Load all posts - try with orderBy first, fallback to no orderBy if index doesn't exist
+        let allPostsSnapshot;
+        try {
+            const allPostsQuery = window.firebaseDb.collection('communityPosts')
+                .orderBy('createdAt', 'desc')
+                .limit(200);
+            allPostsSnapshot = await allPostsQuery.get();
+        } catch (indexError) {
+            // If index doesn't exist, load without orderBy and sort client-side
+            console.log('Index not found, loading posts without orderBy');
+            const allPostsQuery = window.firebaseDb.collection('communityPosts')
+                .limit(500);
+            allPostsSnapshot = await allPostsQuery.get();
+        }
+        const communityPosts = [];
+        
+        for (const doc of allPostsSnapshot.docs) {
+            const data = doc.data();
+            // Skip bulletin posts
+            if (data.isBulletin === true) continue;
+            
+            // Filter by category client-side if not 'all'
+            if (currentCommunityCategory !== 'all' && data.category !== currentCommunityCategory) {
+                continue;
+            }
+            
+            const authorInfo = await getUserInfo(data.authorId);
+            communityPosts.push({
+                id: doc.id,
+                ...data,
+                authorName: authorInfo.name,
+                authorPhotoURL: authorInfo.photoURL,
+                createdAt: data.createdAt // Preserve timestamp for sorting
+            });
+        }
+        
+        // Sort by createdAt (most recent first)
+        communityPosts.sort((a, b) => {
+            const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+            const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+            return bTime.getTime() - aTime.getTime();
+        });
+        
+        renderPosts(communityPosts, communityPostsList, false);
+    } catch (error) {
+        console.error('Error reloading community posts:', error);
+    }
+}
+
+// Event listeners for community functionality
+document.addEventListener('DOMContentLoaded', () => {
+    // Create post button
+    const createPostBtn = document.getElementById('createPostBtn');
+    if (createPostBtn) {
+        createPostBtn.addEventListener('click', openCreatePostModal);
+    }
+    
+    // Close modal buttons
+    const closeCreatePostModalBtn = document.getElementById('closeCreatePostModal');
+    if (closeCreatePostModalBtn) {
+        closeCreatePostModalBtn.addEventListener('click', closeCreatePostModal);
+    }
+    
+    const closePostDetailModalBtn = document.getElementById('closePostDetailModal');
+    if (closePostDetailModalBtn) {
+        closePostDetailModalBtn.addEventListener('click', closePostDetailModal);
+    }
+    
+    // Submit post button
+    const submitPostBtn = document.getElementById('submitPostBtn');
+    if (submitPostBtn) {
+        submitPostBtn.addEventListener('click', () => {
+            const title = document.getElementById('postTitleInput')?.value || '';
+            const content = document.getElementById('postContentInput')?.value || '';
+            const category = document.getElementById('postCategorySelect')?.value || 'general';
+            
+            if (!title.trim() || !content.trim()) {
+                const errorEl = document.getElementById('createPostError');
+                if (errorEl) {
+                    errorEl.textContent = 'Title and content are required';
+                    errorEl.style.display = 'block';
+                }
+                return;
+            }
+            
+            createPost(title, content, category);
+        });
+    }
+    
+    // Cancel post button
+    const cancelPostBtn = document.getElementById('cancelPostBtn');
+    if (cancelPostBtn) {
+        cancelPostBtn.addEventListener('click', closeCreatePostModal);
+    }
+    
+    // Submit comment button
+    const submitCommentBtn = document.getElementById('submitCommentBtn');
+    const newCommentInput = document.getElementById('newCommentInput');
+    if (submitCommentBtn) {
+        submitCommentBtn.addEventListener('click', () => {
+            if (!currentPostDetailId) return;
+            const content = newCommentInput?.value || '';
+            if (content.trim()) {
+                addComment(currentPostDetailId, content);
+            }
+        });
+    }
+    
+    // Allow Enter key to submit comment (Shift+Enter for new line)
+    if (newCommentInput) {
+        newCommentInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (currentPostDetailId && newCommentInput.value.trim()) {
+                    addComment(currentPostDetailId, newCommentInput.value);
+                }
+            }
+        });
+    }
+    
+    // Category filter buttons
+    document.querySelectorAll('.category-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const category = btn.dataset.category;
+            filterCommunityPosts(category);
+        });
+    });
+    
+    // Click outside modal to close
+    const createPostModal = document.getElementById('createPostModal');
+    if (createPostModal) {
+        createPostModal.addEventListener('click', (e) => {
+            if (e.target === createPostModal) {
+                closeCreatePostModal();
+            }
+        });
+    }
+    
+    const postDetailModal = document.getElementById('postDetailModal');
+    if (postDetailModal) {
+        postDetailModal.addEventListener('click', (e) => {
+            if (e.target === postDetailModal) {
+                closePostDetailModal();
+            }
+        });
+    }
+    
+    // Make functions globally available
+    window.likePost = likePost;
+    window.openPostDetail = openPostDetail;
+    window.deletePost = deletePost;
+});
 

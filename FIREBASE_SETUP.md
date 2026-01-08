@@ -117,6 +117,41 @@ service cloud.firestore {
     match /decks/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
+    
+    // Community Posts collection - users can read all posts, but only create/update/delete their own
+    match /communityPosts/{postId} {
+      // Anyone authenticated can read posts
+      allow read: if request.auth != null;
+      
+      // Anyone authenticated can create posts
+      allow create: if request.auth != null && 
+        request.auth.uid == request.resource.data.authorId;
+      
+      // Only the author can update their own post (for likes, comment count, etc.)
+      allow update: if request.auth != null && 
+        (request.auth.uid == resource.data.authorId || 
+         // Allow updates to likes and likedBy fields (anyone can like)
+         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'likedBy', 'commentCount', 'updatedAt'])));
+      
+      // Only the author can delete their own post
+      allow delete: if request.auth != null && request.auth.uid == resource.data.authorId;
+      
+      // Comments subcollection - nested under each post
+      match /comments/{commentId} {
+        // Anyone authenticated can read comments
+        allow read: if request.auth != null;
+        
+        // Anyone authenticated can create comments
+        allow create: if request.auth != null && 
+          request.auth.uid == request.resource.data.authorId;
+        
+        // Only the comment author can delete their own comment
+        allow delete: if request.auth != null && request.auth.uid == resource.data.authorId;
+        
+        // Comments cannot be updated (only created or deleted)
+        allow update: if false;
+      }
+    }
   }
 }
 ```
