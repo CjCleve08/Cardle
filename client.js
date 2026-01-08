@@ -2041,7 +2041,7 @@ socket.on('gameStarted', (data) => {
             
             if (vsPlayer1StatRank) {
                 const rankImagePath = getRankImagePath(rank.tier, rank.subRank);
-                vsPlayer1StatRank.innerHTML = `Rank: <img src="${rankImagePath}" alt="${rank.fullRank}" class="vs-rank-image"> ${rank.fullRank}`;
+                vsPlayer1StatRank.innerHTML = `<img src="${rankImagePath}" alt="${rank.fullRank}" class="vs-rank-image"> ${rank.fullRank}`;
                 vsPlayer1StatRank.style.color = rank.color;
             }
             if (vsPlayer1StatChipPoints) {
@@ -2052,7 +2052,7 @@ socket.on('gameStarted', (data) => {
             }
         }).catch(() => {
             if (vsPlayer1StatRank) {
-                vsPlayer1StatRank.textContent = 'Rank: -';
+                vsPlayer1StatRank.textContent = '-';
                 vsPlayer1StatRank.style.color = '';
             }
             if (vsPlayer1StatChipPoints) {
@@ -2121,7 +2121,7 @@ socket.on('gameStarted', (data) => {
             if (!window.firebaseAuth || !window.firebaseAuth.currentUser) {
                 console.warn('User not authenticated, cannot fetch opponent stats');
                 if (vsPlayer2StatRank) {
-                    vsPlayer2StatRank.textContent = 'Rank: -';
+                    vsPlayer2StatRank.textContent = '-';
                     vsPlayer2StatRank.style.color = '';
                 }
                 if (vsPlayer2StatChipPoints) {
@@ -2145,7 +2145,7 @@ socket.on('gameStarted', (data) => {
                             
                             if (vsPlayer2StatRank) {
                                 const rankImagePath = getRankImagePath(rank.tier, rank.subRank);
-                                vsPlayer2StatRank.innerHTML = `Rank: <img src="${rankImagePath}" alt="${rank.fullRank}" class="vs-rank-image"> ${rank.fullRank}`;
+                                vsPlayer2StatRank.innerHTML = `<img src="${rankImagePath}" alt="${rank.fullRank}" class="vs-rank-image"> ${rank.fullRank}`;
                                 vsPlayer2StatRank.style.color = rank.color;
                             }
                             if (vsPlayer2StatChipPoints) {
@@ -2157,7 +2157,7 @@ socket.on('gameStarted', (data) => {
                         } else {
                             console.log('Opponent stats doc does not exist for firebaseUid:', opponentData.firebaseUid);
                             if (vsPlayer2StatRank) {
-                                vsPlayer2StatRank.textContent = 'Rank: Copper V';
+                                vsPlayer2StatRank.textContent = 'Copper V';
                                 vsPlayer2StatRank.style.color = '#8B4513';
                             }
                             if (vsPlayer2StatChipPoints) {
@@ -2179,7 +2179,7 @@ socket.on('gameStarted', (data) => {
                         }
                         
                         if (vsPlayer2StatRank) {
-                            vsPlayer2StatRank.textContent = 'Rank: -';
+                            vsPlayer2StatRank.textContent = '-';
                             vsPlayer2StatRank.style.color = '';
                         }
                         if (vsPlayer2StatChipPoints) {
@@ -2209,7 +2209,7 @@ socket.on('gameStarted', (data) => {
             
             if (vsPlayer2StatRank) {
                 const rankImagePath = getRankImagePath(rank.tier, rank.subRank);
-                vsPlayer2StatRank.innerHTML = `Rank: <img src="${rankImagePath}" alt="${rank.fullRank}" class="vs-rank-image"> ${rank.fullRank}`;
+                vsPlayer2StatRank.innerHTML = `<img src="${rankImagePath}" alt="${rank.fullRank}" class="vs-rank-image"> ${rank.fullRank}`;
                 vsPlayer2StatRank.style.color = rank.color;
             }
             if (vsPlayer2StatChipPoints) {
@@ -6624,7 +6624,6 @@ function displayTopPlayers(players) {
                 <div class="leaderboard-name">${escapeHtml(player.name)}</div>
                 <div class="leaderboard-stats">
                     <div class="leaderboard-stat">
-                        <span class="leaderboard-stat-label">Rank:</span>
                         <img src="${rankImagePath}" alt="${rankInfo.fullRank}" class="leaderboard-rank-image">
                         <span>${rankInfo.fullRank}</span>
                     </div>
@@ -6665,7 +6664,6 @@ function displayUserRank(user) {
             <div class="leaderboard-name">${escapeHtml(user.name)}</div>
             <div class="leaderboard-stats">
                 <div class="leaderboard-stat">
-                    <span class="leaderboard-stat-label">Rank:</span>
                     <img src="${rankImagePath}" alt="${rankInfo.fullRank}" class="leaderboard-rank-image">
                     <span>${rankInfo.fullRank}</span>
                 </div>
