@@ -250,8 +250,11 @@
                             </div>
                             <div class="current-rank-content">
                                 <div class="current-rank-main">
-                                    <span class="current-rank-tier" id="currentRankTier">Copper</span>
-                                    <span class="current-rank-subrank" id="currentRankSubRank">V</span>
+                                    <img src="images/Rank Images/Copper5.png" alt="Copper V" class="current-rank-image" id="currentRankImage">
+                                    <div class="current-rank-text">
+                                        <span class="current-rank-tier" id="currentRankTier">Copper</span>
+                                        <span class="current-rank-subrank" id="currentRankSubRank">V</span>
+                                    </div>
                                 </div>
                                 <div class="current-rank-chips">
                                     <span class="rank-chips-label">Chips:</span>
@@ -451,6 +454,31 @@
                         </div>
                     </div>
                     
+                    <!-- Leaderboard Tab -->
+                    <div id="leaderboardTab" class="tab-panel">
+                        <div class="tab-panel-inner">
+                            <h2 class="tab-panel-title">Leaderboard</h2>
+                            <div class="leaderboard-content">
+                                <div id="leaderboardLoading" class="leaderboard-loading" style="display: none;">
+                                    <div class="loading-spinner"></div>
+                                    <p>Loading leaderboard...</p>
+                                </div>
+                                <div id="leaderboardError" class="leaderboard-error" style="display: none;">
+                                    <p>Failed to load leaderboard. Please try again later.</p>
+                                </div>
+                                <div id="leaderboardTop" class="leaderboard-top">
+                                    <!-- Top 10 players will be inserted here -->
+                                </div>
+                                <div id="leaderboardUser" class="leaderboard-user-section">
+                                    <h3 class="leaderboard-section-title">Your Ranking</h3>
+                                    <div id="leaderboardUserEntry" class="leaderboard-entry">
+                                        <!-- User's ranking will be inserted here -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <!-- Settings Tab -->
                     <div id="settingsTab" class="tab-panel">
                         <div class="tab-panel-inner">
@@ -497,6 +525,12 @@
                             <span class="tab-icon">👥</span>
                         </div>
                         <span class="tab-label">Friends</span>
+                    </button>
+                    <button class="lobby-tab" data-tab="leaderboard">
+                        <div class="tab-icon-wrapper">
+                            <span class="tab-icon">🏆</span>
+                        </div>
+                        <span class="tab-label">Leaderboard</span>
                     </button>
                     <button class="lobby-tab" data-tab="profile">
                         <div class="tab-icon-wrapper">

@@ -1867,8 +1867,8 @@ io.on('connection', (socket) => {
             console.log('User', firebaseUid, 'connected (startTutorial) and added to onlineUsers');
         }
         
-        // Create tutorial bot game
-        createBotGame(socket, playerName, firebaseUid, true);
+        // Create tutorial bot game (isTutorial=true, isRanked=false)
+        createBotGame(socket, playerName, firebaseUid, true, false);
     });
     
     // Matchmaking handlers
@@ -3565,12 +3565,6 @@ io.on('connection', (socket) => {
         // Validate word format
         if (guess.length !== 5 || !/^[A-Z]+$/.test(guess)) {
             socket.emit('error', { message: 'Invalid word' });
-            return;
-        }
-        
-        // Validate word exists in dictionary
-        if (!WORDS.includes(guess)) {
-            socket.emit('error', { message: "You can't guess that word. Please enter a valid 5-letter word." });
             return;
         }
         

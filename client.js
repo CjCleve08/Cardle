@@ -794,7 +794,8 @@ async function updateStats(gameResult) {
     }
     
     // Only update chip points (rank) if this is a ranked game
-    const isRanked = gameState && gameState.isRanked === true;
+    // Check both the passed parameter and gameState (fallback)
+    const isRanked = (gameResult.isRanked !== undefined ? gameResult.isRanked : (gameState && gameState.isRanked === true));
     if (isRanked) {
         // If chipPoints is provided (e.g., from disconnect scenario), use it directly
         // Otherwise calculate normally
@@ -880,27 +881,43 @@ const RANK_TIERS = [
     { name: 'Gold', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 3600, maxChips: 4799, color: '#FFD700' },
     { name: 'Platinum', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 4800, maxChips: 5999, color: '#00CED1' },
     { name: 'Diamond', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 6000, maxChips: 7999, color: '#B9F2FF' },
-    { name: 'Champion', subRanks: [], minChips: 8000, maxChips: Infinity, color: '#FF1493' }
+    { name: 'Champion', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 8000, maxChips: 9999, color: '#FF1493' }
 ];
+
+// Get rank image path based on tier and sub-rank
+function getRankImagePath(tier, subRank) {
+    // Map sub-rank Roman numerals to numbers (I = 1, II = 2, III = 3, IV = 4, V = 5)
+    const subRankMap = {
+        'I': '1',
+        'II': '2',
+        'III': '3',
+        'IV': '4',
+        'V': '5'
+    };
+    
+    const subRankNumber = subRankMap[subRank] || '1';
+    
+    // Map tier names to image folder names
+    const tierMap = {
+        'Copper': 'Copper',
+        'Bronze': 'Bronze',
+        'Silver': 'Silver',
+        'Gold': 'Gold',
+        'Platinum': 'Plat',  // Platinum uses "Plat" in filename
+        'Diamond': 'Diamond',
+        'Champion': 'Champ'  // Champion uses "Champ" in filename
+    };
+    
+    const tierName = tierMap[tier] || 'Copper';
+    
+    return `images/Rank Images/${tierName}${subRankNumber}.png`;
+}
 
 function getRankFromChips(chipPoints) {
     const chips = chipPoints || 0;
     
     for (const tier of RANK_TIERS) {
         if (chips >= tier.minChips && chips <= tier.maxChips) {
-            if (tier.subRanks.length === 0) {
-                // Champion (no sub-ranks)
-                return {
-                    tier: tier.name,
-                    subRank: '',
-                    fullRank: tier.name,
-                    color: tier.color,
-                    chips: chips,
-                    progress: 0,
-                    nextRank: null
-                };
-            }
-            
             // Calculate which sub-rank
             const tierRange = tier.maxChips - tier.minChips;
             const subRankRange = tierRange / tier.subRanks.length;
@@ -969,6 +986,7 @@ async function updateRankDisplay() {
     const rankDisplayEl = document.getElementById('currentRankDisplay');
     const rankTierEl = document.getElementById('currentRankTier');
     const rankSubRankEl = document.getElementById('currentRankSubRank');
+    const rankImageEl = document.getElementById('currentRankImage');
     const rankChipsEl = document.getElementById('currentRankChips');
     const rankProgressBar = document.getElementById('rankProgressBar');
     const rankProgressText = document.getElementById('rankProgressText');
@@ -986,6 +1004,12 @@ async function updateRankDisplay() {
     if (rankSubRankEl) {
         rankSubRankEl.textContent = rank.subRank || '';
         rankSubRankEl.style.color = rank.color;
+    }
+    
+    // Update rank image
+    if (rankImageEl) {
+        rankImageEl.src = getRankImagePath(rank.tier, rank.subRank);
+        rankImageEl.alt = rank.fullRank;
     }
     
     if (rankChipsEl) {
@@ -1037,103 +1061,7 @@ function generateGameOverRankProgress(beforeChips, afterChips) {
     const currentTier = RANK_TIERS.find(tier => tier.name === afterRank.tier) || 
                         RANK_TIERS.find(tier => tier.name === beforeRank.tier);
     
-    if (!currentTier || currentTier.subRanks.length === 0) {
-        // Champion tier - special handling
-        const championTier = RANK_TIERS[RANK_TIERS.length - 1];
-        const tierRange = 2000; // Assume 2000 chip range for Champion (8000-10000)
-        const chipsInTier = Math.max(0, afterChips - championTier.minChips);
-        const beforeChipsInTier = Math.max(0, beforeChips - championTier.minChips);
-        const beforeFillPercentage = (beforeChipsInTier / tierRange) * 100;
-        const afterFillPercentage = (chipsInTier / tierRange) * 100;
-        
-        // Set initial position
-        progressBarFill.style.width = `${Math.min(100, beforeFillPercentage)}%`;
-        progressBarFill.style.background = `linear-gradient(90deg, ${beforeRank.color}, ${beforeRank.color})`;
-        currentRankIndicator.style.left = `${Math.min(100, beforeFillPercentage)}%`;
-        currentRankBadge.textContent = beforeRank.fullRank;
-        currentRankBadge.style.backgroundColor = beforeRank.color;
-        currentRankBadge.style.borderColor = beforeRank.color;
-        
-        // Add Champion marker
-        const marker = document.createElement('div');
-        marker.className = 'rank-marker';
-        marker.style.left = '100%';
-        marker.style.borderColor = championTier.color;
-        const markerLabel = document.createElement('div');
-        markerLabel.className = 'rank-marker-label';
-        markerLabel.textContent = 'Champion';
-        markerLabel.style.color = championTier.color;
-        marker.appendChild(markerLabel);
-        markersContainer.appendChild(marker);
-        
-        // Animate to new position
-        setTimeout(() => {
-            if (afterChips > beforeChips) {
-                // Gain: Smoothly expand from before to after, green overlay on new portion
-                const changeWidth = afterFillPercentage - beforeFillPercentage;
-                
-                if (changeWidth > 0) {
-                    // Reset and position green overlay at the before position with 0 width
-                    progressBarChange.style.transition = 'none';
-                    progressBarChange.style.left = `${beforeFillPercentage}%`;
-                    progressBarChange.style.width = '0%';
-                    progressBarChange.classList.add('show', 'gain');
-                    
-                    // Force reflow to apply initial state
-                    void progressBarChange.offsetWidth;
-                    
-                    // Re-enable transition and animate
-                    progressBarChange.style.transition = 'left 1.2s cubic-bezier(0.4, 0, 0.2, 1), width 1.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
-                    
-                    // Animate both fill expansion and green overlay expansion simultaneously
-                    progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
-                    progressBarFill.style.background = afterRank.color;
-                    progressBarChange.style.width = `${changeWidth}%`;
-                } else {
-                    progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
-                    progressBarFill.style.background = afterRank.color;
-                }
-            } else if (afterChips < beforeChips) {
-                // Loss: Smoothly shrink from before to after, gray overlay on lost portion
-                const lossWidth = beforeFillPercentage - afterFillPercentage;
-                
-                if (lossWidth > 0) {
-                    // Reset and position gray overlay at the after position with 0 width
-                    progressBarChange.style.transition = 'none';
-                    progressBarChange.style.left = `${afterFillPercentage}%`;
-                    progressBarChange.style.width = '0%';
-                    progressBarChange.classList.add('show', 'loss');
-                    
-                    // Force reflow to apply initial state
-                    void progressBarChange.offsetWidth;
-                    
-                    // Re-enable transition and animate
-                    progressBarChange.style.transition = 'left 1.2s cubic-bezier(0.4, 0, 0.2, 1), width 1.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
-                    
-                    // Animate fill shrinking and gray overlay expanding to show lost portion
-                    progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
-                    progressBarFill.style.background = afterRank.color;
-                    progressBarChange.style.width = `${lossWidth}%`;
-                } else {
-                    progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
-                    progressBarFill.style.background = afterRank.color;
-                }
-            } else {
-                // No change
-                progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
-                progressBarFill.style.background = afterRank.color;
-            }
-            
-            // Position marker at exact fill position
-            currentRankIndicator.style.left = `${Math.min(100, afterFillPercentage)}%`;
-            currentRankBadge.textContent = afterRank.fullRank;
-            currentRankBadge.style.backgroundColor = afterRank.color;
-            currentRankBadge.style.borderColor = afterRank.color;
-        }, 500);
-        return;
-    }
-    
-    // Calculate progress within the tier
+    // Calculate tier range
     const tierRange = currentTier.maxChips - currentTier.minChips;
     const subRankRange = tierRange / currentTier.subRanks.length;
     const beforeChipsInTier = Math.max(0, beforeChips - currentTier.minChips);
@@ -1150,10 +1078,10 @@ function generateGameOverRankProgress(beforeChips, afterChips) {
     );
     
     // Calculate progress within current sub-rank range
-    const beforeSubRankStart = beforeSubRankIndex * subRankRange;
-    const afterSubRankStart = afterSubRankIndex * subRankRange;
-    const beforeProgressInSubRank = ((beforeChipsInTier - beforeSubRankStart) / subRankRange) * 100;
-    const afterProgressInSubRank = ((afterChipsInTier - afterSubRankStart) / subRankRange) * 100;
+    const beforeSubRankStart = currentTier.minChips + (beforeSubRankIndex * subRankRange);
+    const afterSubRankStart = currentTier.minChips + (afterSubRankIndex * subRankRange);
+    const beforeProgressInSubRank = ((beforeChips - beforeSubRankStart) / subRankRange) * 100;
+    const afterProgressInSubRank = ((afterChips - afterSubRankStart) / subRankRange) * 100;
     
     // Calculate overall percentage within tier
     const beforeFillPercentage = ((beforeSubRankIndex + (beforeProgressInSubRank / 100)) / currentTier.subRanks.length) * 100;
@@ -1163,7 +1091,10 @@ function generateGameOverRankProgress(beforeChips, afterChips) {
     progressBarFill.style.width = `${beforeFillPercentage}%`;
     progressBarFill.style.background = `linear-gradient(90deg, ${beforeRank.color}, ${beforeRank.color})`;
     currentRankIndicator.style.left = `${beforeFillPercentage}%`;
-    currentRankBadge.textContent = beforeRank.fullRank;
+    
+    // Update rank badge with image
+    const beforeRankImagePath = getRankImagePath(beforeRank.tier, beforeRank.subRank);
+    currentRankBadge.innerHTML = `<img src="${beforeRankImagePath}" alt="${beforeRank.fullRank}" class="rank-badge-image">`;
     currentRankBadge.style.backgroundColor = beforeRank.color;
     currentRankBadge.style.borderColor = beforeRank.color;
     
@@ -1184,30 +1115,26 @@ function generateGameOverRankProgress(beforeChips, afterChips) {
         markersContainer.appendChild(marker);
     });
     
-    // Add marker at the end (next tier or end of tier)
-    const endMarker = document.createElement('div');
-    endMarker.className = 'rank-marker';
-    endMarker.style.left = '100%';
-    endMarker.style.borderColor = currentTier.color;
-    
-    // Check if there's a next tier
+    // Add end marker for next tier (only if there is a next tier)
     const currentTierIndex = RANK_TIERS.findIndex(t => t.name === currentTier.name);
     const nextTier = currentTierIndex < RANK_TIERS.length - 1 ? RANK_TIERS[currentTierIndex + 1] : null;
     
-    const endMarkerLabel = document.createElement('div');
-    endMarkerLabel.className = 'rank-marker-label';
+    // Only add end marker if there's a next tier (don't add one at Champion since Champion I is the highest)
     if (nextTier) {
+        const endMarker = document.createElement('div');
+        endMarker.className = 'rank-marker';
+        endMarker.style.left = '100%';
+        
+        const endMarkerLabel = document.createElement('div');
+        endMarkerLabel.className = 'rank-marker-label';
         endMarkerLabel.textContent = nextTier.name;
         endMarkerLabel.style.color = nextTier.color;
         endMarker.style.borderColor = nextTier.color;
-    } else {
-        endMarkerLabel.textContent = 'Max';
-        endMarkerLabel.style.color = currentTier.color;
+        endMarker.appendChild(endMarkerLabel);
+        markersContainer.appendChild(endMarker);
     }
-    endMarker.appendChild(endMarkerLabel);
-    markersContainer.appendChild(endMarker);
     
-    // Animate to new position after a short delay
+    // Animate to new position
     setTimeout(() => {
         if (afterChips > beforeChips) {
             // Gain: Smoothly expand from before to after, green overlay on new portion
@@ -1227,11 +1154,11 @@ function generateGameOverRankProgress(beforeChips, afterChips) {
                 progressBarChange.style.transition = 'left 1.2s cubic-bezier(0.4, 0, 0.2, 1), width 1.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
                 
                 // Animate both fill expansion and green overlay expansion simultaneously
-                progressBarFill.style.width = `${afterFillPercentage}%`;
+                progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
                 progressBarFill.style.background = afterRank.color;
                 progressBarChange.style.width = `${changeWidth}%`;
             } else {
-                progressBarFill.style.width = `${afterFillPercentage}%`;
+                progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
                 progressBarFill.style.background = afterRank.color;
             }
         } else if (afterChips < beforeChips) {
@@ -1252,22 +1179,25 @@ function generateGameOverRankProgress(beforeChips, afterChips) {
                 progressBarChange.style.transition = 'left 1.2s cubic-bezier(0.4, 0, 0.2, 1), width 1.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
                 
                 // Animate fill shrinking and gray overlay expanding to show lost portion
-                progressBarFill.style.width = `${afterFillPercentage}%`;
+                progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
                 progressBarFill.style.background = afterRank.color;
                 progressBarChange.style.width = `${lossWidth}%`;
             } else {
-                progressBarFill.style.width = `${afterFillPercentage}%`;
+                progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
                 progressBarFill.style.background = afterRank.color;
             }
         } else {
             // No change
-            progressBarFill.style.width = `${afterFillPercentage}%`;
+            progressBarFill.style.width = `${Math.min(100, afterFillPercentage)}%`;
             progressBarFill.style.background = afterRank.color;
         }
         
         // Position marker at exact fill position
-        currentRankIndicator.style.left = `${afterFillPercentage}%`;
-        currentRankBadge.textContent = afterRank.fullRank;
+        currentRankIndicator.style.left = `${Math.min(100, afterFillPercentage)}%`;
+        
+        // Update rank badge with image
+        const afterRankImagePath = getRankImagePath(afterRank.tier, afterRank.subRank);
+        currentRankBadge.innerHTML = `<img src="${afterRankImagePath}" alt="${afterRank.fullRank}" class="rank-badge-image">`;
         currentRankBadge.style.backgroundColor = afterRank.color;
         currentRankBadge.style.borderColor = afterRank.color;
     }, 500);
@@ -1286,11 +1216,7 @@ function generateRankLadder() {
     // Calculate total number of ranks
     let totalRanks = 0;
     RANK_TIERS.forEach(tier => {
-        if (tier.subRanks.length > 0) {
-            totalRanks += tier.subRanks.length;
-        } else {
-            totalRanks += 1; // Champion
-        }
+        totalRanks += tier.subRanks.length;
     });
     
     // Get current rank
@@ -1305,35 +1231,25 @@ function generateRankLadder() {
         for (const tier of RANK_TIERS) {
             if (chipPoints >= tier.minChips && chipPoints <= tier.maxChips) {
                 // We're in this tier
-                if (tier.subRanks.length > 0) {
-                    const tierRange = tier.maxChips - tier.minChips;
-                    const subRankRange = tierRange / tier.subRanks.length;
-                    const chipsInTier = chipPoints - tier.minChips;
-                    const subRankIndex = Math.min(
-                        Math.floor(chipsInTier / subRankRange),
-                        tier.subRanks.length - 1
-                    );
-                    
-                    // Calculate progress within the current sub-rank
-                    const currentSubRankStart = subRankIndex * subRankRange;
-                    const nextSubRankStart = (subRankIndex + 1) * subRankRange;
-                    const progressInSubRank = ((chipsInTier - currentSubRankStart) / (nextSubRankStart - currentSubRankStart));
-                    
-                    // Position = (ranks before this tier + current sub-rank index + progress in sub-rank) / total ranks
-                    rankPosition = (rankCount + subRankIndex + progressInSubRank) / totalRanks;
-                    break;
-                } else {
-                    // Champion - at the end
-                    rankPosition = 1.0;
-                    break;
-                }
+                const tierRange = tier.maxChips - tier.minChips;
+                const subRankRange = tierRange / tier.subRanks.length;
+                const chipsInTier = chipPoints - tier.minChips;
+                const subRankIndex = Math.min(
+                    Math.floor(chipsInTier / subRankRange),
+                    tier.subRanks.length - 1
+                );
+                
+                // Calculate progress within the current sub-rank
+                const currentSubRankStart = subRankIndex * subRankRange;
+                const nextSubRankStart = (subRankIndex + 1) * subRankRange;
+                const progressInSubRank = ((chipsInTier - currentSubRankStart) / (nextSubRankStart - currentSubRankStart));
+                
+                // Position = (ranks before this tier + current sub-rank index + progress in sub-rank) / total ranks
+                rankPosition = (rankCount + subRankIndex + progressInSubRank) / totalRanks;
+                break;
             } else if (chipPoints > tier.maxChips) {
                 // We've passed this tier, add all its sub-ranks to the count
-                if (tier.subRanks.length > 0) {
-                    rankCount += tier.subRanks.length;
-                } else {
-                    rankCount += 1;
-                }
+                rankCount += tier.subRanks.length;
             }
         }
         
@@ -1344,7 +1260,10 @@ function generateRankLadder() {
         
         // Position current rank indicator
         currentRankIndicator.style.left = `${indicatorPosition}%`;
-        currentRankBadge.textContent = currentRank.fullRank;
+        
+        // Update rank badge with image
+        const rankImagePath = getRankImagePath(currentRank.tier, currentRank.subRank);
+        currentRankBadge.innerHTML = `<img src="${rankImagePath}" alt="${currentRank.fullRank}" class="rank-badge-image">`;
         currentRankBadge.style.backgroundColor = currentRank.color;
         currentRankBadge.style.borderColor = currentRank.color;
         
@@ -1356,11 +1275,7 @@ function generateRankLadder() {
             // Calculate position for this tier
             let tierStartIndex = 0;
             for (let i = 0; i < tierIndex; i++) {
-                if (RANK_TIERS[i].subRanks.length > 0) {
-                    tierStartIndex += RANK_TIERS[i].subRanks.length;
-                } else {
-                    tierStartIndex += 1;
-                }
+                tierStartIndex += RANK_TIERS[i].subRanks.length;
             }
             
             // Position at the start of the tier
@@ -1376,19 +1291,6 @@ function generateRankLadder() {
             
             markersContainer.appendChild(marker);
         });
-        
-        // Add Champion marker at the end
-        const championMarker = document.createElement('div');
-        championMarker.className = 'rank-marker';
-        championMarker.style.left = '100%';
-        championMarker.style.borderColor = RANK_TIERS[RANK_TIERS.length - 1].color;
-        
-        const championLabel = document.createElement('div');
-        championLabel.className = 'rank-marker-label';
-        championLabel.textContent = 'Champion';
-        championLabel.style.color = RANK_TIERS[RANK_TIERS.length - 1].color;
-        championMarker.appendChild(championLabel);
-        markersContainer.appendChild(championMarker);
         
     }).catch(error => {
         console.error('Error generating rank ladder:', error);
@@ -2138,7 +2040,8 @@ socket.on('gameStarted', (data) => {
             const rank = getRankFromChips(chipPoints);
             
             if (vsPlayer1StatRank) {
-                vsPlayer1StatRank.textContent = `Rank: ${rank.fullRank}`;
+                const rankImagePath = getRankImagePath(rank.tier, rank.subRank);
+                vsPlayer1StatRank.innerHTML = `Rank: <img src="${rankImagePath}" alt="${rank.fullRank}" class="vs-rank-image"> ${rank.fullRank}`;
                 vsPlayer1StatRank.style.color = rank.color;
             }
             if (vsPlayer1StatChipPoints) {
@@ -2241,7 +2144,8 @@ socket.on('gameStarted', (data) => {
                             const rank = getRankFromChips(chipPoints);
                             
                             if (vsPlayer2StatRank) {
-                                vsPlayer2StatRank.textContent = `Rank: ${rank.fullRank}`;
+                                const rankImagePath = getRankImagePath(rank.tier, rank.subRank);
+                                vsPlayer2StatRank.innerHTML = `Rank: <img src="${rankImagePath}" alt="${rank.fullRank}" class="vs-rank-image"> ${rank.fullRank}`;
                                 vsPlayer2StatRank.style.color = rank.color;
                             }
                             if (vsPlayer2StatChipPoints) {
@@ -2304,7 +2208,8 @@ socket.on('gameStarted', (data) => {
             const rank = getRankFromChips(chipPoints);
             
             if (vsPlayer2StatRank) {
-                vsPlayer2StatRank.textContent = `Rank: ${rank.fullRank}`;
+                const rankImagePath = getRankImagePath(rank.tier, rank.subRank);
+                vsPlayer2StatRank.innerHTML = `Rank: <img src="${rankImagePath}" alt="${rank.fullRank}" class="vs-rank-image"> ${rank.fullRank}`;
                 vsPlayer2StatRank.style.color = rank.color;
             }
             if (vsPlayer2StatChipPoints) {
@@ -2759,7 +2664,11 @@ socket.on('requestHand', (data) => {
         }
         while (window.playerCardHand.length < 3) {
             const newCard = drawCardFromDeck();
-            window.playerCardHand.push(newCard);
+            if (newCard) {
+                window.playerCardHand.push(newCard);
+            } else {
+                break; // Prevent infinite loop if drawCardFromDeck returns null
+            }
         }
     }
     
@@ -2792,7 +2701,11 @@ socket.on('requestHandForSteal', (data) => {
         }
         while (window.playerCardHand.length < 3) {
             const newCard = drawCardFromDeck();
-            window.playerCardHand.push(newCard);
+            if (newCard) {
+                window.playerCardHand.push(newCard);
+            } else {
+                break; // Prevent infinite loop if drawCardFromDeck returns null
+            }
         }
     }
     
@@ -2825,7 +2738,11 @@ socket.on('requestHandForBlock', (data) => {
         }
         while (window.playerCardHand.length < 3) {
             const newCard = drawCardFromDeck();
-            window.playerCardHand.push(newCard);
+            if (newCard) {
+                window.playerCardHand.push(newCard);
+            } else {
+                break; // Prevent infinite loop if drawCardFromDeck returns null
+            }
         }
     }
     
@@ -2858,7 +2775,11 @@ socket.on('requestHandForSpectator', (data) => {
         }
         while (window.playerCardHand.length < 3) {
             const newCard = drawCardFromDeck();
-            window.playerCardHand.push(newCard);
+            if (newCard) {
+                window.playerCardHand.push(newCard);
+            } else {
+                break; // Prevent infinite loop if drawCardFromDeck returns null
+            }
         }
     }
     
@@ -3286,7 +3207,8 @@ socket.on('gameOver', (data) => {
             updateStats({
                 won: won,
                 guesses: guesses,
-                chipPoints: newChipPoints  // Pass the new chip points directly
+                chipPoints: newChipPoints,  // Pass the new chip points directly
+                isRanked: true  // Explicitly mark as ranked
             }).catch(error => {
                 console.error('Error updating stats:', error);
             });
@@ -3304,7 +3226,8 @@ socket.on('gameOver', (data) => {
         // Update statistics for non-ranked games
         updateStats({
             won: won,
-            guesses: guesses
+            guesses: guesses,
+            isRanked: false  // Explicitly mark as non-ranked
         }).catch(error => {
             console.error('Error updating stats:', error);
         });
@@ -4106,7 +4029,23 @@ function initializeDeckPoolSync() {
     
     // Create a shuffled pool of deck cards
     window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
-    window.playerCardHand = [];
+    
+    // Initialize hand if not exists
+    if (!window.playerCardHand) {
+        window.playerCardHand = [];
+    }
+    
+    // Draw initial 3 cards into hand if empty
+    if (window.deckPool && window.deckPool.length > 0) {
+        while (window.playerCardHand.length < 3 && window.deckPool.length > 0) {
+            const newCard = window.deckPool.shift();
+            if (newCard) {
+                window.playerCardHand.push(newCard);
+            } else {
+                break; // Prevent infinite loop
+            }
+        }
+    }
 }
 
 // Update the hand panel display
@@ -4129,7 +4068,11 @@ function updateHandPanel() {
     }
     while (window.playerCardHand.length < 3 && window.deckPool && window.deckPool.length > 0) {
         const newCard = drawCardFromDeck();
-        window.playerCardHand.push(newCard);
+        if (newCard) {
+            window.playerCardHand.push(newCard);
+        } else {
+            break; // Prevent infinite loop if drawCardFromDeck returns null/undefined
+        }
     }
     
     // Clear existing content
@@ -4191,22 +4134,38 @@ function updateHandPanel() {
 }
 
 function drawCardFromDeck() {
-    // If deck pool is empty, reshuffle
+    // If deck pool is empty, try to reshuffle
     if (!window.deckPool || window.deckPool.length === 0) {
         const deckIds = getPlayerDeckSync();
         const allCards = getAllCards();
         const deckCards = deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
-        window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
+        if (deckCards.length > 0) {
+            window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
+        } else {
+            // If still empty, try fallback
+            const fallbackCards = getDeckCards();
+            if (fallbackCards && fallbackCards.length > 0) {
+                window.deckPool = [...fallbackCards].sort(() => Math.random() - 0.5);
+            } else {
+                console.error('drawCardFromDeck: No cards available in deck!');
+                return null; // Return null instead of undefined
+            }
+        }
     }
     
     // Draw a card from the pool
-    if (window.deckPool.length > 0) {
+    if (window.deckPool && window.deckPool.length > 0) {
         return window.deckPool.shift();
     }
     
-    // Fallback (shouldn't happen)
+    // Final fallback
     const deckCards = getDeckCards();
-    return deckCards[0];
+    if (deckCards && deckCards.length > 0) {
+        return deckCards[0];
+    }
+    
+    console.error('drawCardFromDeck: All fallbacks failed, returning null');
+    return null;
 }
 
 function generateCards(forceGrayOut = false) {
@@ -4226,7 +4185,13 @@ function generateCards(forceGrayOut = false) {
     // If hand is empty or has less than 3 cards, draw from deck
     while (window.playerCardHand.length < 3) {
         const newCard = drawCardFromDeck();
-        window.playerCardHand.push(newCard);
+        if (newCard) {
+            window.playerCardHand.push(newCard);
+        } else {
+            // If we can't draw a card, break to prevent infinite loop
+            console.error('Cannot draw card from deck. Deck pool length:', window.deckPool?.length);
+            break;
+        }
     }
     
     // Check if blocked card is still in hand - clear it if not
@@ -4425,10 +4390,14 @@ function generateCards(forceGrayOut = false) {
         // If we filtered out cards and have less than 3, add replacements from deck
         while (availableCards.length < 3) {
             const replacementCard = drawCardFromDeck();
-            // Make sure it's not already in hand and not in chain
-            if (!window.playerCardHand.some(handCard => handCard.id === replacementCard.id) &&
+            if (replacementCard && 
+                !window.playerCardHand.some(handCard => handCard.id === replacementCard.id) &&
                 (!isModifierCard(replacementCard.id) || !cardsInChain.includes(replacementCard.id))) {
                 availableCards.push(replacementCard);
+            } else if (!replacementCard) {
+                // If we can't draw a card, break to prevent infinite loop
+                console.error('Cannot draw replacement card from deck');
+                break;
             }
         }
     }
@@ -4577,7 +4546,11 @@ function selectCard(card, cardElement) {
                     window.playerCardHand = [];
                     while (window.playerCardHand.length < 3 && window.deckPool.length > 0) {
                         const newCard = drawCardFromDeck();
-                        window.playerCardHand.push(newCard);
+                        if (newCard) {
+                            window.playerCardHand.push(newCard);
+                        } else {
+                            break; // Prevent infinite loop if drawCardFromDeck returns null
+                        }
                     }
                 }
                 
@@ -6455,6 +6428,13 @@ function switchTab(tabName) {
         });
     }
     
+    // If switching to leaderboard tab, load leaderboard
+    if (tabName === 'leaderboard') {
+        loadLeaderboard().catch(error => {
+            console.error('Error loading leaderboard:', error);
+        });
+    }
+    
     // If switching to settings tab, initialize settings
     if (tabName === 'settings') {
         initializeSettings();
@@ -6485,6 +6465,219 @@ function switchTab(tabName) {
             window.friendStatusInterval = null;
         }
     }
+}
+
+// Leaderboard functionality
+async function loadLeaderboard() {
+    const loadingEl = document.getElementById('leaderboardLoading');
+    const errorEl = document.getElementById('leaderboardError');
+    const topEl = document.getElementById('leaderboardTop');
+    const userEntryEl = document.getElementById('leaderboardUserEntry');
+    const userSectionEl = document.getElementById('leaderboardUser');
+    
+    // Show loading state
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (errorEl) errorEl.style.display = 'none';
+    if (topEl) topEl.innerHTML = '';
+    if (userEntryEl) userEntryEl.innerHTML = '';
+    
+    try {
+        // Check if user is authenticated and Firestore is available
+        if (!window.firebaseDb || !currentUser || !currentUser.uid) {
+            throw new Error('Firebase not available or user not authenticated');
+        }
+        
+        // Fetch top 10 players by chipPoints
+        const statsRef = window.firebaseDb.collection('stats');
+        const topPlayersQuery = await statsRef
+            .orderBy('chipPoints', 'desc')
+            .limit(10)
+            .get();
+        
+        // Also get user's stats to find their rank
+        const userStatsDoc = await statsRef.doc(currentUser.uid).get();
+        const userStats = userStatsDoc.exists ? userStatsDoc.data() : { chipPoints: 0 };
+        
+        // Get user info from users collection
+        let userName = 'Player';
+        let userPhotoURL = null;
+        try {
+            const userDoc = await window.firebaseDb.collection('users').doc(currentUser.uid).get();
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                userName = userData.displayName || currentUser.displayName || 'Player';
+                userPhotoURL = userData.photoURL || currentUser.photoURL || null;
+            }
+        } catch (error) {
+            console.error('Error fetching user info:', error);
+            userName = currentUser.displayName || 'Player';
+            userPhotoURL = currentUser.photoURL || null;
+        }
+        
+        // Fetch user info for top 10 players
+        const topPlayers = [];
+        for (const doc of topPlayersQuery.docs) {
+            const stats = doc.data();
+            const uid = doc.id;
+            let name = 'Player';
+            let photoURL = null;
+            
+            try {
+                const userDoc = await window.firebaseDb.collection('users').doc(uid).get();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    name = userData.displayName || 'Player';
+                    photoURL = userData.photoURL || null;
+                }
+            } catch (error) {
+                console.error('Error fetching user info for', uid, ':', error);
+            }
+            
+            topPlayers.push({
+                uid: uid,
+                name: name,
+                photoURL: photoURL,
+                chipPoints: stats.chipPoints || 0,
+                stats: stats
+            });
+        }
+        
+        // Calculate user's rank by counting players with higher chipPoints
+        const userRank = await calculateUserRank(userStats.chipPoints || 0);
+        
+        // Display top 10
+        if (topEl) {
+            displayTopPlayers(topPlayers);
+        }
+        
+        // Display user's rank
+        if (userEntryEl && userSectionEl) {
+            displayUserRank({
+                uid: currentUser.uid,
+                name: userName,
+                photoURL: userPhotoURL,
+                chipPoints: userStats.chipPoints || 0,
+                rank: userRank,
+                stats: userStats
+            });
+        }
+        
+    } catch (error) {
+        console.error('Error loading leaderboard:', error);
+        if (errorEl) {
+            errorEl.style.display = 'block';
+            errorEl.textContent = error.message || 'Failed to load leaderboard. Please try again later.';
+        }
+    } finally {
+        if (loadingEl) loadingEl.style.display = 'none';
+    }
+}
+
+async function calculateUserRank(userChipPoints) {
+    if (!window.firebaseDb) return { rank: 'N/A', totalPlayers: 0 };
+    
+    try {
+        // Count players with chipPoints greater than the user's
+        const statsRef = window.firebaseDb.collection('stats');
+        const higherPlayersQuery = await statsRef
+            .where('chipPoints', '>', userChipPoints)
+            .get();
+        
+        const userRank = higherPlayersQuery.size + 1;
+        
+        // Get total players count (approximate)
+        const allStatsQuery = await statsRef.get();
+        const totalPlayers = allStatsQuery.size;
+        
+        return { rank: userRank, totalPlayers: totalPlayers };
+    } catch (error) {
+        console.error('Error calculating user rank:', error);
+        return { rank: 'N/A', totalPlayers: 0 };
+    }
+}
+
+function displayTopPlayers(players) {
+    const topEl = document.getElementById('leaderboardTop');
+    if (!topEl) return;
+    
+    topEl.innerHTML = '';
+    
+    players.forEach((player, index) => {
+        const rank = index + 1;
+        const rankInfo = getRankFromChips(player.chipPoints);
+        
+        const entry = document.createElement('div');
+        entry.className = `leaderboard-entry ${rank <= 3 ? `top-${rank}` : ''}`;
+        
+        // Create avatar div with photo or first letter
+        const avatarInitial = player.name ? player.name.charAt(0).toUpperCase() : '?';
+        const avatarStyle = player.photoURL 
+            ? `background-image: url(${player.photoURL}); background-size: cover; background-position: center;` 
+            : '';
+        
+        const rankImagePath = getRankImagePath(rankInfo.tier, rankInfo.subRank);
+        
+        entry.innerHTML = `
+            <div class="leaderboard-rank">#${rank}</div>
+            <div class="leaderboard-avatar" style="${avatarStyle}">${player.photoURL ? '' : avatarInitial}</div>
+            <div class="leaderboard-info">
+                <div class="leaderboard-name">${escapeHtml(player.name)}</div>
+                <div class="leaderboard-stats">
+                    <div class="leaderboard-stat">
+                        <span class="leaderboard-stat-label">Rank:</span>
+                        <img src="${rankImagePath}" alt="${rankInfo.fullRank}" class="leaderboard-rank-image">
+                        <span>${rankInfo.fullRank}</span>
+                    </div>
+                    <div class="leaderboard-stat">
+                        <span class="leaderboard-stat-label">Chips:</span>
+                        <span>${Math.round(player.chipPoints)}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        topEl.appendChild(entry);
+    });
+}
+
+function displayUserRank(user) {
+    const userEntryEl = document.getElementById('leaderboardUserEntry');
+    const userSectionEl = document.getElementById('leaderboardUser');
+    if (!userEntryEl || !userSectionEl) return;
+    
+    const rankInfo = getRankFromChips(user.chipPoints);
+    const rankText = user.rank && typeof user.rank.rank === 'number'
+        ? `#${user.rank.rank}` 
+        : 'N/A';
+    
+    // Create avatar div with photo or first letter
+    const avatarInitial = user.name ? user.name.charAt(0).toUpperCase() : '?';
+    const avatarStyle = user.photoURL 
+        ? `background-image: url(${user.photoURL}); background-size: cover; background-position: center;` 
+        : '';
+    
+    const rankImagePath = getRankImagePath(rankInfo.tier, rankInfo.subRank);
+    
+    userEntryEl.innerHTML = `
+        <div class="leaderboard-rank">${rankText}</div>
+        <div class="leaderboard-avatar" style="${avatarStyle}">${user.photoURL ? '' : avatarInitial}</div>
+        <div class="leaderboard-info">
+            <div class="leaderboard-name">${escapeHtml(user.name)}</div>
+            <div class="leaderboard-stats">
+                <div class="leaderboard-stat">
+                    <span class="leaderboard-stat-label">Rank:</span>
+                    <img src="${rankImagePath}" alt="${rankInfo.fullRank}" class="leaderboard-rank-image">
+                    <span>${rankInfo.fullRank}</span>
+                </div>
+                <div class="leaderboard-stat">
+                    <span class="leaderboard-stat-label">Chips:</span>
+                    <span>${Math.round(user.chipPoints)}</span>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    userEntryEl.className = 'leaderboard-entry user-entry';
 }
 
 // Update deck count display

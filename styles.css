@@ -1147,6 +1147,19 @@ header h1 {
 
 .current-rank-main {
     display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.current-rank-image {
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.current-rank-text {
+    display: flex;
     align-items: baseline;
     gap: 8px;
 }
@@ -1940,6 +1953,225 @@ header h1 {
     font-size: 1rem;
     color: #818384;
     margin: 0;
+}
+
+/* Leaderboard Tab Styles */
+.leaderboard-content {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+.leaderboard-loading,
+.leaderboard-error {
+    text-align: center;
+    padding: 40px 20px;
+    color: #818384;
+}
+
+.leaderboard-loading p,
+.leaderboard-error p {
+    margin-top: 16px;
+    font-size: 0.9375rem;
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(106, 170, 100, 0.2);
+    border-top-color: #6aaa64;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.leaderboard-top {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 24px;
+}
+
+.leaderboard-section-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #6aaa64;
+    margin-bottom: 16px;
+    text-align: center;
+}
+
+.leaderboard-entry {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    background: rgba(58, 58, 60, 0.3);
+    border: 1px solid rgba(106, 170, 100, 0.2);
+    border-radius: 12px;
+    transition: all 0.2s ease;
+}
+
+.leaderboard-entry:hover {
+    background: rgba(58, 58, 60, 0.5);
+    border-color: rgba(106, 170, 100, 0.4);
+    transform: translateX(4px);
+}
+
+.leaderboard-entry.top-1 {
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.15), rgba(255, 215, 0, 0.05));
+    border-color: rgba(255, 215, 0, 0.4);
+}
+
+.leaderboard-entry.top-2 {
+    background: linear-gradient(135deg, rgba(192, 192, 192, 0.15), rgba(192, 192, 192, 0.05));
+    border-color: rgba(192, 192, 192, 0.4);
+}
+
+.leaderboard-entry.top-3 {
+    background: linear-gradient(135deg, rgba(205, 127, 50, 0.15), rgba(205, 127, 50, 0.05));
+    border-color: rgba(205, 127, 50, 0.4);
+}
+
+.leaderboard-entry.user-entry {
+    background: rgba(106, 170, 100, 0.2);
+    border-color: #6aaa64;
+    border-width: 2px;
+}
+
+.leaderboard-rank {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #6aaa64;
+    min-width: 40px;
+    text-align: center;
+}
+
+.leaderboard-entry.top-1 .leaderboard-rank {
+    color: #ffd700;
+}
+
+.leaderboard-entry.top-2 .leaderboard-rank {
+    color: #c0c0c0;
+}
+
+.leaderboard-entry.top-3 .leaderboard-rank {
+    color: #cd7f32;
+}
+
+.leaderboard-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3a3a3c, #2a2a2b);
+    border: 2px solid #6aaa64;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #ffffff;
+    overflow: hidden;
+}
+
+.leaderboard-entry.top-1 .leaderboard-avatar {
+    border-color: #ffd700;
+}
+
+.leaderboard-entry.top-2 .leaderboard-avatar {
+    border-color: #c0c0c0;
+}
+
+.leaderboard-entry.top-3 .leaderboard-avatar {
+    border-color: #cd7f32;
+}
+
+.leaderboard-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.leaderboard-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.leaderboard-stats {
+    display: flex;
+    gap: 20px;
+    font-size: 0.875rem;
+    color: #818384;
+}
+
+.leaderboard-stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.leaderboard-rank-image {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    vertical-align: middle;
+}
+
+.rank-badge-image {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    vertical-align: middle;
+}
+
+.vs-rank-image {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    vertical-align: middle;
+    margin: 0 4px;
+}
+
+.leaderboard-stat-label {
+    color: #6aaa64;
+    font-weight: 600;
+}
+
+.leaderboard-chips,
+.leaderboard-rank-badge {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #6aaa64;
+    margin-left: auto;
+}
+
+.leaderboard-entry.top-1 .leaderboard-chips,
+.leaderboard-entry.top-1 .leaderboard-rank-badge {
+    color: #ffd700;
+}
+
+.leaderboard-entry.top-2 .leaderboard-chips,
+.leaderboard-entry.top-2 .leaderboard-rank-badge {
+    color: #c0c0c0;
+}
+
+.leaderboard-entry.top-3 .leaderboard-chips,
+.leaderboard-entry.top-3 .leaderboard-rank-badge {
+    color: #cd7f32;
+}
+
+.leaderboard-user-section {
+    margin-top: 32px;
+    padding-top: 32px;
+    border-top: 1px solid rgba(58, 58, 60, 0.5);
 }
 
 .profile-badge {
