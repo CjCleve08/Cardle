@@ -529,6 +529,35 @@ const CARD_CONFIG = {
                 }
             }
         }
+    },
+    'blackHand': {
+        metadata: {
+            id: 'blackHand',
+            title: 'Black Hand',
+            description: 'Flips all your opponent\'s cards around for their next turn',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                // Find the opponent
+                const opponent = game.players.find(p => p.id !== playerId);
+                if (opponent) {
+                    // Add black hand effect targeting the opponent
+                    game.activeEffects.push({
+                        type: 'blackHand',
+                        target: opponent.id,
+                        description: 'Your cards are flipped for this turn',
+                        used: false
+                    });
+                }
+            }
+        }
     }
 };
 
@@ -1942,7 +1971,8 @@ function submitBotGuess(gameId, botId, guess, card) {
             e.type === 'remJobHide' ||
             e.type === 'greenToGrey' ||
             e.type === 'wordScramble' ||
-            e.type === 'hiddenKeyboard'
+            e.type === 'hiddenKeyboard' ||
+            e.type === 'blackHand'
         )) {
             return false;
         }
@@ -4161,7 +4191,7 @@ io.on('connection', (socket) => {
         
         // Remove used effects (mark as used and remove)
         game.activeEffects = game.activeEffects.filter(e => {
-            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, remJobHide, greenToGrey, wordScramble, and hiddenKeyboard after they've been used on this guess
+            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, remJobHide, greenToGrey, wordScramble, hiddenKeyboard, and blackHand after they've been used on this guess
             // Note: timeRush is removed in the turn switch section above, not here
             if (e.target === socket.id && (
                 e.type === 'hiddenGuess' || 
@@ -4173,7 +4203,8 @@ io.on('connection', (socket) => {
                 e.type === 'remJobHide' ||
                 e.type === 'greenToGrey' ||
                 e.type === 'wordScramble' ||
-                e.type === 'hiddenKeyboard'
+                e.type === 'hiddenKeyboard' ||
+                e.type === 'blackHand'
             )) {
                 if (e.type === 'falseFeedback') {
                     console.log('Removing falseFeedback effect after it was applied to player:', socket.id);

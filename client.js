@@ -85,7 +85,7 @@ function showCreditsThenLobby() {
     
     // Auto-advance after 4.5 seconds, or allow click to skip
     let creditsTimeout = setTimeout(() => {
-        showLobby();
+        showNewCardAnnouncement();
     }, 4500);
     
     // Click to skip credits
@@ -94,10 +94,198 @@ function showCreditsThenLobby() {
         const skipCredits = (e) => {
             clearTimeout(creditsTimeout);
             creditsScreen.removeEventListener('click', skipCredits);
-            showLobby();
+            showNewCardAnnouncement();
         };
         creditsScreen.addEventListener('click', skipCredits);
     }
+}
+
+function showNewCardAnnouncement() {
+    ScreenManager.show('newCardAnnouncement');
+    
+    // Scale the announcement screen to fit after a small delay to ensure layout is complete
+    setTimeout(() => {
+        scaleNewCardAnnouncement();
+    }, 100);
+    
+    // Set up mouse tracking for card rotation
+    setupCardRotationTracking();
+    
+    // Wait for user click to continue - no auto-advance
+    const announcementScreen = document.getElementById('newCardAnnouncement');
+    if (announcementScreen) {
+        const skipAnnouncement = (e) => {
+            cleanupCardRotationTracking();
+            announcementScreen.removeEventListener('click', skipAnnouncement);
+            showLobby();
+        };
+        announcementScreen.addEventListener('click', skipAnnouncement);
+    }
+}
+
+let cardRotationTracker = null;
+let continuousRotationAngle = 0;
+
+function setupCardRotationTracking() {
+    // Clean up any existing tracking first
+    cleanupCardRotationTracking();
+    
+    const cardFlipInner = document.querySelector('.new-card-flip-inner');
+    const announcementScreen = document.getElementById('newCardAnnouncement');
+    
+    if (!cardFlipInner || !announcementScreen) return;
+    
+    // Get center of the card container
+    const cardContainer = document.querySelector('.new-card-container');
+    if (!cardContainer) return;
+    
+    let continuousRotationAngle = 0;
+    let currentRotationX = 0;
+    let currentRotationY = 0;
+    let targetRotationX = 0;
+    let targetRotationY = 0;
+    
+    // Use time-based rotation for consistent speed regardless of frame rate
+    let lastTime = performance.now();
+    
+    // Continuous rotation speed: 30 degrees per second (one full rotation every 12 seconds)
+    const rotationSpeedPerSecond = 30;
+    let animationFrameId = null;
+    
+    const handleMouseMove = (e) => {
+        const rect = cardContainer.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        
+        const mouseX = e.clientX;
+        const mouseY = e.clientY;
+        
+        // Calculate angle from center to mouse (in degrees)
+        const deltaX = mouseX - centerX;
+        const deltaY = mouseY - centerY;
+        
+        // Convert to rotation angles (inverse Y for natural feel)
+        // Limit the rotation range for a subtle effect
+        targetRotationY = (deltaX / rect.width) * 15; // Max 15 degrees
+        targetRotationX = -(deltaY / rect.height) * 15; // Max 15 degrees (inverted)
+    };
+    
+    const handleMouseLeave = () => {
+        targetRotationX = 0;
+        targetRotationY = 0;
+    };
+    
+    // Smooth animation function using time-based updates
+    const animateRotation = (currentTime) => {
+        // Calculate delta time for frame-rate independent rotation
+        const deltaTime = Math.min((currentTime - lastTime) / 1000, 0.1); // Cap at 0.1s to prevent jumps
+        lastTime = currentTime;
+        
+        // Update continuous rotation angle based on time (frame-rate independent)
+        continuousRotationAngle += rotationSpeedPerSecond * deltaTime;
+        if (continuousRotationAngle >= 360) {
+            continuousRotationAngle -= 360;
+        }
+        
+        // Smoothly interpolate towards target rotation for mouse following
+        currentRotationX += (targetRotationX - currentRotationX) * 0.1;
+        currentRotationY += (targetRotationY - currentRotationY) * 0.1;
+        
+        // Apply continuous rotation first (rotateY for spinning), then mouse-following rotations
+        // rotateY is the continuous circle rotation, rotateX is the mouse tilt
+        cardFlipInner.style.transform = `rotateY(${continuousRotationAngle + currentRotationY}deg) rotateX(${currentRotationX}deg)`;
+        
+        animationFrameId = requestAnimationFrame(animateRotation);
+    };
+    
+    // Initialize lastTime
+    lastTime = performance.now();
+    
+    // Start animation loop
+    animationFrameId = requestAnimationFrame(animateRotation);
+    
+    // Add mouse move listener
+    announcementScreen.addEventListener('mousemove', handleMouseMove);
+    announcementScreen.addEventListener('mouseleave', handleMouseLeave);
+    
+    // Store cleanup function
+    cardRotationTracker = {
+        handleMouseMove,
+        handleMouseLeave,
+        animationFrameId,
+        cleanup: () => {
+            if (animationFrameId !== null) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+            announcementScreen.removeEventListener('mousemove', handleMouseMove);
+            announcementScreen.removeEventListener('mouseleave', handleMouseLeave);
+        }
+    };
+}
+
+function cleanupCardRotationTracking() {
+    if (cardRotationTracker) {
+        cardRotationTracker.cleanup();
+        if (cardRotationTracker.animationFrameId !== null) {
+            cancelAnimationFrame(cardRotationTracker.animationFrameId);
+        }
+        cardRotationTracker = null;
+    }
+}
+
+// Scale new card announcement screen to fit viewport
+function scaleNewCardAnnouncement() {
+    const announcementScreen = document.getElementById('newCardAnnouncement');
+    const scalingContainer = document.getElementById('newCardAnnouncementScalingContainer');
+    
+    if (!announcementScreen || !scalingContainer) return;
+    
+    // Temporarily set transform to just centering (no scale) to measure natural size accurately
+    scalingContainer.style.transform = 'translate(-50%, -50%) scale(1)';
+    scalingContainer.style.webkitTransform = 'translate(-50%, -50%) scale(1)';
+    scalingContainer.style.msTransform = 'translate(-50%, -50%) scale(1)';
+    scalingContainer.style.width = 'auto';
+    scalingContainer.style.height = 'auto';
+    scalingContainer.style.minWidth = '0';
+    scalingContainer.style.minHeight = '0';
+    
+    // Force browser to recalculate layout
+    void scalingContainer.offsetWidth;
+    void scalingContainer.offsetHeight;
+    
+    // Get the natural (unscaled) dimensions of the content
+    const contentWidth = scalingContainer.scrollWidth;
+    const contentHeight = scalingContainer.scrollHeight;
+    
+    // Get available space from the parent container
+    const padding = 20; // Safety padding on all sides
+    const availableWidth = announcementScreen.clientWidth - (padding * 2);
+    const availableHeight = announcementScreen.clientHeight - (padding * 2);
+    
+    // Only proceed if we have valid dimensions
+    if (availableWidth <= 0 || availableHeight <= 0 || contentWidth <= 0 || contentHeight <= 0) {
+        return;
+    }
+    
+    // Calculate scale factors for both dimensions
+    const scaleX = availableWidth / contentWidth;
+    const scaleY = availableHeight / contentHeight;
+    
+    // Use the smaller scale to ensure everything fits in both dimensions
+    let scale = Math.min(scaleX, scaleY);
+    
+    // Apply a small safety margin (0.98) to prevent edge touching
+    scale = scale * 0.98;
+    
+    // Ensure minimum and maximum scale limits for usability
+    scale = Math.max(0.3, Math.min(scale, 2.0));
+    
+    // Apply the transform with centering and scaling
+    scalingContainer.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    scalingContainer.style.webkitTransform = `translate(-50%, -50%) scale(${scale})`;
+    scalingContainer.style.msTransform = `translate(-50%, -50%) scale(${scale})`;
+    scalingContainer.style.transformOrigin = 'center center';
 }
 
 function showLobby() {
@@ -578,7 +766,8 @@ function getCardImagePath(cardId) {
         'cardMirror': 'FollowSuit.png',
         'snackTime': 'SnackTime.png',
         'remJob': 'RemJob.png',
-        'hiddenKeyboard': 'CardeBlanche.png'
+        'hiddenKeyboard': 'CardeBlanche.png',
+        'blackHand': 'BlackHand.png'
     };
     
     const imageName = cardImageMap[cardId] || 'Blank.png';
@@ -1691,7 +1880,7 @@ const ScreenManager = {
     
     // Initialize all screens
     init() {
-        const screenIds = ['splash', 'credits', 'login', 'signup', 'guestName', 'lobby', 'waiting', 'vs', 'game', 'gameOver'];
+        const screenIds = ['splash', 'credits', 'newCardAnnouncement', 'login', 'signup', 'guestName', 'lobby', 'waiting', 'vs', 'game', 'gameOver'];
         screenIds.forEach(id => {
             const element = document.getElementById(id);
             if (!element) {
@@ -3553,6 +3742,7 @@ let resizeTimeout;
 window.addEventListener('resize', () => {
     const gameScreen = document.getElementById('game');
     const gameOverScreen = document.getElementById('gameOver');
+    const newCardAnnouncementScreen = document.getElementById('newCardAnnouncement');
     if (gameScreen && gameScreen.classList.contains('active')) {
         clearTimeout(resizeTimeout);
         resizeTimeout = setTimeout(() => {
@@ -3563,6 +3753,12 @@ window.addEventListener('resize', () => {
         clearTimeout(resizeTimeout);
         resizeTimeout = setTimeout(() => {
             scaleGameOverScreen();
+        }, 100);
+    }
+    if (newCardAnnouncementScreen && newCardAnnouncementScreen.classList.contains('active')) {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            scaleNewCardAnnouncement();
         }, 100);
     }
 });
@@ -4093,6 +4289,12 @@ function updateHandPanel() {
     // Clear existing content
     handCardsContainer.innerHTML = '';
     
+    // Check if blackHand effect is active (cards are flipped)
+    const isBlackHandActive = gameState && gameState.activeEffects && 
+        gameState.activeEffects.some(e => 
+            e.type === 'blackHand' && e.target === currentPlayer && !e.used
+        );
+    
     // Display current hand (up to 3 cards)
     if (window.playerCardHand && window.playerCardHand.length > 0) {
         window.playerCardHand.slice(0, 3).forEach((card) => {
@@ -4108,7 +4310,12 @@ function updateHandPanel() {
             
             // Create image element for the card
             const cardImage = document.createElement('img');
-            cardImage.src = getCardImagePath(card.id);
+            // If blackHand is active, show flipped card image instead
+            if (isBlackHandActive) {
+                cardImage.src = 'images/Card Images/FlipedCard.png';
+            } else {
+                cardImage.src = getCardImagePath(card.id);
+            }
             cardImage.alt = card.title || 'Unknown Card';
             cardImage.className = 'hand-card-image';
             cardElement.appendChild(cardImage);
@@ -4420,6 +4627,12 @@ function generateCards(forceGrayOut = false) {
     // Show available cards (up to 3, including blocked card but greyed out)
     const selectedCards = availableCards.slice(0, 3);
     
+    // Check if blackHand effect is active (cards are flipped)
+    const isBlackHandActive = gameState && gameState.activeEffects && 
+        gameState.activeEffects.some(e => 
+            e.type === 'blackHand' && e.target === currentPlayer && !e.used
+        );
+    
     selectedCards.forEach((card, index) => {
         const cardElement = document.createElement('div');
         const isBlocked = window.blockedCardId === card.id;
@@ -4435,7 +4648,12 @@ function generateCards(forceGrayOut = false) {
         
         // Create image element for the card
         const cardImage = document.createElement('img');
-        cardImage.src = getCardImagePath(card.id);
+        // If blackHand is active, show flipped card image instead
+        if (isBlackHandActive) {
+            cardImage.src = 'images/Card Images/FlipedCard.png';
+        } else {
+            cardImage.src = getCardImagePath(card.id);
+        }
         cardImage.alt = card.title;
         cardImage.className = 'card-image';
         cardElement.appendChild(cardImage);
