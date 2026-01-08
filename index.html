@@ -512,6 +512,58 @@
                     </div>
                     
                     <!-- Community Tab -->
+                    <!-- Messages Tab -->
+                    <div id="messagesTab" class="tab-panel">
+                        <div class="tab-panel-inner messages-tab-inner">
+                            <h2 class="tab-panel-title">Messages</h2>
+                            <div class="messages-container">
+                                <!-- Friends List Sidebar -->
+                                <div class="messages-friends-list">
+                                    <div class="messages-friends-header">
+                                        <h3>Friends</h3>
+                                    </div>
+                                    <div id="messagesFriendsList" class="messages-friends-items">
+                                        <div class="empty-state">
+                                            <div class="empty-state-icon">💬</div>
+                                            <div class="empty-state-text">Loading friends...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Chat Interface -->
+                                <div class="messages-chat-container">
+                                    <div id="noChatSelected" class="messages-no-chat-selected">
+                                        <div class="empty-state">
+                                            <div class="empty-state-icon">💬</div>
+                                            <div class="empty-state-text">Select a friend to start messaging</div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div id="messagesChatInterface" class="messages-chat-interface" style="display: none;">
+                                        <div class="messages-chat-header">
+                                            <div class="messages-chat-header-info">
+                                                <div id="messagesChatAvatar" class="messages-chat-avatar"></div>
+                                                <div>
+                                                    <div id="messagesChatName" class="messages-chat-name"></div>
+                                                    <div id="messagesChatStatus" class="messages-chat-status">Offline</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div id="messagesChatMessages" class="messages-chat-messages">
+                                            <!-- Messages will be loaded here -->
+                                        </div>
+                                        <div class="messages-chat-input-container">
+                                            <textarea id="messagesChatInput" class="messages-chat-input" placeholder="Type a message..." rows="1" maxlength="1000"></textarea>
+                                            <button id="messagesSendBtn" class="messages-send-btn">
+                                                <span class="messages-send-icon">📤</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div id="communityTab" class="tab-panel">
                         <div class="tab-panel-inner">
                             <h2 class="tab-panel-title">Community</h2>
@@ -624,7 +676,7 @@
                     </button>
                     <button class="lobby-tab" data-tab="community">
                         <div class="tab-icon-wrapper">
-                            <span class="tab-icon">💬</span>
+                            <span class="tab-icon">📋</span>
                         </div>
                         <span class="tab-label">Community</span>
                     </button>
@@ -636,6 +688,11 @@
                             <span class="tab-label">More</span>
                         </button>
                         <div id="moreTabMenu" class="more-tab-menu" style="display: none;">
+                            <button class="more-tab-item" data-tab="messages">
+                                <span class="more-tab-icon">💬</span>
+                                <span class="more-tab-label">Messages</span>
+                                <span id="messagesNotificationBadge" class="more-tab-notification" style="display: none;"></span>
+                            </button>
                             <button class="more-tab-item" data-tab="leaderboard">
                                 <span class="more-tab-icon">🏆</span>
                                 <span class="more-tab-label">Leaderboard</span>

@@ -1,8 +1,8 @@
-# Firebase Setup Instructions
+# Firebase Setup Guide
 
-To use Firebase authentication and database in Cardle, you need to:
+This guide will walk you through setting up Firebase for the Cardle game.
 
-## 1. Create a Firebase Project
+## 1. Create Firebase Project
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Click "Add project" or select an existing project
@@ -22,29 +22,21 @@ To use Firebase authentication and database in Cardle, you need to:
    - Toggle "Enable" to ON
    - Enter a project support email (your email address)
    - Click "Save"
-6. **Configure Authorized Domains** (IMPORTANT for Google sign-in):
-   - Still in **Authentication** → **Settings** tab
-   - Scroll down to **Authorized domains**
-   - Make sure your domain is listed (localhost is there by default)
-   - If deploying to Render or another service, add your domain:
-     - Click "Add domain"
-     - Enter your domain (e.g., `your-app.onrender.com`)
-     - Click "Add"
 
-## 3. Enable Firestore Database
+## 3. Create Firestore Database
 
 1. In your Firebase project, go to **Firestore Database** in the left sidebar
 2. Click **Create database**
-3. Choose **Start in test mode** (for development) or configure security rules as needed
-4. Select a location for your database
+3. Choose **Start in production mode** (we'll add security rules in step 6)
+4. Select a location for your database (choose the closest to your users)
 5. Click **Enable**
 
-## 4. Get Your Firebase Configuration
+## 4. Get Firebase Configuration
 
 1. In your Firebase project, click the gear icon ⚙️ next to "Project Overview"
 2. Select **Project settings**
-3. Scroll down to the "Your apps" section
-4. If you don't have a web app yet, click the web icon `</>` to add one
+3. Scroll down to the **Your apps** section
+4. If you don't have a web app yet, click the **</>** (web) icon to add one
 5. Register your app with a nickname (e.g., "Cardle Web")
 6. Copy the `firebaseConfig` object that looks like this:
 
@@ -152,6 +144,33 @@ service cloud.firestore {
         allow update: if false;
       }
     }
+    
+    // Messages collection - users can only read/write messages in conversations they're part of
+    match /messages/{messageId} {
+      // Users can read messages where they are the sender or receiver
+      // This rule works for both individual document reads and queries
+      allow read: if request.auth != null && 
+                   (resource.data.senderId == request.auth.uid || 
+                    resource.data.receiverId == request.auth.uid);
+      
+      // Users can create messages where they are the sender
+      allow create: if request.auth != null && 
+                     request.resource.data.senderId == request.auth.uid &&
+                     request.resource.data.receiverId != request.auth.uid;
+      
+      // Users can update messages (only to mark as read, not change content)
+      allow update: if request.auth != null && 
+                     (resource.data.senderId == request.auth.uid || 
+                      resource.data.receiverId == request.auth.uid) &&
+                     // Ensure text and IDs don't change
+                     request.resource.data.text == resource.data.text &&
+                     request.resource.data.senderId == resource.data.senderId &&
+                     request.resource.data.receiverId == resource.data.receiverId;
+      
+      // Users can delete messages they sent
+      allow delete: if request.auth != null && 
+                     resource.data.senderId == request.auth.uid;
+    }
   }
 }
 ```
@@ -162,7 +181,11 @@ service cloud.firestore {
 
 - **`/users/{userId}`**: Users can only read and write their own user profile data
 - **`/stats/{userId}`**: Users can only read and write their own game statistics
-- Both rules require authentication (`request.auth != null`) and verify the user ID matches (`request.auth.uid == userId`)
+- **`/friends/{friendDocId}`**: Users can read/write friend relationships they're part of
+- **`/decks/{userId}`**: Users can only read/write their own decks
+- **`/communityPosts/{postId}`**: Users can read all posts, create their own, update likes/comment counts, and delete their own posts
+- **`/communityPosts/{postId}/comments/{commentId}`**: Users can read all comments, create their own, and delete their own comments
+- **`/messages/{messageId}`**: Users can read messages where they're the sender or receiver, create messages where they're the sender, update read status, and delete messages they sent
 
 ### Switching from Test Mode to Production Mode:
 
@@ -177,25 +200,44 @@ If you created your Firestore database in **test mode**, you need to switch to p
 7. Make sure the security rules above are in place (they should already be there)
 8. Click **Publish** to activate production mode
 
-**Important**: Test mode allows anyone to read/write your database for 30 days. Production mode uses your security rules to protect your data.
+## 7. Create Firestore Indexes (if needed)
 
-### Testing Your Rules:
+Firestore may require composite indexes for certain queries. If you see an error message about needing an index:
 
-After publishing, you can test the rules using the Rules Playground in the Firebase Console, or by testing in your application.
+1. Click the link in the error message, or
+2. Go to [Firebase Console](https://console.firebase.google.com/) → Firestore Database → Indexes tab
+3. Click **Create Index**
+4. Follow the prompts to create the required index
 
-## 7. Test Your Setup
+**Note**: The messages collection may need an index for `conversationId` + `createdAt` queries. If you see an index error, create it with:
+- Collection: `messages`
+- Fields: `conversationId` (Ascending), `createdAt` (Ascending)
 
-1. Start your server: `npm start`
-2. Open your application in a browser
-3. You should see the login screen
-4. Try creating an account and signing in
-5. After signing in, you should see the lobby screen
+## 8. Test Your Setup
+
+1. Open your game in a browser
+2. Try signing up/signing in with email/password or Google
+3. Check the browser console for any errors
+4. Verify that user data is being saved to Firestore
 
 ## Troubleshooting
 
-- **"Firebase Auth not initialized"**: Make sure `firebase-config.js` is loaded before `client.js` in `index.html`
-- **Authentication errors**: Verify that Email/Password authentication is enabled in Firebase Console
-- **Firestore errors**: Make sure Firestore Database is created and security rules allow authenticated users
+### Common Issues:
 
-For more information, visit the [Firebase Documentation](https://firebase.google.com/docs).
+1. **"Missing or insufficient permissions"**: 
+   - Make sure you've published the security rules
+   - Verify the user is authenticated (`request.auth != null`)
+   - Check that the user ID matches (`request.auth.uid == userId`)
 
+2. **"Index required"**: 
+   - Create the composite index as shown in the error message
+   - Wait a few minutes for the index to build
+
+3. **"User not authenticated"**: 
+   - Make sure Authentication is enabled in Firebase
+   - Check that the user is signed in before trying to access Firestore
+
+4. **Messages query failing**:
+   - Ensure the security rules for messages are published
+   - Check that `senderId` and `receiverId` fields are set correctly in message documents
+   - Create a composite index for `conversationId` + `createdAt` if needed

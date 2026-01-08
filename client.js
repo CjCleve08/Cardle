@@ -6711,6 +6711,15 @@ function switchTab(tabName) {
         initializeSettings();
     }
     
+    // If switching to messages tab, load friends for messaging
+    if (tabName === 'messages') {
+        loadMessagesFriends();
+        // Also load unread counts
+        loadUnreadMessageCounts();
+        // Note: Individual friend unread counts (green dots) remain until you open their specific chat
+        // The notification badge will update automatically based on remaining unread counts
+    }
+    
     // If switching to community tab, load community posts
     if (tabName === 'community') {
         loadCommunityPosts();
@@ -9054,7 +9063,8 @@ document.getElementById('chatShowBtn').addEventListener('click', toggleChat);
 
 // Keyboard input handling
 document.addEventListener('keydown', (e) => {
-    if (screens.game.classList.contains('active')) {
+    const gameScreen = document.getElementById('game');
+    if (gameScreen && gameScreen.classList.contains('active')) {
         const input = document.getElementById('wordInput');
         const chatInput = document.getElementById('chatInput');
         
@@ -10475,5 +10485,631 @@ document.addEventListener('DOMContentLoaded', () => {
     window.likePost = likePost;
     window.openPostDetail = openPostDetail;
     window.deletePost = deletePost;
+    
+    // Messages tab event listeners
+    const messagesSendBtn = document.getElementById('messagesSendBtn');
+    const messagesChatInput = document.getElementById('messagesChatInput');
+    
+    if (messagesSendBtn && messagesChatInput) {
+        messagesSendBtn.addEventListener('click', () => {
+            if (!currentChatFriendId) return;
+            const text = messagesChatInput.value.trim();
+            if (text) {
+                sendMessage(currentChatFriendId, text);
+            }
+        });
+        
+        // Send on Enter (Shift+Enter for new line)
+        messagesChatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (currentChatFriendId && messagesChatInput.value.trim()) {
+                    sendMessage(currentChatFriendId, messagesChatInput.value);
+                }
+            }
+        });
+        
+        // Auto-resize textarea
+        messagesChatInput.addEventListener('input', () => {
+            messagesChatInput.style.height = 'auto';
+            messagesChatInput.style.height = Math.min(messagesChatInput.scrollHeight, 120) + 'px';
+        });
+    }
 });
+
+// ==================== MESSAGING FUNCTIONALITY ====================
+
+let currentChatFriendId = null;
+let messageListeners = {}; // Store listeners for cleanup
+let friendsForMessaging = [];
+let unreadMessageCounts = {}; // Track unread messages per friend: { friendId: count }
+let lastMessageTimes = {}; // Track last message time per friend: { friendId: timestamp }
+
+// Load friends list for messaging
+async function loadMessagesFriends() {
+    if (!currentUser || !window.firebaseDb) return;
+    
+    try {
+        // Reuse the friends list data if available, otherwise load it
+        if (friendsListData.length === 0) {
+            await loadFriends();
+        }
+        
+        friendsForMessaging = [...friendsListData];
+        renderMessagesFriendsList();
+    } catch (error) {
+        console.error('Error loading friends for messaging:', error);
+    }
+}
+
+// Render friends list in messages tab
+function renderMessagesFriendsList() {
+    const friendsListEl = document.getElementById('messagesFriendsList');
+    if (!friendsListEl) return;
+    
+    if (friendsForMessaging.length === 0) {
+        friendsListEl.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">👥</div>
+                <div class="empty-state-text">No friends yet. Add friends to start messaging!</div>
+            </div>
+        `;
+        return;
+    }
+    
+    // Sort by last message time (newest first), then by name
+    const sortedFriends = [...friendsForMessaging].sort((a, b) => {
+        const aTime = lastMessageTimes[a.id] || 0;
+        const bTime = lastMessageTimes[b.id] || 0;
+        
+        // Friends with messages come first
+        if (aTime > 0 && bTime === 0) return -1;
+        if (aTime === 0 && bTime > 0) return 1;
+        
+        // If both have messages, sort by time (newest first)
+        if (aTime > 0 && bTime > 0) {
+            return bTime - aTime;
+        }
+        
+        // If neither has messages, sort by name
+        return (a.name || '').localeCompare(b.name || '');
+    });
+    
+    friendsListEl.innerHTML = sortedFriends.map(friend => {
+        const initial = friend.name ? friend.name.charAt(0).toUpperCase() : '?';
+        const avatarStyle = friend.photoURL 
+            ? `background-image: url(${friend.photoURL}); background-size: cover; background-position: center;` 
+            : '';
+        const isActive = currentChatFriendId === friend.id ? 'active' : '';
+        const unreadCount = unreadMessageCounts[friend.id] || 0;
+        const hasUnread = unreadCount > 0 && currentChatFriendId !== friend.id;
+        
+        return `
+            <div class="messages-friend-item ${isActive}" data-friend-id="${friend.id}" onclick="openChatWithFriend('${friend.id}')">
+                <div class="messages-friend-avatar" style="${avatarStyle}">${friend.photoURL ? '' : initial}</div>
+                ${hasUnread ? '<div class="messages-unread-indicator"></div>' : ''}
+                <div class="messages-friend-info">
+                    <div class="messages-friend-name">${escapeHtml(friend.name || 'Unknown')}</div>
+                    <div class="messages-friend-preview" id="friendPreview_${friend.id}">Tap to start chatting</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // Update notification badge in More menu
+    updateMessagesNotificationBadge();
+}
+
+// Open chat with a friend
+async function openChatWithFriend(friendId) {
+    if (!currentUser || !window.firebaseDb) return;
+    
+    // Clear unread count for this friend when opening chat
+    unreadMessageCounts[friendId] = 0;
+    updateMessagesNotificationBadge();
+    
+    // Mark all messages from this friend as read (update in Firestore)
+    try {
+        const unreadMessagesQuery = window.firebaseDb.collection('messages')
+            .where('senderId', '==', friendId)
+            .where('receiverId', '==', currentUser.uid)
+            .where('read', '==', false);
+        
+        const unreadSnapshot = await unreadMessagesQuery.get();
+        const batch = window.firebaseDb.batch();
+        
+        unreadSnapshot.forEach(doc => {
+            batch.update(doc.ref, { read: true });
+        });
+        
+        if (unreadSnapshot.size > 0) {
+            await batch.commit();
+        }
+    } catch (error) {
+        console.error('Error marking messages as read:', error);
+        // Continue even if marking as read fails
+    }
+    
+    // Remove active state from all friends
+    document.querySelectorAll('.messages-friend-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    
+    // Add active state to selected friend
+    const selectedFriendItem = document.querySelector(`[data-friend-id="${friendId}"]`);
+    if (selectedFriendItem) {
+        selectedFriendItem.classList.add('active');
+        // Remove unread indicator
+        const unreadIndicator = selectedFriendItem.querySelector('.messages-unread-indicator');
+        if (unreadIndicator) unreadIndicator.remove();
+    }
+    
+    currentChatFriendId = friendId;
+    
+    // Find friend data
+    const friend = friendsForMessaging.find(f => f.id === friendId);
+    if (!friend) return;
+    
+    // Update chat interface
+    const chatInterface = document.getElementById('messagesChatInterface');
+    const noChatSelected = document.getElementById('noChatSelected');
+    
+    if (chatInterface) chatInterface.style.display = 'flex';
+    if (noChatSelected) noChatSelected.style.display = 'none';
+    
+    // Update chat header
+    const chatAvatar = document.getElementById('messagesChatAvatar');
+    const chatName = document.getElementById('messagesChatName');
+    const chatStatus = document.getElementById('messagesChatStatus');
+    
+    if (chatAvatar) {
+        const initial = friend.name ? friend.name.charAt(0).toUpperCase() : '?';
+        const avatarStyle = friend.photoURL 
+            ? `background-image: url(${friend.photoURL}); background-size: cover; background-position: center;` 
+            : '';
+        chatAvatar.style.cssText = avatarStyle || '';
+        chatAvatar.textContent = friend.photoURL ? '' : initial;
+    }
+    
+    if (chatName) chatName.textContent = friend.name || 'Unknown';
+    
+    // Check if friend is online (you can enhance this later)
+    if (chatStatus) {
+        chatStatus.textContent = 'Online'; // Can check from friendsActivityStatus
+    }
+    
+    // Load messages for this conversation
+    await loadConversationMessages(friendId);
+    
+    // Set up real-time listener
+    setupMessageListener(friendId);
+    
+    // Re-render friends list to update unread indicators
+    renderMessagesFriendsList();
+}
+
+// Create or get conversation ID (sorted user IDs to ensure consistency)
+function getConversationId(userId1, userId2) {
+    return [userId1, userId2].sort().join('_');
+}
+
+// Load messages for a conversation
+async function loadConversationMessages(friendId) {
+    if (!currentUser || !window.firebaseDb) return;
+    
+    const messagesEl = document.getElementById('messagesChatMessages');
+    if (!messagesEl) return;
+    
+    try {
+        const conversationId = getConversationId(currentUser.uid, friendId);
+        
+        // Query messages where current user is sender and friend is receiver, OR vice versa
+        // This matches the security rules which check senderId/receiverId
+        const sentMessagesQuery = window.firebaseDb.collection('messages')
+            .where('senderId', '==', currentUser.uid)
+            .where('receiverId', '==', friendId);
+        
+        const receivedMessagesQuery = window.firebaseDb.collection('messages')
+            .where('senderId', '==', friendId)
+            .where('receiverId', '==', currentUser.uid);
+        
+        // Execute both queries in parallel
+        const [sentSnapshot, receivedSnapshot] = await Promise.all([
+            sentMessagesQuery.get(),
+            receivedMessagesQuery.get()
+        ]);
+        
+        // Combine results
+        const messages = [];
+        sentSnapshot.forEach(doc => {
+            messages.push({
+                id: doc.id,
+                ...doc.data(),
+                createdAt: doc.data().createdAt
+            });
+        });
+        receivedSnapshot.forEach(doc => {
+            messages.push({
+                id: doc.id,
+                ...doc.data(),
+                createdAt: doc.data().createdAt
+            });
+        });
+        
+        if (messages.length === 0) {
+            messagesEl.innerHTML = `
+                <div class="messages-empty-state">
+                    <div class="empty-state-text">No messages yet. Start the conversation!</div>
+                </div>
+            `;
+            return;
+        }
+        
+        // Sort by createdAt (oldest first)
+        messages.sort((a, b) => {
+            const aTime = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
+            const bTime = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
+            return aTime.getTime() - bTime.getTime();
+        });
+        
+        // Update last message time for this friend
+        if (messages.length > 0) {
+            const lastMessage = messages[messages.length - 1];
+            const lastTime = lastMessage.createdAt?.toDate ? lastMessage.createdAt.toDate() : new Date(lastMessage.createdAt || 0);
+            lastMessageTimes[friendId] = lastTime.getTime();
+            
+            // Count unread messages (messages from friend that haven't been read)
+            // Only count if chat is not currently open
+            if (currentChatFriendId !== friendId) {
+                const unreadMessages = messages.filter(msg => 
+                    msg.senderId === friendId && 
+                    msg.receiverId === currentUser.uid &&
+                    (!msg.read || msg.read === false)
+                );
+                unreadMessageCounts[friendId] = unreadMessages.length;
+            } else {
+                // Chat is open, clear unread count
+                unreadMessageCounts[friendId] = 0;
+            }
+        }
+        
+        renderMessages(messages);
+        // Update friends list to show new sorting and indicators
+        renderMessagesFriendsList();
+        
+    } catch (error) {
+        console.error('Error loading messages:', error);
+        messagesEl.innerHTML = '<div class="messages-empty-state"><div class="empty-state-text">Error loading messages</div></div>';
+    }
+}
+
+// Render messages in chat
+function renderMessages(messages) {
+    const messagesEl = document.getElementById('messagesChatMessages');
+    if (!messagesEl) return;
+    
+    if (messages.length === 0) {
+        messagesEl.innerHTML = `
+            <div class="messages-empty-state">
+                <div class="empty-state-text">No messages yet. Start the conversation!</div>
+            </div>
+        `;
+        return;
+    }
+    
+    // Store current scroll position to determine if user was at bottom
+    const wasAtBottom = messagesEl.scrollHeight - messagesEl.scrollTop <= messagesEl.clientHeight + 10;
+    
+    messagesEl.innerHTML = messages.map(message => {
+        const isOwn = message.senderId === currentUser.uid;
+        const timestamp = message.createdAt?.toDate ? message.createdAt.toDate() : new Date(message.createdAt || Date.now());
+        const timeStr = formatMessageTime(timestamp);
+        
+        return `
+            <div class="message-item ${isOwn ? 'message-own' : 'message-other'}">
+                <div class="message-content">
+                    ${escapeHtml(message.text || '')}
+                </div>
+                <div class="message-time">${timeStr}</div>
+            </div>
+        `;
+    }).join('');
+    
+    // Scroll to bottom after DOM is updated
+    // Use multiple methods to ensure it works
+    const scrollToBottom = () => {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    };
+    
+    // Try immediate scroll
+    scrollToBottom();
+    
+    // Also use requestAnimationFrame to ensure layout is complete
+    requestAnimationFrame(() => {
+        scrollToBottom();
+        // Double-check with a small delay to catch any late layout changes
+        setTimeout(scrollToBottom, 10);
+    });
+}
+
+// Format message time
+function formatMessageTime(date) {
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    
+    // Older than a week, show date
+    return date.toLocaleDateString();
+}
+
+// Send a message
+async function sendMessage(friendId, text) {
+    if (!currentUser || !window.firebaseDb) return;
+    if (!text.trim()) return;
+    
+    try {
+        const conversationId = getConversationId(currentUser.uid, friendId);
+        
+        const messageData = {
+            conversationId: conversationId,
+            senderId: currentUser.uid,
+            receiverId: friendId,
+            text: text.trim(),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            read: false
+        };
+        
+        await window.firebaseDb.collection('messages').add(messageData);
+        
+        // Clear input
+        const chatInput = document.getElementById('messagesChatInput');
+        if (chatInput) chatInput.value = '';
+        
+        // Update preview for this friend
+        updateFriendPreview(friendId, text.trim());
+        
+        // Optimistically add the message to the UI immediately (before Firestore listener updates)
+        // This prevents the "jump to top" issue
+        const messagesEl = document.getElementById('messagesChatMessages');
+        if (messagesEl && currentChatFriendId === friendId) {
+            const tempMessage = {
+                id: 'temp_' + Date.now(),
+                senderId: currentUser.uid,
+                receiverId: friendId,
+                text: text.trim(),
+                createdAt: new Date()
+            };
+            
+            // Add message to bottom of list
+            const messageHTML = `
+                <div class="message-item message-own">
+                    <div class="message-content">
+                        ${escapeHtml(text.trim())}
+                    </div>
+                    <div class="message-time">Just now</div>
+                </div>
+            `;
+            messagesEl.insertAdjacentHTML('beforeend', messageHTML);
+            
+            // Scroll to bottom immediately
+            requestAnimationFrame(() => {
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+                setTimeout(() => {
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                }, 50);
+            });
+        }
+        
+        // Messages will reload automatically via the real-time listener (which will replace the temp message)
+        
+    } catch (error) {
+        console.error('Error sending message:', error);
+        alert('Failed to send message. Please try again.');
+    }
+}
+
+// Update friend preview with last message
+function updateFriendPreview(friendId, text) {
+    const previewEl = document.getElementById(`friendPreview_${friendId}`);
+    if (previewEl) {
+        previewEl.textContent = text.length > 50 ? text.substring(0, 50) + '...' : text;
+    }
+}
+
+// Set up real-time listener for new messages
+function setupMessageListener(friendId) {
+    // Clean up previous listener
+    if (messageListeners[friendId]) {
+        messageListeners[friendId]();
+        delete messageListeners[friendId];
+    }
+    
+    if (!currentUser || !window.firebaseDb) return;
+    
+    // Listen for new messages where current user is sender or receiver
+    // Use two listeners to match security rules
+    let unsubscribeSent, unsubscribeReceived;
+    
+    // Listen to messages sent by current user to friend
+    unsubscribeSent = window.firebaseDb.collection('messages')
+        .where('senderId', '==', currentUser.uid)
+        .where('receiverId', '==', friendId)
+        .onSnapshot(snapshot => {
+            snapshot.docChanges().forEach(change => {
+                if (change.type === 'added') {
+                    const message = {
+                        id: change.doc.id,
+                        ...change.doc.data()
+                    };
+                    // Update last message time
+                    const messageTime = message.createdAt?.toDate ? message.createdAt.toDate() : new Date(message.createdAt || 0);
+                    lastMessageTimes[friendId] = messageTime.getTime();
+                    
+                    // Only reload if chat is open with this friend (to avoid unnecessary reloads)
+                    if (currentChatFriendId === friendId) {
+                        // Remove any temporary messages first
+                        const messagesEl = document.getElementById('messagesChatMessages');
+                        if (messagesEl) {
+                            const tempMessages = messagesEl.querySelectorAll('[id^="temp_"]');
+                            tempMessages.forEach(temp => temp.remove());
+                        }
+                        // Reload all messages
+                        loadConversationMessages(friendId);
+                    }
+                    // Update preview
+                    if (message.text) {
+                        updateFriendPreview(friendId, message.text);
+                    }
+                    // Re-render friends list to update sorting
+                    renderMessagesFriendsList();
+                }
+            });
+        }, error => {
+            console.error('Error listening to sent messages:', error);
+        });
+    
+    // Listen to messages received from friend
+    unsubscribeReceived = window.firebaseDb.collection('messages')
+        .where('senderId', '==', friendId)
+        .where('receiverId', '==', currentUser.uid)
+        .onSnapshot(snapshot => {
+            snapshot.docChanges().forEach(change => {
+                if (change.type === 'added') {
+                    const message = {
+                        id: change.doc.id,
+                        ...change.doc.data()
+                    };
+                    // Update last message time
+                    const messageTime = message.createdAt?.toDate ? message.createdAt.toDate() : new Date(message.createdAt || 0);
+                    lastMessageTimes[friendId] = messageTime.getTime();
+                    
+                    // If chat is not open with this friend, increment unread count
+                    if (currentChatFriendId !== friendId) {
+                        unreadMessageCounts[friendId] = (unreadMessageCounts[friendId] || 0) + 1;
+                        updateMessagesNotificationBadge();
+                    } else {
+                        // Chat is open, mark message as read immediately (async, don't await)
+                        const messageRef = window.firebaseDb.collection('messages').doc(message.id);
+                        messageRef.update({ read: true }).catch(error => {
+                            console.error('Error marking message as read:', error);
+                        });
+                    }
+                    
+                    // Reload all messages (always reload for received messages to show them)
+                    loadConversationMessages(friendId);
+                    // Update preview
+                    if (message.text) {
+                        updateFriendPreview(friendId, message.text);
+                    }
+                    // Re-render friends list to update sorting and indicators
+                    renderMessagesFriendsList();
+                }
+            });
+        }, error => {
+            console.error('Error listening to received messages:', error);
+        });
+    
+    // Store both unsubscribers
+    messageListeners[friendId] = () => {
+        if (unsubscribeSent) unsubscribeSent();
+        if (unsubscribeReceived) unsubscribeReceived();
+    };
+}
+
+// Update messages notification badge in More menu
+function updateMessagesNotificationBadge() {
+    const badge = document.getElementById('messagesNotificationBadge');
+    if (!badge) return;
+    
+    const totalUnread = Object.values(unreadMessageCounts).reduce((sum, count) => sum + count, 0);
+    
+    if (totalUnread > 0) {
+        badge.style.display = 'block';
+        badge.textContent = totalUnread > 99 ? '99+' : totalUnread.toString();
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+// Load unread message counts for all friends
+async function loadUnreadMessageCounts() {
+    if (!currentUser || !window.firebaseDb) return;
+    
+    try {
+        // Reset counts
+        unreadMessageCounts = {};
+        lastMessageTimes = {};
+        
+        // Load all friends
+        if (friendsForMessaging.length === 0) {
+            await loadMessagesFriends();
+        }
+        
+        // For each friend, check for unread messages
+        for (const friend of friendsForMessaging) {
+            try {
+                // Get the most recent message where friend sent to current user
+                const recentMessagesQuery = window.firebaseDb.collection('messages')
+                    .where('senderId', '==', friend.id)
+                    .where('receiverId', '==', currentUser.uid)
+                    .limit(1);
+                
+                const snapshot = await recentMessagesQuery.get();
+                
+                if (!snapshot.empty) {
+                    snapshot.forEach(doc => {
+                        const message = doc.data();
+                        const messageTime = message.createdAt?.toDate ? message.createdAt.toDate() : new Date(message.createdAt || 0);
+                        lastMessageTimes[friend.id] = messageTime.getTime();
+                    });
+                }
+                
+                // Count unread messages (messages not read)
+                if (currentChatFriendId !== friend.id) {
+                    // Count messages that haven't been marked as read
+                    try {
+                        const unreadQuery = window.firebaseDb.collection('messages')
+                            .where('senderId', '==', friend.id)
+                            .where('receiverId', '==', currentUser.uid)
+                            .where('read', '==', false);
+                        
+                        const unreadSnapshot = await unreadQuery.get();
+                        unreadMessageCounts[friend.id] = unreadSnapshot.size;
+                    } catch (error) {
+                        // If query fails (e.g., no index), use simplified count
+                        // Check if there are any messages at all
+                        if (!snapshot.empty) {
+                            unreadMessageCounts[friend.id] = 1;
+                        } else {
+                            unreadMessageCounts[friend.id] = 0;
+                        }
+                    }
+                } else {
+                    // Chat is open, no unread messages
+                    unreadMessageCounts[friend.id] = 0;
+                }
+            } catch (error) {
+                console.error(`Error loading unread count for friend ${friend.id}:`, error);
+            }
+        }
+        
+        // Update UI
+        renderMessagesFriendsList();
+        updateMessagesNotificationBadge();
+    } catch (error) {
+        console.error('Error loading unread message counts:', error);
+    }
+}
+
+// Make openChatWithFriend globally available
+window.openChatWithFriend = openChatWithFriend;
 

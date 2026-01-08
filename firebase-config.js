@@ -15,18 +15,22 @@ const firebaseConfig = {
 
 // Check if Firebase is loaded before initializing
 if (typeof firebase !== 'undefined') {
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-    
-    // Initialize Firebase services
-    const auth = firebase.auth();
-    const db = firebase.firestore();
-    
-    // Make Firebase services available globally
-    window.firebaseAuth = auth;
-    window.firebaseDb = db;
-    
-    console.log('Firebase initialized successfully');
+    try {
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        
+        // Initialize Firebase services
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        
+        // Make Firebase services available globally
+        window.firebaseAuth = auth;
+        window.firebaseDb = db;
+        
+        console.log('Firebase initialized successfully');
+    } catch (error) {
+        console.error('Error initializing Firebase:', error);
+    }
 } else {
     console.error('Firebase SDK not loaded. Make sure Firebase scripts are included in index.html');
 }
