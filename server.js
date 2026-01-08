@@ -687,11 +687,60 @@ const matchmakingQueue = [];
 // Track bot matchmaking timeouts
 const matchmakingTimeouts = new Map(); // socket.id -> timeout
 
-// Bot names pool
-const BOT_NAMES = [
-    'Alex', 'Jordan', 'Casey', 'Sam', 'Taylor', 'Morgan', 'Riley', 'Jamie',
+// Bot names pool - realistic gaming usernames
+const BOT_NAME_BASES = [
+    'Shadow', 'Night', 'Dark', 'Light', 'Fire', 'Ice', 'Storm', 'Thunder',
+    'Dragon', 'Wolf', 'Eagle', 'Phoenix', 'Tiger', 'Lion', 'Falcon', 'Raven',
+    'Blade', 'Sword', 'Arrow', 'Shield', 'Knight', 'Warrior', 'Hunter', 'Ranger',
+    'Ghost', 'Demon', 'Angel', 'Spirit', 'Mystic', 'Sage', 'Wizard', 'Mage',
+    'Ninja', 'Samurai', 'Viking', 'Spartan', 'Gladiator', 'Champion', 'Legend', 'Hero',
+    'Pro', 'Elite', 'Master', 'Ace', 'Star', 'King', 'Queen', 'Prince',
+    'Gamer', 'Player', 'Noob', 'Veteran', 'Rookie', 'Expert', 'Novice', 'Pro',
+    'Alpha', 'Beta', 'Omega', 'Delta', 'Gamma', 'Sigma', 'Zeta', 'Nova',
+    'Crimson', 'Azure', 'Emerald', 'Golden', 'Silver', 'Bronze', 'Platinum', 'Diamond',
+    'Swift', 'Fast', 'Quick', 'Rapid', 'Blaze', 'Flash', 'Bolt', 'Speed',
+    'Cool', 'Epic', 'Awesome', 'Sick', 'Dope', 'Rad', 'Lit', 'Fire'
+];
+
+// Real first names
+const BOT_FIRST_NAMES = [
+    'Nick', 'Alex', 'Jordan', 'Casey', 'Sam', 'Taylor', 'Morgan', 'Riley', 'Jamie',
     'Quinn', 'Avery', 'Blake', 'Cameron', 'Dakota', 'Emery', 'Finley', 'Hayden',
-    'Parker', 'River', 'Sage', 'Skylar'
+    'Parker', 'River', 'Sage', 'Skylar', 'Chris', 'Mike', 'Tom', 'John', 'Matt',
+    'Dan', 'Ben', 'Jake', 'Ryan', 'Kevin', 'Steve', 'Dave', 'Mark', 'Luke',
+    'Emma', 'Sarah', 'Jessica', 'Emily', 'Olivia', 'Sophia', 'Mia', 'Isabella',
+    'Ava', 'Charlotte', 'Amelia', 'Harper', 'Evelyn', 'Abigail', 'Ella', 'Lily'
+];
+
+// Real last names
+const BOT_LAST_NAMES = [
+    'Jones', 'Smith', 'Johnson', 'Williams', 'Brown', 'Davis', 'Miller', 'Wilson',
+    'Moore', 'Taylor', 'Anderson', 'Thomas', 'Jackson', 'White', 'Harris', 'Martin',
+    'Thompson', 'Garcia', 'Martinez', 'Robinson', 'Clark', 'Rodriguez', 'Lewis', 'Lee',
+    'Walker', 'Hall', 'Allen', 'Young', 'King', 'Wright', 'Lopez', 'Hill',
+    'Scott', 'Green', 'Adams', 'Baker', 'Gonzalez', 'Nelson', 'Carter', 'Mitchell',
+    'Perez', 'Roberts', 'Turner', 'Phillips', 'Campbell', 'Parker', 'Evans', 'Edwards'
+];
+
+// Silly/funny names
+const BOT_SILLY_NAMES = [
+    'Salivia', 'Pickle', 'Noodle', 'Bubble', 'Waffle', 'Pancake', 'Toast', 'Bagel',
+    'Cheese', 'Burrito', 'Taco', 'Pizza', 'Sushi', 'Ramen', 'Cookie', 'Cupcake',
+    'Banana', 'Potato', 'Tomato', 'Carrot', 'Broccoli', 'Cucumber', 'Zucchini', 'Eggplant',
+    'Penguin', 'Duck', 'Goose', 'Chicken', 'Turkey', 'Cow', 'Pig', 'Sheep',
+    'Squirrel', 'Raccoon', 'Possum', 'Beaver', 'Moose', 'Elk', 'Deer', 'Bear',
+    'Frog', 'Toad', 'Lizard', 'Snake', 'Turtle', 'Tortoise', 'Crab', 'Lobster',
+    'Spoon', 'Fork', 'Knife', 'Plate', 'Bowl', 'Cup', 'Mug', 'Bottle',
+    'Sock', 'Shoe', 'Hat', 'Glove', 'Scarf', 'Shirt', 'Pants', 'Jacket'
+];
+
+const BOT_NAME_SUFFIXES = [
+    'Pro', 'Master', 'Elite', 'Ace', 'King', 'Queen', 'Lord', 'God',
+    'X', 'XX', '99', '2024', '2023', 'Gamer', 'Player', 'Warrior'
+];
+
+const BOT_NAME_PREFIXES = [
+    'xX', 'Xx', 'x', 'X', 'The', 'Mr', 'Ms', 'Dr'
 ];
 
 // Bot games tracking
@@ -947,8 +996,130 @@ function applyPermutationToArray(array, permutation) {
 // ==================== BOT AI SYSTEM ====================
 
 function getRandomBotName() {
-    return BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)] + 
-           Math.floor(Math.random() * 1000).toString();
+    // Helper function to truncate name to 12 characters
+    const truncateTo12 = (name) => {
+        if (name.length <= 12) return name;
+        return name.substring(0, 12);
+    };
+    
+    const patterns = [
+        // Pattern 1: Just first name (simple, realistic - 30% chance)
+        () => {
+            const firstName = BOT_FIRST_NAMES[Math.floor(Math.random() * BOT_FIRST_NAMES.length)];
+            return truncateTo12(firstName);
+        },
+        // Pattern 2: Just last name (simple, realistic)
+        () => {
+            const lastName = BOT_LAST_NAMES[Math.floor(Math.random() * BOT_LAST_NAMES.length)];
+            return truncateTo12(lastName);
+        },
+        // Pattern 3: Just silly name (simple, like "Salivia")
+        () => {
+            const silly = BOT_SILLY_NAMES[Math.floor(Math.random() * BOT_SILLY_NAMES.length)];
+            return truncateTo12(silly);
+        },
+        // Pattern 4: First name + last name (no space, realistic)
+        () => {
+            const firstName = BOT_FIRST_NAMES[Math.floor(Math.random() * BOT_FIRST_NAMES.length)];
+            const lastName = BOT_LAST_NAMES[Math.floor(Math.random() * BOT_LAST_NAMES.length)];
+            return truncateTo12(firstName + lastName);
+        },
+        // Pattern 5: First name + underscore + last name
+        () => {
+            const firstName = BOT_FIRST_NAMES[Math.floor(Math.random() * BOT_FIRST_NAMES.length)];
+            const lastName = BOT_LAST_NAMES[Math.floor(Math.random() * BOT_LAST_NAMES.length)];
+            return truncateTo12(firstName + '_' + lastName);
+        },
+        // Pattern 6: First name + 1-2 digit number (realistic)
+        () => {
+            const firstName = BOT_FIRST_NAMES[Math.floor(Math.random() * BOT_FIRST_NAMES.length)];
+            const num = Math.floor(Math.random() * 99) + 1;
+            return truncateTo12(firstName + num);
+        },
+        // Pattern 7: Last name + 1-2 digit number
+        () => {
+            const lastName = BOT_LAST_NAMES[Math.floor(Math.random() * BOT_LAST_NAMES.length)];
+            const num = Math.floor(Math.random() * 99) + 1;
+            return truncateTo12(lastName + num);
+        },
+        // Pattern 8: First name + underscore + 1-2 digit number
+        () => {
+            const firstName = BOT_FIRST_NAMES[Math.floor(Math.random() * BOT_FIRST_NAMES.length)];
+            const num = Math.floor(Math.random() * 99) + 1;
+            return truncateTo12(firstName + '_' + num);
+        },
+        // Pattern 9: Silly name + 1-2 digit number
+        () => {
+            const silly = BOT_SILLY_NAMES[Math.floor(Math.random() * BOT_SILLY_NAMES.length)];
+            const num = Math.floor(Math.random() * 99) + 1;
+            return truncateTo12(silly + num);
+        },
+        // Pattern 10: Gaming base (no numbers, just the word)
+        () => {
+            const base = BOT_NAME_BASES[Math.floor(Math.random() * BOT_NAME_BASES.length)];
+            return truncateTo12(base);
+        },
+        // Pattern 11: Gaming base + 1-2 digit number
+        () => {
+            const base = BOT_NAME_BASES[Math.floor(Math.random() * BOT_NAME_BASES.length)];
+            const num = Math.floor(Math.random() * 99) + 1;
+            return truncateTo12(base + num);
+        },
+        // Pattern 12: Gaming base + underscore + 1-2 digit number
+        () => {
+            const base = BOT_NAME_BASES[Math.floor(Math.random() * BOT_NAME_BASES.length)];
+            const num = Math.floor(Math.random() * 99) + 1;
+            return truncateTo12(base + '_' + num);
+        },
+        // Pattern 13: Gaming base + suffix (no numbers)
+        () => {
+            const base = BOT_NAME_BASES[Math.floor(Math.random() * BOT_NAME_BASES.length)];
+            const suffix = BOT_NAME_SUFFIXES[Math.floor(Math.random() * BOT_NAME_SUFFIXES.length)];
+            return truncateTo12(base + suffix);
+        },
+        // Pattern 14: Short gaming base + short suffix
+        () => {
+            // Use shorter bases for this pattern
+            const shortBases = ['Fire', 'Ice', 'Dark', 'Light', 'Wolf', 'Eagle', 'Blade', 'Ghost', 'Ninja', 'King'];
+            const base = shortBases[Math.floor(Math.random() * shortBases.length)];
+            const suffix = BOT_NAME_SUFFIXES[Math.floor(Math.random() * BOT_NAME_SUFFIXES.length)];
+            return truncateTo12(base + suffix);
+        },
+        // Pattern 15: Two short words combined
+        () => {
+            const shortBases = ['Fire', 'Ice', 'Dark', 'Light', 'Wolf', 'Eagle', 'Blade', 'Ghost', 'Ninja', 'King', 'Star', 'Moon'];
+            const base1 = shortBases[Math.floor(Math.random() * shortBases.length)];
+            const base2 = shortBases[Math.floor(Math.random() * shortBases.length)];
+            if (base1 === base2) {
+                const num = Math.floor(Math.random() * 9) + 1;
+                return truncateTo12(base1 + num);
+            }
+            return truncateTo12(base1 + base2);
+        },
+        // Pattern 16: First name + last initial
+        () => {
+            const firstName = BOT_FIRST_NAMES[Math.floor(Math.random() * BOT_FIRST_NAMES.length)];
+            const lastName = BOT_LAST_NAMES[Math.floor(Math.random() * BOT_LAST_NAMES.length)];
+            return truncateTo12(firstName + lastName.charAt(0));
+        },
+        // Pattern 17: Short first name + short last name
+        () => {
+            const shortFirst = BOT_FIRST_NAMES.filter(n => n.length <= 5);
+            const shortLast = BOT_LAST_NAMES.filter(n => n.length <= 6);
+            if (shortFirst.length > 0 && shortLast.length > 0) {
+                const firstName = shortFirst[Math.floor(Math.random() * shortFirst.length)];
+                const lastName = shortLast[Math.floor(Math.random() * shortLast.length)];
+                return truncateTo12(firstName + lastName);
+            }
+            // Fallback
+            const firstName = BOT_FIRST_NAMES[Math.floor(Math.random() * BOT_FIRST_NAMES.length)];
+            return truncateTo12(firstName);
+        }
+    ];
+    
+    // Randomly select a pattern
+    const pattern = patterns[Math.floor(Math.random() * patterns.length)];
+    return pattern();
 }
 
 // Bot Wordle Solver - filters possible words based on feedback
@@ -1461,35 +1632,15 @@ function processBotTurn(gameId) {
                 }
             }
             
-            // Check if this is a timeRush card - apply effect immediately when card is selected
-            if (selectedCard.id === 'timeRush' && opponent) {
-                // Add timeRush effect targeting the opponent
-                currentGame.activeEffects.push({
-                    type: 'timeRush',
-                    target: opponent.id,
-                    description: 'Your next turn will only have 20 seconds',
-                    used: false
-                });
-                console.log(`Time Rush (Bot): Added timeRush effect targeting opponent ${opponent.id}`);
-                
-                // Notify human opponent with updated active effects
-                if (opponent && !opponent.isBot) {
-                    const humanSocket = io.sockets.sockets.get(opponent.id);
-                    if (humanSocket) {
-                        humanSocket.emit('activeEffectsUpdated', {
-                            activeEffects: currentGame.activeEffects,
-                            gameId: gameId
-                        });
-                    }
-                }
-            }
-            
-            // Emit card played event for human to see
-            
             // Emit card played event for human to see
             const botPlayerForCard = currentGame.players.find(p => p.id === botId);
             if (botPlayerForCard) {
-                const humanSocket = io.sockets.sockets.get(currentGame.players.find(p => p.id !== botId).id);
+                const humanPlayer = currentGame.players.find(p => p.id !== botId);
+                if (!humanPlayer) {
+                    console.error(`Bot card selection: Could not find human player in game ${gameId}`);
+                    return;
+                }
+                const humanSocket = io.sockets.sockets.get(humanPlayer.id);
                 if (humanSocket) {
                     // Show card to opponent (might be fake if phonyCard was used, or resolved if mirror card)
                     const splashBehavior = getSplashBehavior(selectedCard.id);
@@ -4230,33 +4381,33 @@ io.on('connection', (socket) => {
                     games.delete(playerData.gameId);
                 } else {
                     // Game not active or no remaining player - normal cleanup
-                    game.players = game.players.filter(p => p.id !== socket.id);
-                    
-                    // Clean up user-to-game tracking
-                    const player = game.players.find(p => p.id === socket.id);
-                    if (player && player.firebaseUid) {
-                        userToGame.delete(player.firebaseUid);
-                    }
-                    
-                    // Clean up bot games
-                    if (game.isBotGame) {
-                        botGames.delete(game.gameId);
-                    }
-                    
-                    if (game.players.length === 0) {
-                        games.delete(playerData.gameId);
-                        userToGame.forEach((gameIdForUser, firebaseUid) => {
-                            if (gameIdForUser === playerData.gameId) {
-                                userToGame.delete(firebaseUid);
-                            }
-                        });
-                    } else {
-                        io.to(playerData.gameId).emit('playerLeft', {});
-                    }
-                    players.delete(socket.id);
+                game.players = game.players.filter(p => p.id !== socket.id);
+                
+                // Clean up user-to-game tracking
+                const player = game.players.find(p => p.id === socket.id);
+                if (player && player.firebaseUid) {
+                    userToGame.delete(player.firebaseUid);
                 }
+                
+                // Clean up bot games
+                if (game.isBotGame) {
+                    botGames.delete(game.gameId);
+                }
+                
+                if (game.players.length === 0) {
+                    games.delete(playerData.gameId);
+                    userToGame.forEach((gameIdForUser, firebaseUid) => {
+                        if (gameIdForUser === playerData.gameId) {
+                            userToGame.delete(firebaseUid);
+                        }
+                    });
+                } else {
+                    io.to(playerData.gameId).emit('playerLeft', {});
+                }
+                    players.delete(socket.id);
+            }
             } else {
-                players.delete(socket.id);
+            players.delete(socket.id);
             }
         }
     });
@@ -4408,20 +4559,20 @@ io.on('connection', (socket) => {
             const gameStateForClients = {
                 gameId: game.gameId,
                 currentTurn: game.currentTurn,
-                    players: game.players.map(p => ({
-                        id: p.id,
-                        name: p.name,
-                        firebaseUid: p.firebaseUid || null,
+                players: game.players.map(p => ({
+                    id: p.id,
+                    name: p.name,
+                    firebaseUid: p.firebaseUid || null,
                         photoURL: p.photoURL || null,
-                        guesses: p.guesses || [],
-                        row: p.row || 0,
-                        isBot: false
-                    })),
-                    status: 'playing',
-                    activeEffects: game.activeEffects,
+                    guesses: p.guesses || [],
+                    row: p.row || 0,
+                    isBot: false
+                })),
+                status: 'playing',
+                activeEffects: game.activeEffects,
                     totalGuesses: game.totalGuesses,
                     isRanked: game.isRanked || false
-                };
+            };
             
             game.status = 'playing';
             game.players.forEach(player => {

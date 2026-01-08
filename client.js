@@ -464,15 +464,15 @@ function updateLobbyUserInfo() {
             const applyAvatar = (url) => {
                 if (url) {
                     profileAvatar.style.backgroundImage = `url(${url})`;
-                    profileAvatar.style.backgroundSize = 'cover';
-                    profileAvatar.style.backgroundPosition = 'center';
-                    profileAvatar.textContent = '';
-                } else {
+                profileAvatar.style.backgroundSize = 'cover';
+                profileAvatar.style.backgroundPosition = 'center';
+                profileAvatar.textContent = '';
+            } else {
                     profileAvatar.style.backgroundImage = '';
                     profileAvatar.style.backgroundSize = '';
                     profileAvatar.style.backgroundPosition = '';
-                    profileAvatar.textContent = displayName.charAt(0).toUpperCase();
-                }
+                profileAvatar.textContent = displayName.charAt(0).toUpperCase();
+            }
             };
             // Default to Auth photoURL while we fetch Firestore
             const initialPhoto = currentUser.photoURL || null;
@@ -1121,17 +1121,17 @@ function generateGameOverRankProgress(beforeChips, afterChips) {
     
     // Only add end marker if there's a next tier (don't add one at Champion since Champion I is the highest)
     if (nextTier) {
-        const endMarker = document.createElement('div');
-        endMarker.className = 'rank-marker';
-        endMarker.style.left = '100%';
-        
-        const endMarkerLabel = document.createElement('div');
-        endMarkerLabel.className = 'rank-marker-label';
+    const endMarker = document.createElement('div');
+    endMarker.className = 'rank-marker';
+    endMarker.style.left = '100%';
+    
+    const endMarkerLabel = document.createElement('div');
+    endMarkerLabel.className = 'rank-marker-label';
         endMarkerLabel.textContent = nextTier.name;
         endMarkerLabel.style.color = nextTier.color;
         endMarker.style.borderColor = nextTier.color;
-        endMarker.appendChild(endMarkerLabel);
-        markersContainer.appendChild(endMarker);
+    endMarker.appendChild(endMarkerLabel);
+    markersContainer.appendChild(endMarker);
     }
     
     // Animate to new position
@@ -1216,7 +1216,7 @@ function generateRankLadder() {
     // Calculate total number of ranks
     let totalRanks = 0;
     RANK_TIERS.forEach(tier => {
-        totalRanks += tier.subRanks.length;
+            totalRanks += tier.subRanks.length;
     });
     
     // Get current rank
@@ -1231,25 +1231,25 @@ function generateRankLadder() {
         for (const tier of RANK_TIERS) {
             if (chipPoints >= tier.minChips && chipPoints <= tier.maxChips) {
                 // We're in this tier
-                const tierRange = tier.maxChips - tier.minChips;
-                const subRankRange = tierRange / tier.subRanks.length;
-                const chipsInTier = chipPoints - tier.minChips;
-                const subRankIndex = Math.min(
-                    Math.floor(chipsInTier / subRankRange),
-                    tier.subRanks.length - 1
-                );
-                
-                // Calculate progress within the current sub-rank
-                const currentSubRankStart = subRankIndex * subRankRange;
-                const nextSubRankStart = (subRankIndex + 1) * subRankRange;
-                const progressInSubRank = ((chipsInTier - currentSubRankStart) / (nextSubRankStart - currentSubRankStart));
-                
-                // Position = (ranks before this tier + current sub-rank index + progress in sub-rank) / total ranks
-                rankPosition = (rankCount + subRankIndex + progressInSubRank) / totalRanks;
-                break;
+                    const tierRange = tier.maxChips - tier.minChips;
+                    const subRankRange = tierRange / tier.subRanks.length;
+                    const chipsInTier = chipPoints - tier.minChips;
+                    const subRankIndex = Math.min(
+                        Math.floor(chipsInTier / subRankRange),
+                        tier.subRanks.length - 1
+                    );
+                    
+                    // Calculate progress within the current sub-rank
+                    const currentSubRankStart = subRankIndex * subRankRange;
+                    const nextSubRankStart = (subRankIndex + 1) * subRankRange;
+                    const progressInSubRank = ((chipsInTier - currentSubRankStart) / (nextSubRankStart - currentSubRankStart));
+                    
+                    // Position = (ranks before this tier + current sub-rank index + progress in sub-rank) / total ranks
+                    rankPosition = (rankCount + subRankIndex + progressInSubRank) / totalRanks;
+                    break;
             } else if (chipPoints > tier.maxChips) {
                 // We've passed this tier, add all its sub-ranks to the count
-                rankCount += tier.subRanks.length;
+                    rankCount += tier.subRanks.length;
             }
         }
         
@@ -1275,7 +1275,7 @@ function generateRankLadder() {
             // Calculate position for this tier
             let tierStartIndex = 0;
             for (let i = 0; i < tierIndex; i++) {
-                tierStartIndex += RANK_TIERS[i].subRanks.length;
+                    tierStartIndex += RANK_TIERS[i].subRanks.length;
             }
             
             // Position at the start of the tier
@@ -2086,11 +2086,11 @@ socket.on('gameStarted', (data) => {
                             vsPlayer2Avatar.style.backgroundPosition = 'center';
                             vsPlayer2Avatar.textContent = '';
                         } else {
-                            vsPlayer2Avatar.style.backgroundImage = '';
-                            vsPlayer2Avatar.style.backgroundSize = '';
-                            vsPlayer2Avatar.style.backgroundPosition = '';
-                            const initial = player2Name.charAt(0).toUpperCase();
-                            vsPlayer2Avatar.textContent = initial || '👤';
+            vsPlayer2Avatar.style.backgroundImage = '';
+            vsPlayer2Avatar.style.backgroundSize = '';
+            vsPlayer2Avatar.style.backgroundPosition = '';
+            const initial = player2Name.charAt(0).toUpperCase();
+            vsPlayer2Avatar.textContent = initial || '👤';
                         }
                     })
                     .catch(() => {
@@ -2665,7 +2665,7 @@ socket.on('requestHand', (data) => {
         while (window.playerCardHand.length < 3) {
             const newCard = drawCardFromDeck();
             if (newCard) {
-                window.playerCardHand.push(newCard);
+            window.playerCardHand.push(newCard);
             } else {
                 break; // Prevent infinite loop if drawCardFromDeck returns null
             }
@@ -2702,7 +2702,7 @@ socket.on('requestHandForSteal', (data) => {
         while (window.playerCardHand.length < 3) {
             const newCard = drawCardFromDeck();
             if (newCard) {
-                window.playerCardHand.push(newCard);
+            window.playerCardHand.push(newCard);
             } else {
                 break; // Prevent infinite loop if drawCardFromDeck returns null
             }
@@ -2739,7 +2739,7 @@ socket.on('requestHandForBlock', (data) => {
         while (window.playerCardHand.length < 3) {
             const newCard = drawCardFromDeck();
             if (newCard) {
-                window.playerCardHand.push(newCard);
+            window.playerCardHand.push(newCard);
             } else {
                 break; // Prevent infinite loop if drawCardFromDeck returns null
             }
@@ -3106,29 +3106,29 @@ socket.on('gameOver', (data) => {
         }
     } else {
         // Normal game end
-        if (won) {
-            titleEl.textContent = 'You Win!';
-            titleEl.classList.add('win');
-            titleEl.classList.remove('lose');
-            messageEl.textContent = 'Congratulations! You guessed the word!';
-            iconEl.textContent = '🎉';
-            wordEl.textContent = data.word;
-            
-            // Play win sound
-            if (typeof soundManager !== 'undefined') {
-                soundManager.playGameWin();
-            }
-        } else {
-            titleEl.textContent = 'You Lost!';
-            titleEl.classList.add('lose');
-            titleEl.classList.remove('win');
-            messageEl.textContent = 'Better luck next time! The word was:';
-            iconEl.textContent = '😔';
-            wordEl.textContent = data.word;
-            
-            // Play lose sound
-            if (typeof soundManager !== 'undefined') {
-                soundManager.playGameLose();
+    if (won) {
+        titleEl.textContent = 'You Win!';
+        titleEl.classList.add('win');
+        titleEl.classList.remove('lose');
+        messageEl.textContent = 'Congratulations! You guessed the word!';
+        iconEl.textContent = '🎉';
+        wordEl.textContent = data.word;
+        
+        // Play win sound
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playGameWin();
+        }
+    } else {
+        titleEl.textContent = 'You Lost!';
+        titleEl.classList.add('lose');
+        titleEl.classList.remove('win');
+        messageEl.textContent = 'Better luck next time! The word was:';
+        iconEl.textContent = '😔';
+        wordEl.textContent = data.word;
+        
+        // Play lose sound
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playGameLose();
             }
         }
     }
@@ -3167,8 +3167,8 @@ socket.on('gameOver', (data) => {
     }
     
     if (isRanked) {
-        getPlayerStats().then(stats => {
-            const currentChipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+    getPlayerStats().then(stats => {
+        const currentChipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
             
             // SECURITY: Use server-provided chip change values (prevents client-side manipulation)
             let chipPointsChange = 0;
@@ -3192,26 +3192,26 @@ socket.on('gameOver', (data) => {
                 chipPointsChange = 0;
                 newChipPoints = currentChipPoints;
             }
-            
-            // Display chip points change on game over screen
-            const chipPointsChangeEl = document.getElementById('gameOverChipPoints');
-            if (chipPointsChangeEl) {
-                if (chipPointsChange > 0) {
-                    chipPointsChangeEl.textContent = `+${chipPointsChange} Chips`;
-                    chipPointsChangeEl.classList.add('chip-points-gain');
-                    chipPointsChangeEl.classList.remove('chip-points-loss');
-                } else if (chipPointsChange < 0) {
-                    chipPointsChangeEl.textContent = `${chipPointsChange} Chips`;
-                    chipPointsChangeEl.classList.add('chip-points-loss');
-                    chipPointsChangeEl.classList.remove('chip-points-gain');
-                } else {
-                    chipPointsChangeEl.textContent = '0 Chips';
-                    chipPointsChangeEl.classList.remove('chip-points-gain', 'chip-points-loss');
-                }
+        
+        // Display chip points change on game over screen
+        const chipPointsChangeEl = document.getElementById('gameOverChipPoints');
+        if (chipPointsChangeEl) {
+            if (chipPointsChange > 0) {
+                chipPointsChangeEl.textContent = `+${chipPointsChange} Chips`;
+                chipPointsChangeEl.classList.add('chip-points-gain');
+                chipPointsChangeEl.classList.remove('chip-points-loss');
+            } else if (chipPointsChange < 0) {
+                chipPointsChangeEl.textContent = `${chipPointsChange} Chips`;
+                chipPointsChangeEl.classList.add('chip-points-loss');
+                chipPointsChangeEl.classList.remove('chip-points-gain');
+            } else {
+                chipPointsChangeEl.textContent = '0 Chips';
+                chipPointsChangeEl.classList.remove('chip-points-gain', 'chip-points-loss');
             }
-            
-            // Generate and animate rank progress bar
-            generateGameOverRankProgress(currentChipPoints, newChipPoints);
+        }
+        
+        // Generate and animate rank progress bar
+        generateGameOverRankProgress(currentChipPoints, newChipPoints);
             
             // Update stats with the server-provided chip change (SECURITY: only update if server provided values)
             // Use server-provided guesses if available, otherwise fall back to client calculation
@@ -3227,9 +3227,9 @@ socket.on('gameOver', (data) => {
             }).catch(error => {
                 console.error('Error updating stats:', error);
             });
-        }).catch(error => {
-            console.error('Error calculating chip points change:', error);
-        });
+    }).catch(error => {
+        console.error('Error calculating chip points change:', error);
+    });
     } else {
         // Hide chip points change for non-ranked games
         const chipPointsChangeEl = document.getElementById('gameOverChipPoints');
@@ -3237,15 +3237,15 @@ socket.on('gameOver', (data) => {
             chipPointsChangeEl.textContent = '';
             chipPointsChangeEl.classList.remove('chip-points-gain', 'chip-points-loss');
         }
-        
+    
         // Update statistics for non-ranked games
-        updateStats({
-            won: won,
+    updateStats({
+        won: won,
             guesses: guesses,
             isRanked: false  // Explicitly mark as non-ranked
-        }).catch(error => {
-            console.error('Error updating stats:', error);
-        });
+    }).catch(error => {
+        console.error('Error updating stats:', error);
+    });
     }
     
     // Reset rematch button state
@@ -4047,7 +4047,7 @@ function initializeDeckPoolSync() {
     
     // Initialize hand if not exists
     if (!window.playerCardHand) {
-        window.playerCardHand = [];
+    window.playerCardHand = [];
     }
     
     // Draw initial 3 cards into hand if empty
@@ -4084,7 +4084,7 @@ function updateHandPanel() {
     while (window.playerCardHand.length < 3 && window.deckPool && window.deckPool.length > 0) {
         const newCard = drawCardFromDeck();
         if (newCard) {
-            window.playerCardHand.push(newCard);
+        window.playerCardHand.push(newCard);
         } else {
             break; // Prevent infinite loop if drawCardFromDeck returns null/undefined
         }
@@ -4155,7 +4155,7 @@ function drawCardFromDeck() {
         const allCards = getAllCards();
         const deckCards = deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
         if (deckCards.length > 0) {
-            window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
+        window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
         } else {
             // If still empty, try fallback
             const fallbackCards = getDeckCards();
@@ -4176,7 +4176,7 @@ function drawCardFromDeck() {
     // Final fallback
     const deckCards = getDeckCards();
     if (deckCards && deckCards.length > 0) {
-        return deckCards[0];
+    return deckCards[0];
     }
     
     console.error('drawCardFromDeck: All fallbacks failed, returning null');
@@ -4201,7 +4201,7 @@ function generateCards(forceGrayOut = false) {
     while (window.playerCardHand.length < 3) {
         const newCard = drawCardFromDeck();
         if (newCard) {
-            window.playerCardHand.push(newCard);
+        window.playerCardHand.push(newCard);
         } else {
             // If we can't draw a card, break to prevent infinite loop
             console.error('Cannot draw card from deck. Deck pool length:', window.deckPool?.length);
@@ -4562,7 +4562,7 @@ function selectCard(card, cardElement) {
                     while (window.playerCardHand.length < 3 && window.deckPool.length > 0) {
                         const newCard = drawCardFromDeck();
                         if (newCard) {
-                            window.playerCardHand.push(newCard);
+                        window.playerCardHand.push(newCard);
                         } else {
                             break; // Prevent infinite loop if drawCardFromDeck returns null
                         }
@@ -8089,7 +8089,7 @@ function updateSpectatorHandPanel() {
     
     if (!handCardsContainer || !nextCardContainer) {
         return;
-    }
+}
     
     // Clear existing content
     handCardsContainer.innerHTML = '';
@@ -8846,11 +8846,11 @@ async function checkUsernameAvailable(username) {
     const trimmedUsername = username.trim().toLowerCase();
     
     // Validate username format
-    const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+    const usernameRegex = /^[a-zA-Z0-9_-]{3,12}$/;
     if (!usernameRegex.test(trimmedUsername)) {
         return { 
             available: false, 
-            message: 'Username must be 3-20 characters and contain only letters, numbers, underscores, or hyphens' 
+            message: 'Username must be 3-12 characters and contain only letters, numbers, underscores, or hyphens' 
         };
     }
     
