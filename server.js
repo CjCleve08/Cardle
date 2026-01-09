@@ -2073,6 +2073,16 @@ function submitBotGuess(gameId, botId, guess, card) {
             return true;
         });
         
+        // Clear moonshine effect when the affected bot's turn ends
+        // (when turn switches away from them)
+        game.activeEffects = game.activeEffects.filter(e => {
+            if (e.type === 'moonshine' && e.target === botId) {
+                console.log('Removing moonshine effect after turn ended for bot:', botId);
+                return false;
+            }
+            return true;
+        });
+        
         // Clear blocked card when the bot's turn ends
         // (when turn switches away from them)
         if (game.blockedCards && game.blockedCards.has(botId)) {
@@ -2091,15 +2101,25 @@ function submitBotGuess(gameId, botId, guess, card) {
         game.activeEffects = game.activeEffects.filter(e => 
             !(e.type === 'extraGuess' && e.target === botId)
         );
-        // Clear timeRush effect even if bot has extra guess (timeRush only affects one turn)
-        game.activeEffects = game.activeEffects.filter(e => {
-            if (e.type === 'timeRush' && e.target === botId) {
-                console.log('Removing timeRush effect after first guess (extra guess used) for bot:', botId);
-                return false;
-            }
-            return true;
-        });
-        game.currentTurn = botId; // Bot gets another turn
+            // Clear timeRush effect even if bot has extra guess (timeRush only affects one turn)
+            game.activeEffects = game.activeEffects.filter(e => {
+                if (e.type === 'timeRush' && e.target === botId) {
+                    console.log('Removing timeRush effect after first guess (extra guess used) for bot:', botId);
+                    return false;
+                }
+                return true;
+            });
+            
+            // Clear moonshine effect even if bot has extra guess (moonshine only affects one turn)
+            game.activeEffects = game.activeEffects.filter(e => {
+                if (e.type === 'moonshine' && e.target === botId) {
+                    console.log('Removing moonshine effect after first guess (extra guess used) for bot:', botId);
+                    return false;
+                }
+                return true;
+            });
+            
+            game.currentTurn = botId; // Bot gets another turn
     }
     
     // Emit turn change
@@ -4491,6 +4511,27 @@ io.on('connection', (socket) => {
                     });
                 }
             }
+            
+            // Clear moonshine effect after the affected player's turn ends
+            const moonshineEffect = game.activeEffects.find(e => 
+                e.type === 'moonshine' && e.target === socket.id && !e.used
+            );
+            if (moonshineEffect) {
+                game.activeEffects = game.activeEffects.filter(e => e !== moonshineEffect);
+                console.log(`Cleared moonshine effect for player ${socket.id} after their turn`);
+                // Notify both players that moonshine was cleared
+                socket.emit('activeEffectsUpdated', {
+                    activeEffects: game.activeEffects,
+                    gameId: data.gameId
+                });
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('activeEffectsUpdated', {
+                        activeEffects: game.activeEffects,
+                        gameId: data.gameId
+                    });
+                }
+            }
         } else {
             // Extra guess: don't count toward limit, don't switch turns
             // Player gets another turn immediately
@@ -4502,6 +4543,15 @@ io.on('connection', (socket) => {
             game.activeEffects = game.activeEffects.filter(e => {
                 if (e.type === 'timeRush' && e.target === socket.id) {
                     console.log('Removing timeRush effect after first guess (extra guess used):', socket.id);
+                    return false;
+                }
+                return true;
+            });
+            
+            // Clear moonshine effect even if player has extra guess (moonshine only affects one turn)
+            game.activeEffects = game.activeEffects.filter(e => {
+                if (e.type === 'moonshine' && e.target === socket.id) {
+                    console.log('Removing moonshine effect after first guess (extra guess used):', socket.id);
                     return false;
                 }
                 return true;
