@@ -1296,6 +1296,30 @@ header h1 {
     gap: 12px;
 }
 
+.messages-loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    gap: 16px;
+}
+
+.messages-loading-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid rgba(106, 170, 100, 0.3);
+    border-top-color: #6aaa64;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.messages-loading-text {
+    font-size: 0.875rem;
+    color: #818384;
+    text-align: center;
+}
+
 .messages-empty-state {
     flex: 1;
     display: flex;
@@ -1625,6 +1649,55 @@ header h1 {
     word-break: break-word;
     max-width: 100%;
     margin-bottom: 8px;
+}
+
+/* Admin name glowing effect - Purple pulsing */
+.vs-player-name.admin-name,
+.friend-name.admin-name,
+.leaderboard-name.admin-name,
+.messages-friend-name.admin-name,
+#messagesChatName.admin-name,
+#friendStatsName.admin-name {
+    position: relative;
+    color: #c084fc;
+    text-shadow: 
+        0 0 10px rgba(192, 132, 252, 0.9),
+        0 0 20px rgba(167, 139, 250, 0.8),
+        0 0 30px rgba(139, 92, 246, 0.7),
+        0 0 40px rgba(124, 58, 237, 0.6),
+        0 0 60px rgba(109, 40, 217, 0.5),
+        0 4px 20px rgba(139, 92, 246, 0.4);
+    animation: adminPulsePurple 1.8s ease-in-out infinite;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    filter: drop-shadow(0 0 10px rgba(192, 132, 252, 0.7));
+}
+
+@keyframes adminPulsePurple {
+    0%, 100% {
+        color: #c084fc;
+        text-shadow: 
+            0 0 10px rgba(192, 132, 252, 0.9),
+            0 0 20px rgba(167, 139, 250, 0.8),
+            0 0 30px rgba(139, 92, 246, 0.7),
+            0 0 40px rgba(124, 58, 237, 0.6),
+            0 0 60px rgba(109, 40, 217, 0.5),
+            0 4px 20px rgba(139, 92, 246, 0.4);
+        filter: drop-shadow(0 0 10px rgba(192, 132, 252, 0.7)) brightness(1);
+        transform: scale(1);
+    }
+    50% {
+        color: #a78bfa;
+        text-shadow: 
+            0 0 20px rgba(192, 132, 252, 1),
+            0 0 35px rgba(167, 139, 250, 0.95),
+            0 0 50px rgba(139, 92, 246, 0.9),
+            0 0 70px rgba(124, 58, 237, 0.8),
+            0 0 100px rgba(109, 40, 217, 0.7),
+            0 4px 35px rgba(139, 92, 246, 0.6);
+        filter: drop-shadow(0 0 20px rgba(192, 132, 252, 1)) brightness(1.2);
+        transform: scale(1.03);
+    }
 }
 
 .vs-player-label {

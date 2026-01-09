@@ -329,12 +329,26 @@ function continueToAuth() {
     }
     
     if (window.firebaseAuth) {
-        window.firebaseAuth.onAuthStateChanged((user) => {
+        window.firebaseAuth.onAuthStateChanged(async (user) => {
             if (user) {
                 currentUser = user;
                 isGuestMode = false;
                 guestName = null;
                 console.log('User signed in:', user.email);
+                
+                // Ensure email is saved to Firestore (important for admin checks)
+                if (window.firebaseDb && user.email) {
+                    try {
+                        await window.firebaseDb.collection('users').doc(user.uid).set({
+                            email: user.email,
+                            displayName: user.displayName || null,
+                            photoURL: user.photoURL || null
+                        }, { merge: true });
+                    } catch (error) {
+                        console.error('Error syncing user email to Firestore:', error);
+                    }
+                }
+                
                 // Clear stats cache when user changes
                 clearStatsCache();
         clearDecksCache();
@@ -2374,6 +2388,36 @@ socket.on('gameStarted', (data) => {
         // Update player 1 (me) name
         if (vsPlayer1Name) {
             vsPlayer1Name.textContent = player1Name;
+            // Add admin class if current user is admin - check both currentUser.email and Firestore
+            (async () => {
+                let email = currentUser?.email?.toLowerCase() || '';
+                
+                // Always also check Firestore to ensure we have the latest email
+                if (window.firebaseDb && currentUser?.uid) {
+                    try {
+                        const userDoc = await window.firebaseDb.collection('users').doc(currentUser.uid).get();
+                        if (userDoc.exists) {
+                            const userData = userDoc.data();
+                            const firestoreEmail = (userData.email || '').toLowerCase().trim();
+                            if (firestoreEmail) {
+                                email = firestoreEmail; // Prefer Firestore email as it's the source of truth
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error fetching user email for admin check:', error);
+                    }
+                }
+                
+                if (isAdminEmail(email)) {
+                    vsPlayer1Name.classList.add('admin-name');
+                    console.log('VS Screen: Added admin-name class to player 1, email:', email);
+                } else {
+                    vsPlayer1Name.classList.remove('admin-name');
+                    if (email) {
+                        console.log('VS Screen: Player 1 is not admin, email:', email);
+                    }
+                }
+            })();
         }
         
         // Update player 1 avatar
@@ -2425,6 +2469,28 @@ socket.on('gameStarted', (data) => {
         // Update player 2 (opponent) name
         if (vsPlayer2Name) {
             vsPlayer2Name.textContent = player2Name;
+            // Check if opponent is admin by fetching their email
+            if (opponentData && opponentData.firebaseUid && window.firebaseDb) {
+                window.firebaseDb.collection('users').doc(opponentData.firebaseUid).get()
+                    .then(userDoc => {
+                        if (userDoc.exists) {
+                            const userData = userDoc.data();
+                            const opponentEmail = userData.email || '';
+                            if (isAdminEmail(opponentEmail)) {
+                                vsPlayer2Name.classList.add('admin-name');
+                            } else {
+                                vsPlayer2Name.classList.remove('admin-name');
+                            }
+                        } else {
+                            vsPlayer2Name.classList.remove('admin-name');
+                        }
+                    })
+                    .catch(() => {
+                        vsPlayer2Name.classList.remove('admin-name');
+                    });
+            } else {
+                vsPlayer2Name.classList.remove('admin-name');
+            }
         }
         
         // Update player 2 avatar
@@ -7412,17 +7478,20 @@ async function loadLeaderboard() {
         // Get user info from users collection
         let userName = 'Player';
         let userPhotoURL = null;
+        let userEmail = currentUser.email || '';
         try {
             const userDoc = await window.firebaseDb.collection('users').doc(currentUser.uid).get();
             if (userDoc.exists) {
                 const userData = userDoc.data();
                 userName = userData.displayName || currentUser.displayName || 'Player';
                 userPhotoURL = userData.photoURL || currentUser.photoURL || null;
+                userEmail = userData.email || currentUser.email || '';
             }
         } catch (error) {
             console.error('Error fetching user info:', error);
             userName = currentUser.displayName || 'Player';
             userPhotoURL = currentUser.photoURL || null;
+            userEmail = currentUser.email || '';
         }
         
         // Fetch user info for top 10 players
@@ -7432,6 +7501,7 @@ async function loadLeaderboard() {
             const uid = doc.id;
             let name = 'Player';
             let photoURL = null;
+            let email = '';
             
             try {
                 const userDoc = await window.firebaseDb.collection('users').doc(uid).get();
@@ -7439,6 +7509,7 @@ async function loadLeaderboard() {
                     const userData = userDoc.data();
                     name = userData.displayName || 'Player';
                     photoURL = userData.photoURL || null;
+                    email = userData.email || '';
                 }
             } catch (error) {
                 console.error('Error fetching user info for', uid, ':', error);
@@ -7448,6 +7519,7 @@ async function loadLeaderboard() {
                 uid: uid,
                 name: name,
                 photoURL: photoURL,
+                email: email,
                 chipPoints: stats.chipPoints || 0,
                 stats: stats
             });
@@ -7467,6 +7539,7 @@ async function loadLeaderboard() {
                 uid: currentUser.uid,
                 name: userName,
                 photoURL: userPhotoURL,
+                email: userEmail,
                 chipPoints: userStats.chipPoints || 0,
                 rank: userRank,
                 stats: userStats
@@ -7527,12 +7600,13 @@ function displayTopPlayers(players) {
             : '';
         
         const rankImagePath = getRankImagePath(rankInfo.tier, rankInfo.subRank);
+        const isPlayerAdmin = isAdminEmail(player.email || '');
         
         entry.innerHTML = `
             <div class="leaderboard-rank">#${rank}</div>
             <div class="leaderboard-avatar" style="${avatarStyle}">${player.photoURL ? '' : avatarInitial}</div>
             <div class="leaderboard-info">
-                <div class="leaderboard-name">${escapeHtml(player.name)}</div>
+                <div class="leaderboard-name ${isPlayerAdmin ? 'admin-name' : ''}">${escapeHtml(player.name)}</div>
                 <div class="leaderboard-stats">
                     <div class="leaderboard-stat">
                         <img src="${rankImagePath}" alt="${rankInfo.fullRank}" class="leaderboard-rank-image">
@@ -7567,12 +7641,13 @@ function displayUserRank(user) {
         : '';
     
     const rankImagePath = getRankImagePath(rankInfo.tier, rankInfo.subRank);
+    const isUserAdmin = isAdminEmail(user.email || '');
     
     userEntryEl.innerHTML = `
         <div class="leaderboard-rank">${rankText}</div>
         <div class="leaderboard-avatar" style="${avatarStyle}">${user.photoURL ? '' : avatarInitial}</div>
         <div class="leaderboard-info">
-            <div class="leaderboard-name">${escapeHtml(user.name)}</div>
+            <div class="leaderboard-name ${isUserAdmin ? 'admin-name' : ''}">${escapeHtml(user.name)}</div>
             <div class="leaderboard-stats">
                 <div class="leaderboard-stat">
                     <img src="${rankImagePath}" alt="${rankInfo.fullRank}" class="leaderboard-rank-image">
@@ -8203,12 +8278,13 @@ function renderFriendsList(friends) {
         const avatarStyle = friend.photoURL 
             ? `background-image: url(${friend.photoURL}); background-size: cover; background-position: center;` 
             : '';
+        const isFriendAdmin = isAdminEmail(friend.email || '');
         return `
         <div class="friend-item" data-friend-id="${friend.id || ''}" data-friend-name="${friend.name || 'Unknown'}" data-friend-email="${friend.email || ''}">
             <div class="friend-avatar" style="${avatarStyle}">${friend.photoURL ? '' : avatarInitial}</div>
             <div class="friend-info">
                 <div class="friend-name-container">
-                    <div class="friend-name">${friend.name || 'Unknown'}</div>
+                    <div class="friend-name ${isFriendAdmin ? 'admin-name' : ''}">${friend.name || 'Unknown'}</div>
                     <div class="friend-status-indicators">
                         <button class="challenge-btn" style="display: ${isActive ? 'flex' : 'none'};" onclick="challengeFriend('${friend.id || ''}', '${friend.name || 'Unknown'}', event)" title="Challenge Friend">
                             <span class="btn-icon">⚔️</span>
@@ -8256,11 +8332,12 @@ function renderFriendRequests(requests) {
         const avatarStyle = request.senderPhotoURL 
             ? `background-image: url(${request.senderPhotoURL}); background-size: cover; background-position: center;` 
             : '';
+        const isRequestAdmin = isAdminEmail(request.senderEmail || '');
         return `
         <div class="friend-item">
             <div class="friend-avatar" style="${avatarStyle}">${request.senderPhotoURL ? '' : avatarInitial}</div>
             <div class="friend-info">
-                <div class="friend-name">${request.senderName || 'Unknown'}</div>
+                <div class="friend-name ${isRequestAdmin ? 'admin-name' : ''}">${request.senderName || 'Unknown'}</div>
                 <div class="friend-status">${request.senderEmail || ''}</div>
             </div>
             <div class="friend-actions">
@@ -8312,6 +8389,12 @@ async function openFriendStats(friendId, friendName, friendEmail) {
     const nameEl = document.getElementById('friendStatsName');
     if (nameEl) {
         nameEl.textContent = friendName || 'Friend Stats';
+        // Add admin class if friend is admin
+        if (isAdminEmail(friendEmail || '')) {
+            nameEl.classList.add('admin-name');
+        } else {
+            nameEl.classList.remove('admin-name');
+        }
     }
     
     // Set avatar
@@ -8645,11 +8728,12 @@ function showSearchResults(users) {
                 </button>`;
             }
             
+            const isUserAdmin = isAdminEmail(user.email || '');
             return `
                 <div class="friend-search-result-item">
                     <div class="friend-avatar" style="${avatarStyle}">${user.photoURL ? '' : avatarInitial}</div>
                     <div class="friend-info">
-                        <div class="friend-name">${user.displayName || 'Unknown'}</div>
+                        <div class="friend-name ${isUserAdmin ? 'admin-name' : ''}">${user.displayName || 'Unknown'}</div>
                         <div class="friend-status">${user.email || ''}</div>
                     </div>
                     ${actionButton}
@@ -10316,15 +10400,61 @@ function isCreator() {
 }
 
 // Check if current user is an admin
-function isAdmin() {
-    if (!currentUser) return false;
-    const email = currentUser.email?.toLowerCase() || '';
-    // Admin emails
-    const adminEmails = [
+// Get list of admin emails
+function getAdminEmails() {
+    return [
         'cjcleve2008@gmail.com',
         'perkerewiczgus@gmail.com'
     ];
-    return adminEmails.includes(email);
+}
+
+async function isAdminAsync() {
+    if (!currentUser) return false;
+    
+    // First check currentUser.email
+    let email = currentUser.email?.toLowerCase() || '';
+    
+    // If email is missing, try fetching from Firestore
+    if (!email && window.firebaseDb) {
+        try {
+            const userDoc = await window.firebaseDb.collection('users').doc(currentUser.uid).get();
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                email = (userData.email || '').toLowerCase();
+            }
+        } catch (error) {
+            console.error('Error fetching user email for admin check:', error);
+        }
+    }
+    
+    return getAdminEmails().includes(email);
+}
+
+function isAdmin() {
+    if (!currentUser) return false;
+    const email = currentUser.email?.toLowerCase() || '';
+    // Note: This synchronous version may miss Firestore emails. Use isAdminAsync() when possible.
+    return getAdminEmails().includes(email);
+}
+
+// Check if an email belongs to an admin (helper for checking other users)
+function isAdminEmail(email) {
+    if (!email) return false;
+    const normalizedEmail = email.toLowerCase().trim();
+    const adminList = getAdminEmails();
+    const isAdmin = adminList.includes(normalizedEmail);
+    
+    // Debug logging to help identify issues
+    if (normalizedEmail && (normalizedEmail.includes('cjcleve') || normalizedEmail.includes('perkere'))) {
+        console.log('Admin check:', {
+            email: email,
+            normalized: normalizedEmail,
+            adminList: adminList,
+            isAdmin: isAdmin
+        });
+    }
+    
+    return isAdmin;
 }
 
 // Load community posts
@@ -10540,19 +10670,19 @@ async function createPost(title, content, category) {
         return;
     }
     
-    // Prevent non-creators from posting to bulletin
-    if (category === 'bulletin' && !isCreator()) {
+    // Prevent non-admins from posting to bulletin
+    if (category === 'bulletin' && !isAdmin()) {
         const errorEl = document.getElementById('createPostError');
         if (errorEl) {
-            errorEl.textContent = 'Only the creator can post to the bulletin board';
+            errorEl.textContent = 'Only admins can post to the bulletin board';
             errorEl.style.display = 'block';
         }
         return;
     }
     
     try {
-        // Determine if this is a bulletin post (creator only, and category must be 'bulletin')
-        const isBulletin = category === 'bulletin' && isCreator();
+        // Determine if this is a bulletin post (admin only, and category must be 'bulletin')
+        const isBulletin = category === 'bulletin' && isAdmin();
         
         // Get user info
         const userDoc = await window.firebaseDb.collection('users').doc(currentUser.uid).get();
@@ -10983,12 +11113,12 @@ function openCreatePostModal() {
         if (contentInput) contentInput.value = '';
         if (errorEl) errorEl.style.display = 'none';
         
-        // Update category select - add bulletin option if creator, remove if not
+        // Update category select - add bulletin option if admin, remove if not
         if (categorySelect) {
             const existingBulletinOption = categorySelect.querySelector('option[value="bulletin"]');
             
-            if (isCreator()) {
-                // Add bulletin option if creator and it doesn't exist
+            if (isAdmin()) {
+                // Add bulletin option if admin and it doesn't exist
                 if (!existingBulletinOption) {
                     const bulletinOption = document.createElement('option');
                     bulletinOption.value = 'bulletin';
@@ -10996,7 +11126,7 @@ function openCreatePostModal() {
                     categorySelect.insertBefore(bulletinOption, categorySelect.firstChild);
                 }
             } else {
-                // Remove bulletin option if not creator
+                // Remove bulletin option if not admin
                 if (existingBulletinOption) {
                     existingBulletinOption.remove();
                 }
@@ -11265,20 +11395,184 @@ let friendsForMessaging = [];
 let unreadMessageCounts = {}; // Track unread messages per friend: { friendId: count }
 let lastMessageTimes = {}; // Track last message time per friend: { friendId: timestamp }
 
+// Save lastMessageTimes to localStorage to persist order
+function saveMessageTimes() {
+    try {
+        if (currentUser) {
+            localStorage.setItem(`messageTimes_${currentUser.uid}`, JSON.stringify(lastMessageTimes));
+        }
+    } catch (error) {
+        console.error('Error saving message times:', error);
+    }
+}
+
+// Load lastMessageTimes from localStorage to restore order
+function loadMessageTimes() {
+    try {
+        if (currentUser) {
+            const saved = localStorage.getItem(`messageTimes_${currentUser.uid}`);
+            if (saved) {
+                lastMessageTimes = JSON.parse(saved);
+            }
+        }
+    } catch (error) {
+        console.error('Error loading message times:', error);
+        lastMessageTimes = {};
+    }
+}
+
+// Save unreadMessageCounts to localStorage to persist indicators
+function saveUnreadCounts() {
+    try {
+        if (currentUser) {
+            localStorage.setItem(`unreadCounts_${currentUser.uid}`, JSON.stringify(unreadMessageCounts));
+        }
+    } catch (error) {
+        console.error('Error saving unread counts:', error);
+    }
+}
+
+// Load unreadMessageCounts from localStorage to restore indicators
+function loadUnreadCounts() {
+    try {
+        if (currentUser) {
+            const saved = localStorage.getItem(`unreadCounts_${currentUser.uid}`);
+            if (saved) {
+                unreadMessageCounts = JSON.parse(saved);
+            }
+        }
+    } catch (error) {
+        console.error('Error loading unread counts:', error);
+        unreadMessageCounts = {};
+    }
+}
+
 // Load friends list for messaging
 async function loadMessagesFriends() {
     if (!currentUser || !window.firebaseDb) return;
     
+    const friendsListEl = document.getElementById('messagesFriendsList');
+    if (friendsListEl) {
+        // Show loading indicator
+        friendsListEl.innerHTML = `
+            <div class="messages-loading-state">
+                <div class="messages-loading-spinner"></div>
+                <div class="messages-loading-text">Loading conversations...</div>
+            </div>
+        `;
+    }
+    
     try {
+        // Load persisted data first
+        loadMessageTimes();
+        loadUnreadCounts();
+        
         // Reuse the friends list data if available, otherwise load it
         if (friendsListData.length === 0) {
             await loadFriends();
         }
         
         friendsForMessaging = [...friendsListData];
+        
+        // Load last message times for all friends and update persisted data
+        await loadLastMessageTimesForAllFriends();
+        
+        // Save the updated times
+        saveMessageTimes();
+        
+        // Load actual unread counts from Firestore and update persisted data
+        await loadUnreadMessageCounts();
+        
+        // Save the updated counts
+        saveUnreadCounts();
+        
         renderMessagesFriendsList();
     } catch (error) {
         console.error('Error loading friends for messaging:', error);
+        if (friendsListEl) {
+            friendsListEl.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">⚠️</div>
+                    <div class="empty-state-text">Error loading conversations</div>
+                </div>
+            `;
+        }
+    }
+}
+
+// Load last message time for all friends
+async function loadLastMessageTimesForAllFriends() {
+    if (!currentUser || !window.firebaseDb || friendsForMessaging.length === 0) return;
+    
+    try {
+        // Load the most recent message for each friend
+        // Use Promise.allSettled to handle errors gracefully
+        const promises = friendsForMessaging.map(async (friend) => {
+            try {
+                // Get most recent message where current user is sender and friend is receiver
+                const sentQuery = window.firebaseDb.collection('messages')
+                    .where('senderId', '==', currentUser.uid)
+                    .where('receiverId', '==', friend.id)
+                    .orderBy('createdAt', 'desc')
+                    .limit(1);
+                
+                // Get most recent message where friend is sender and current user is receiver
+                const receivedQuery = window.firebaseDb.collection('messages')
+                    .where('senderId', '==', friend.id)
+                    .where('receiverId', '==', currentUser.uid)
+                    .orderBy('createdAt', 'desc')
+                    .limit(1);
+                
+                const [sentSnapshot, receivedSnapshot] = await Promise.all([
+                    sentQuery.get(),
+                    receivedQuery.get()
+                ]);
+                
+                let latestTime = 0;
+                let latestMessageText = '';
+                
+                // Check sent messages
+                sentSnapshot.forEach(doc => {
+                    const msg = doc.data();
+                    const msgTime = msg.createdAt?.toDate ? msg.createdAt.toDate() : new Date(msg.createdAt || 0);
+                    const time = msgTime.getTime();
+                    if (time > latestTime) {
+                        latestTime = time;
+                        latestMessageText = msg.text || '';
+                    }
+                });
+                
+                // Check received messages
+                receivedSnapshot.forEach(doc => {
+                    const msg = doc.data();
+                    const msgTime = msg.createdAt?.toDate ? msg.createdAt.toDate() : new Date(msg.createdAt || 0);
+                    const time = msgTime.getTime();
+                    if (time > latestTime) {
+                        latestTime = time;
+                        latestMessageText = msg.text || '';
+                    }
+                });
+                
+                if (latestTime > 0) {
+                    // Only update if this is newer than what we have (preserve order)
+                    const currentTime = lastMessageTimes[friend.id] || 0;
+                    if (latestTime > currentTime) {
+                        lastMessageTimes[friend.id] = latestTime;
+                    }
+                    // Update preview text
+                    if (latestMessageText) {
+                        updateFriendPreview(friend.id, latestMessageText);
+                    }
+                }
+            } catch (error) {
+                // Silently handle errors for individual friends
+                console.error(`Error loading last message time for friend ${friend.id}:`, error);
+            }
+        });
+        
+        await Promise.allSettled(promises);
+    } catch (error) {
+        console.error('Error loading last message times:', error);
     }
 }
 
@@ -11297,22 +11591,14 @@ function renderMessagesFriendsList() {
         return;
     }
     
-    // Sort by last message time (newest first), then by name
+    // Simple Snapchat-style sorting: newest message time first
+    // Friends with no messages (time = 0) go to bottom
     const sortedFriends = [...friendsForMessaging].sort((a, b) => {
         const aTime = lastMessageTimes[a.id] || 0;
         const bTime = lastMessageTimes[b.id] || 0;
         
-        // Friends with messages come first
-        if (aTime > 0 && bTime === 0) return -1;
-        if (aTime === 0 && bTime > 0) return 1;
-        
-        // If both have messages, sort by time (newest first)
-        if (aTime > 0 && bTime > 0) {
-            return bTime - aTime;
-        }
-        
-        // If neither has messages, sort by name
-        return (a.name || '').localeCompare(b.name || '');
+        // Sort by time (newest first) - simple and stable
+        return bTime - aTime;
     });
     
     friendsListEl.innerHTML = sortedFriends.map(friend => {
@@ -11323,13 +11609,14 @@ function renderMessagesFriendsList() {
         const isActive = currentChatFriendId === friend.id ? 'active' : '';
         const unreadCount = unreadMessageCounts[friend.id] || 0;
         const hasUnread = unreadCount > 0 && currentChatFriendId !== friend.id;
+        const isFriendAdmin = isAdminEmail(friend.email || '');
         
         return `
             <div class="messages-friend-item ${isActive}" data-friend-id="${friend.id}" onclick="openChatWithFriend('${friend.id}')">
                 <div class="messages-friend-avatar" style="${avatarStyle}">${friend.photoURL ? '' : initial}</div>
                 ${hasUnread ? '<div class="messages-unread-indicator"></div>' : ''}
                 <div class="messages-friend-info">
-                    <div class="messages-friend-name">${escapeHtml(friend.name || 'Unknown')}</div>
+                    <div class="messages-friend-name ${isFriendAdmin ? 'admin-name' : ''}">${escapeHtml(friend.name || 'Unknown')}</div>
                     <div class="messages-friend-preview" id="friendPreview_${friend.id}">Tap to start chatting</div>
                 </div>
             </div>
@@ -11346,6 +11633,7 @@ async function openChatWithFriend(friendId) {
     
     // Clear unread count for this friend when opening chat
     unreadMessageCounts[friendId] = 0;
+    saveUnreadCounts(); // Persist the cleared count
     updateMessagesNotificationBadge();
     
     // Mark all messages from this friend as read (update in Firestore)
@@ -11364,10 +11652,16 @@ async function openChatWithFriend(friendId) {
         
         if (unreadSnapshot.size > 0) {
             await batch.commit();
+            // After marking as read, update the count
+            unreadMessageCounts[friendId] = 0;
+            saveUnreadCounts(); // Persist the cleared count
         }
     } catch (error) {
         console.error('Error marking messages as read:', error);
         // Continue even if marking as read fails
+        // Still clear the count locally
+        unreadMessageCounts[friendId] = 0;
+        saveUnreadCounts();
     }
     
     // Remove active state from all friends
@@ -11411,7 +11705,15 @@ async function openChatWithFriend(friendId) {
         chatAvatar.textContent = friend.photoURL ? '' : initial;
     }
     
-    if (chatName) chatName.textContent = friend.name || 'Unknown';
+    if (chatName) {
+        chatName.textContent = friend.name || 'Unknown';
+        // Add admin class if friend is admin
+        if (isAdminEmail(friend.email || '')) {
+            chatName.classList.add('admin-name');
+        } else {
+            chatName.classList.remove('admin-name');
+        }
+    }
     
     // Check if friend is online (you can enhance this later)
     if (chatStatus) {
@@ -11439,6 +11741,14 @@ async function loadConversationMessages(friendId) {
     
     const messagesEl = document.getElementById('messagesChatMessages');
     if (!messagesEl) return;
+    
+    // Show loading indicator
+    messagesEl.innerHTML = `
+        <div class="messages-loading-state">
+            <div class="messages-loading-spinner"></div>
+            <div class="messages-loading-text">Loading messages...</div>
+        </div>
+    `;
     
     try {
         const conversationId = getConversationId(currentUser.uid, friendId);
@@ -11492,11 +11802,18 @@ async function loadConversationMessages(friendId) {
             return aTime.getTime() - bTime.getTime();
         });
         
-        // Update last message time for this friend
+        // Update last message time for this friend (only if newer)
         if (messages.length > 0) {
             const lastMessage = messages[messages.length - 1];
             const lastTime = lastMessage.createdAt?.toDate ? lastMessage.createdAt.toDate() : new Date(lastMessage.createdAt || 0);
-            lastMessageTimes[friendId] = lastTime.getTime();
+            const messageTime = lastTime.getTime();
+            const currentTime = lastMessageTimes[friendId] || 0;
+            
+            // Only update if this is newer (preserve order)
+            if (messageTime > currentTime) {
+                lastMessageTimes[friendId] = messageTime;
+                saveMessageTimes(); // Persist the order
+            }
             
             // Count unread messages (messages from friend that haven't been read)
             // Only count if chat is not currently open
@@ -11507,9 +11824,11 @@ async function loadConversationMessages(friendId) {
                     (!msg.read || msg.read === false)
                 );
                 unreadMessageCounts[friendId] = unreadMessages.length;
+                saveUnreadCounts(); // Persist unread counts
             } else {
                 // Chat is open, clear unread count
                 unreadMessageCounts[friendId] = 0;
+                saveUnreadCounts(); // Persist cleared count
             }
         }
         
@@ -11556,6 +11875,7 @@ function renderMessages(messages) {
     // Store current scroll position to determine if user was at bottom
     const wasAtBottom = messagesEl.scrollHeight - messagesEl.scrollTop <= messagesEl.clientHeight + 10;
     
+    // Simply render all messages - no filtering by text, only by ID to prevent actual duplicates
     messagesEl.innerHTML = messages.map(message => {
         const isOwn = message.senderId === currentUser.uid;
         const timestamp = message.createdAt?.toDate ? message.createdAt.toDate() : new Date(message.createdAt || Date.now());
@@ -11646,40 +11966,19 @@ async function sendMessage(friendId, text) {
         // Clear input
         if (chatInput) chatInput.value = '';
         
-        // Update preview for this friend
+        // Simple Snapchat behavior: Immediately update time and move to top
+        const now = Date.now();
+        lastMessageTimes[friendId] = now;
+        saveMessageTimes(); // Persist the order
+        
+        // Update preview
         updateFriendPreview(friendId, text.trim());
         
-        // Optimistically add the message to the UI immediately (before Firestore listener updates)
-        // This prevents the "jump to top" issue
-        const messagesEl = document.getElementById('messagesChatMessages');
-        if (messagesEl && currentChatFriendId === friendId) {
-            // Remove empty state if present
-            const emptyStateEl = messagesEl.querySelector('.messages-empty-state');
-            if (emptyStateEl) emptyStateEl.remove();
-            
-            // Add message to bottom of list with a temp ID and store the text for matching
-            const tempId = 'temp_' + Date.now();
-            const messageText = text.trim();
-            const messageHTML = `
-                <div class="message-item message-own" data-message-id="${tempId}" data-temp-text="${escapeHtml(messageText)}">
-                    <div class="message-content">
-                        ${escapeHtml(messageText)}
-                    </div>
-                    <div class="message-time">Just now</div>
-                </div>
-            `;
-            messagesEl.insertAdjacentHTML('beforeend', messageHTML);
-            
-            // Scroll to bottom immediately
-            requestAnimationFrame(() => {
-                messagesEl.scrollTop = messagesEl.scrollHeight;
-                setTimeout(() => {
-                    messagesEl.scrollTop = messagesEl.scrollHeight;
-                }, 50);
-            });
-        }
+        // Move friend to top immediately
+        renderMessagesFriendsList();
         
-        // Messages will be updated via the real-time listener (which will replace the temp message)
+        // The Firestore listener will handle adding the message to chat when it arrives
+        // This prevents duplicate messages
         
     } catch (error) {
         console.error('Error sending message:', error);
@@ -11725,60 +12024,45 @@ function setupMessageListener(friendId) {
                         id: change.doc.id,
                         ...change.doc.data()
                     };
-                    // Update last message time
+                    
+                    // Simple: Update time and move to top (Snapchat behavior)
                     const messageTime = message.createdAt?.toDate ? message.createdAt.toDate() : new Date(message.createdAt || 0);
                     lastMessageTimes[friendId] = messageTime.getTime();
+                    saveMessageTimes(); // Persist the order
                     
-                    // Only update if chat is open with this friend
-                    if (currentChatFriendId === friendId) {
-                        const messagesEl = document.getElementById('messagesChatMessages');
-                        if (messagesEl) {
-                            // Check if message already exists in DOM (to prevent duplicates)
-                            const existingMessage = messagesEl.querySelector(`[data-message-id="${message.id}"]`);
-                            if (!existingMessage) {
-                                // Find temp message with matching text (from optimistic update)
-                                const tempMessages = Array.from(messagesEl.querySelectorAll('[data-message-id^="temp_"]'));
-                                const matchingTemp = tempMessages.find(temp => {
-                                    const content = temp.querySelector('.message-content');
-                                    return content && content.textContent.trim() === message.text.trim();
-                                });
-                                
-                                if (matchingTemp) {
-                                    // Replace the matching temp message with the real one
-                                    const messageHTML = renderSingleMessage(message);
-                                    matchingTemp.outerHTML = messageHTML;
-                                } else {
-                                    // No matching temp message, check if message already exists by text
-                                    const allMessages = Array.from(messagesEl.querySelectorAll('.message-item'));
-                                    const hasMatchingText = allMessages.some(msg => {
-                                        const content = msg.querySelector('.message-content');
-                                        return content && content.textContent.trim() === message.text.trim();
-                                    });
-                                    
-                                    if (!hasMatchingText) {
-                                        // Remove empty state if present
-                                        const emptyStateEl = messagesEl.querySelector('.messages-empty-state');
-                                        if (emptyStateEl) emptyStateEl.remove();
-                                        
-                                        // Add the real message
-                                        const messageHTML = renderSingleMessage(message);
-                                        messagesEl.insertAdjacentHTML('beforeend', messageHTML);
-                                    }
-                                }
-                                
-                                // Smooth scroll to bottom
-                                requestAnimationFrame(() => {
-                                    messagesEl.scrollTop = messagesEl.scrollHeight;
-                                });
-                            }
-                        }
-                    }
                     // Update preview
                     if (message.text) {
                         updateFriendPreview(friendId, message.text);
                     }
-                    // Re-render friends list to update sorting
+                    
+                    // Move friend to top
                     renderMessagesFriendsList();
+                    
+                    // Only update chat UI if chat is open with this friend
+                    if (currentChatFriendId === friendId) {
+                        const messagesEl = document.getElementById('messagesChatMessages');
+                        if (messagesEl) {
+                            // Check if message already exists in DOM by ID (to prevent duplicates)
+                            const existingMessage = messagesEl.querySelector(`[data-message-id="${message.id}"]`);
+                            if (existingMessage) {
+                                return; // Already exists, skip
+                            }
+                            
+                            // Remove empty state if present
+                            const emptyStateEl = messagesEl.querySelector('.messages-empty-state');
+                            if (emptyStateEl) emptyStateEl.remove();
+                            
+                            // Add the real message
+                            const messageHTML = renderSingleMessage(message);
+                            messagesEl.insertAdjacentHTML('beforeend', messageHTML);
+                            
+                            // Smooth scroll to bottom
+                            requestAnimationFrame(() => {
+                                messagesEl.scrollTop = messagesEl.scrollHeight;
+                            });
+                        }
+                    }
+                    // Preview and sorting already handled above
                 }
             });
         }, error => {
@@ -11796,13 +12080,21 @@ function setupMessageListener(friendId) {
                         id: change.doc.id,
                         ...change.doc.data()
                     };
-                    // Update last message time
+                    
+                    // Simple: Update time and move to top (Snapchat behavior)
                     const messageTime = message.createdAt?.toDate ? message.createdAt.toDate() : new Date(message.createdAt || 0);
                     lastMessageTimes[friendId] = messageTime.getTime();
+                    saveMessageTimes(); // Persist the order
                     
-                    // If chat is not open with this friend, increment unread count
+                    // Update preview
+                    if (message.text) {
+                        updateFriendPreview(friendId, message.text);
+                    }
+                    
+                    // If chat is not open with this friend, increment unread count and show indicator
                     if (currentChatFriendId !== friendId) {
                         unreadMessageCounts[friendId] = (unreadMessageCounts[friendId] || 0) + 1;
+                        saveUnreadCounts(); // Persist unread counts
                         updateMessagesNotificationBadge();
                     } else {
                         // Chat is open, mark message as read immediately (async, don't await)
@@ -11832,12 +12124,7 @@ function setupMessageListener(friendId) {
                             }
                         }
                     }
-                    // Update preview
-                    if (message.text) {
-                        updateFriendPreview(friendId, message.text);
-                    }
-                    // Re-render friends list to update sorting and indicators
-                    renderMessagesFriendsList();
+                    // Preview and sorting already handled above
                 }
             });
         }, error => {
@@ -11871,9 +12158,8 @@ async function loadUnreadMessageCounts() {
     if (!currentUser || !window.firebaseDb) return;
     
     try {
-        // Reset counts
-        unreadMessageCounts = {};
-        lastMessageTimes = {};
+        // Don't reset - use persisted data as base, then update from Firestore
+        // This ensures indicators persist
         
         // Load all friends
         if (friendsForMessaging.length === 0) {
@@ -11895,11 +12181,17 @@ async function loadUnreadMessageCounts() {
                     snapshot.forEach(doc => {
                         const message = doc.data();
                         const messageTime = message.createdAt?.toDate ? message.createdAt.toDate() : new Date(message.createdAt || 0);
-                        lastMessageTimes[friend.id] = messageTime.getTime();
+                        const time = messageTime.getTime();
+                        // Only update if newer than what we have (preserve order)
+                        const currentTime = lastMessageTimes[friend.id] || 0;
+                        if (time > currentTime) {
+                            lastMessageTimes[friend.id] = time;
+                        }
                     });
                 }
                 
-                // Count unread messages (messages not read)
+                // Count unread messages (messages not read) - always check from Firestore
+                // But preserve existing count if chat is currently open
                 if (currentChatFriendId !== friend.id) {
                     // Count messages that haven't been marked as read
                     try {
@@ -11909,15 +12201,19 @@ async function loadUnreadMessageCounts() {
                             .where('read', '==', false);
                         
                         const unreadSnapshot = await unreadQuery.get();
+                        // Always update from Firestore - this is the source of truth
                         unreadMessageCounts[friend.id] = unreadSnapshot.size;
                     } catch (error) {
-                        // If query fails (e.g., no index), use simplified count
-                        // Check if there are any messages at all
-                        if (!snapshot.empty) {
-                            unreadMessageCounts[friend.id] = 1;
-                        } else {
-                            unreadMessageCounts[friend.id] = 0;
+                        // If query fails (e.g., no index), check if we have a persisted count
+                        if (unreadMessageCounts[friend.id] === undefined) {
+                            // Check if there are any messages at all
+                            if (!snapshot.empty) {
+                                unreadMessageCounts[friend.id] = 1;
+                            } else {
+                                unreadMessageCounts[friend.id] = 0;
+                            }
                         }
+                        // Otherwise keep the persisted count
                     }
                 } else {
                     // Chat is open, no unread messages
@@ -11927,6 +12223,9 @@ async function loadUnreadMessageCounts() {
                 console.error(`Error loading unread count for friend ${friend.id}:`, error);
             }
         }
+        
+        // Save updated counts
+        saveUnreadCounts();
         
         // Update UI
         renderMessagesFriendsList();
