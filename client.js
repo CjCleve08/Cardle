@@ -111,8 +111,31 @@ function showNewCardAnnouncement() {
     // Set up mouse tracking for card rotation
     setupCardRotationTracking();
     
-    // Wait for user click to continue - no auto-advance
+    // Wait for user click to continue - then show Moonshine card
     const announcementScreen = document.getElementById('newCardAnnouncement');
+    if (announcementScreen) {
+        const skipAnnouncement = (e) => {
+            cleanupCardRotationTracking();
+            announcementScreen.removeEventListener('click', skipAnnouncement);
+            showMoonshineCardAnnouncement();
+        };
+        announcementScreen.addEventListener('click', skipAnnouncement);
+    }
+}
+
+function showMoonshineCardAnnouncement() {
+    ScreenManager.show('moonshineCardAnnouncement');
+    
+    // Scale the announcement screen to fit after a small delay to ensure layout is complete
+    setTimeout(() => {
+        scaleMoonshineCardAnnouncement();
+    }, 100);
+    
+    // Set up mouse tracking for card rotation
+    setupCardRotationTracking();
+    
+    // Wait for user click to continue - then go to lobby
+    const announcementScreen = document.getElementById('moonshineCardAnnouncement');
     if (announcementScreen) {
         const skipAnnouncement = (e) => {
             cleanupCardRotationTracking();
@@ -130,13 +153,24 @@ function setupCardRotationTracking() {
     // Clean up any existing tracking first
     cleanupCardRotationTracking();
     
-    const cardFlipInner = document.querySelector('.new-card-flip-inner');
-    const announcementScreen = document.getElementById('newCardAnnouncement');
+    // Find which card announcement screen is currently active
+    const amnesiaScreen = document.getElementById('newCardAnnouncement');
+    const moonshineScreen = document.getElementById('moonshineCardAnnouncement');
+    
+    let announcementScreen = null;
+    if (amnesiaScreen && amnesiaScreen.classList.contains('active')) {
+        announcementScreen = amnesiaScreen;
+    } else if (moonshineScreen && moonshineScreen.classList.contains('active')) {
+        announcementScreen = moonshineScreen;
+    }
+    
+    // Find the card flip inner within the active screen
+    const cardFlipInner = announcementScreen ? announcementScreen.querySelector('.new-card-flip-inner') : null;
     
     if (!cardFlipInner || !announcementScreen) return;
     
-    // Get center of the card container
-    const cardContainer = document.querySelector('.new-card-container');
+    // Get center of the card container within the active screen
+    const cardContainer = announcementScreen.querySelector('.new-card-container');
     if (!cardContainer) return;
     
     let continuousRotationAngle = 0;
@@ -239,6 +273,25 @@ function scaleNewCardAnnouncement() {
     const announcementScreen = document.getElementById('newCardAnnouncement');
     const scalingContainer = document.getElementById('newCardAnnouncementScalingContainer');
     
+    if (!announcementScreen || !scalingContainer) return;
+    
+    // Use shared scaling logic
+    scaleCardAnnouncementScreen(announcementScreen, scalingContainer);
+}
+
+// Scale Moonshine card announcement screen to fit viewport
+function scaleMoonshineCardAnnouncement() {
+    const announcementScreen = document.getElementById('moonshineCardAnnouncement');
+    const scalingContainer = document.getElementById('moonshineCardAnnouncementScalingContainer');
+    
+    if (!announcementScreen || !scalingContainer) return;
+    
+    // Use shared scaling logic
+    scaleCardAnnouncementScreen(announcementScreen, scalingContainer);
+}
+
+// Shared scaling logic for card announcement screens
+function scaleCardAnnouncementScreen(announcementScreen, scalingContainer) {
     if (!announcementScreen || !scalingContainer) return;
     
     // Temporarily set transform to just centering (no scale) to measure natural size accurately
@@ -784,7 +837,8 @@ function getCardImagePath(cardId) {
         'remJob': 'RemJob.png',
         'hiddenKeyboard': 'CardeBlanche.png',
         'blackHand': 'BlackHand.png',
-        'amnesia': 'Amnesia.png'
+        'amnesia': 'Amnesia.png',
+        'moonshine': 'Moonshine.png'
     };
     
     const imageName = cardImageMap[cardId] || 'Blank.png';
@@ -2049,7 +2103,7 @@ const ScreenManager = {
     
     // Initialize all screens
     init() {
-        const screenIds = ['splash', 'credits', 'newCardAnnouncement', 'login', 'signup', 'guestName', 'lobby', 'waiting', 'vs', 'game', 'gameOver'];
+        const screenIds = ['splash', 'credits', 'newCardAnnouncement', 'moonshineCardAnnouncement', 'login', 'signup', 'guestName', 'lobby', 'waiting', 'vs', 'game', 'gameOver'];
         screenIds.forEach(id => {
             const element = document.getElementById(id);
             if (!element) {
@@ -2816,23 +2870,28 @@ socket.on('activeEffectsUpdated', (data) => {
     // Update gameState with new active effects
     // CRITICAL: Only update if gameId matches current game (prevent stale updates from previous games)
     if (gameState && gameState.gameId === data.gameId && data.gameId) {
-        // Check if amnesia was just cleared
-        const hadAmnesiaBefore = gameState.activeEffects && gameState.activeEffects.some(e =>
+        // Store old activeEffects before updating (for comparison)
+        const oldActiveEffects = gameState.activeEffects || [];
+        
+        // Check effects before updating (using old array)
+        const hadAmnesiaBefore = oldActiveEffects.some(e =>
             e.type === 'amnesia' && e.target === currentPlayer && !e.used
         );
-        // Check if timeRush was active before (to detect if it was cleared)
+        const hadBlackHandBefore = oldActiveEffects.some(e => 
+            e.type === 'blackHand' && e.target === currentPlayer && !e.used
+        );
+        const hadMoonshineBefore = oldActiveEffects.some(e =>
+            e.type === 'moonshine' && e.target === currentPlayer && !e.used
+        );
+        
+        // Check timeRush before updating (to detect if it was cleared)
         const currentTurnPlayerId = gameState.currentTurn;
-        const hadTimeRushBefore = gameState.activeEffects && gameState.activeEffects.some(e => 
+        const hadTimeRushBefore = oldActiveEffects.some(e => 
             e.type === 'timeRush' && e.target === currentTurnPlayerId && !e.used
         );
         const oldTimeLimit = hadTimeRushBefore ? 20 : TURN_TIME_LIMIT;
         
-        // Check if blackHand effect changed (to update hand panel immediately)
-        const hadBlackHandBefore = gameState.activeEffects && gameState.activeEffects.some(e => 
-            e.type === 'blackHand' && e.target === currentPlayer && !e.used
-        );
-        
-        // Remove any temporary blackHand effects that might have been optimistically added
+        // Remove any temporary effects that might have been optimistically added
         if (gameState.activeEffects) {
             // Keep only one blackHand effect if multiple exist (server's version is authoritative)
             const blackHandEffects = gameState.activeEffects.filter(e => 
@@ -2852,8 +2911,9 @@ socket.on('activeEffectsUpdated', (data) => {
         // Update with new active effects (server's authoritative version)
         gameState.activeEffects = data.activeEffects;
         console.log('Active effects updated:', data.activeEffects);
+        console.log('Previous active effects:', oldActiveEffects);
         
-        // Check if amnesia is still active
+        // Check if amnesia is still active (check new array)
         const hasAmnesiaAfter = gameState.activeEffects && gameState.activeEffects.some(e =>
             e.type === 'amnesia' && e.target === currentPlayer && !e.used
         );
@@ -2877,6 +2937,29 @@ socket.on('activeEffectsUpdated', (data) => {
         const hasBlackHandAfter = gameState.activeEffects && gameState.activeEffects.some(e => 
             e.type === 'blackHand' && e.target === currentPlayer && !e.used
         );
+        
+        // Check if moonshine effect changed
+        const hasMoonshineAfter = gameState.activeEffects && gameState.activeEffects.some(e =>
+            e.type === 'moonshine' && e.target === currentPlayer && !e.used
+        );
+        
+        console.log('Moonshine effect check:', {
+            hadMoonshineBefore,
+            hasMoonshineAfter,
+            oldEffects: oldActiveEffects.filter(e => e.type === 'moonshine' && e.target === currentPlayer),
+            newEffects: (gameState.activeEffects || []).filter(e => e.type === 'moonshine' && e.target === currentPlayer)
+        });
+        
+        // Apply or remove drunk effect based on moonshine status
+        if (hadMoonshineBefore && !hasMoonshineAfter) {
+            console.log('Moonshine effect cleared - removing drunk effect');
+            removeDrunkEffect();
+        } else if (!hadMoonshineBefore && hasMoonshineAfter) {
+            console.log('Moonshine effect just added - applying drunk effect');
+            setTimeout(() => {
+                applyDrunkEffect();
+            }, 100);
+        }
         
         // Update keyboard visibility if hiddenKeyboard effect changed
         updateKeyboardVisibility();
@@ -3023,6 +3106,21 @@ socket.on('turnChanged', (data) => {
     } else {
         // Amnesia not active - show all guesses that were blanked
         showAllGuesses();
+    }
+    
+    // Handle Moonshine effect - check if drunk effect should be applied
+    const moonshineActive = gameState && gameState.activeEffects && Array.isArray(gameState.activeEffects) && gameState.activeEffects.some(e =>
+        e && e.type === 'moonshine' && e.target === currentPlayer && e.used === false
+    );
+    
+    if (moonshineActive) {
+        // Moonshine is active - apply drunk effect
+        setTimeout(() => {
+            applyDrunkEffect();
+        }, 100);
+    } else {
+        // Moonshine is not active - remove drunk effect
+        removeDrunkEffect();
     }
     
     // Play turn change sound
@@ -3901,6 +3999,25 @@ socket.on('cardPlayed', (data) => {
                 // Immediately blank out all previous guesses
                 setTimeout(() => {
                     hideAllPreviousGuesses();
+                }, 100);
+            }
+        }
+        
+        // If opponent played Moonshine, immediately apply drunk effect
+        if (data.card.id === 'moonshine' && data.playerId !== currentPlayer) {
+            console.log('Opponent played Moonshine - immediately applying drunk effect');
+            // Optimistically add the effect to gameState temporarily
+            if (gameState && gameState.activeEffects) {
+                const tempEffect = {
+                    type: 'moonshine',
+                    target: currentPlayer,
+                    description: 'Your screen has a drunk effect for this turn',
+                    used: false
+                };
+                gameState.activeEffects.push(tempEffect);
+                // Immediately apply drunk effect
+                setTimeout(() => {
+                    applyDrunkEffect();
                 }, 100);
             }
         }
@@ -5881,6 +5998,24 @@ function showAllGuesses() {
     }
     
     console.log('showAllGuesses: Restored all blanked guesses from gameState');
+}
+
+// Apply drunk effect to game screen (for Moonshine card)
+function applyDrunkEffect() {
+    const gameScreen = document.getElementById('game');
+    if (gameScreen) {
+        gameScreen.classList.add('drunk-effect');
+        console.log('Drunk effect applied to game screen');
+    }
+}
+
+// Remove drunk effect from game screen (when Moonshine effect ends)
+function removeDrunkEffect() {
+    const gameScreen = document.getElementById('game');
+    if (gameScreen) {
+        gameScreen.classList.remove('drunk-effect');
+        console.log('Drunk effect removed from game screen');
+    }
 }
 
 function displayOpponentGuessHidden(row) {

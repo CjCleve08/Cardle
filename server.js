@@ -587,6 +587,35 @@ const CARD_CONFIG = {
                 }
             }
         }
+    },
+    'moonshine': {
+        metadata: {
+            id: 'moonshine',
+            title: 'Moonshine',
+            description: 'Adds a drunk effect to your opponent\'s screen for their next turn',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                // Find the opponent
+                const opponent = game.players.find(p => p.id !== playerId);
+                if (opponent) {
+                    // Add moonshine effect targeting the opponent
+                    game.activeEffects.push({
+                        type: 'moonshine',
+                        target: opponent.id,
+                        description: 'Your screen has a drunk effect for this turn',
+                        used: false
+                    });
+                }
+            }
+        }
     }
 };
 
@@ -4105,8 +4134,8 @@ io.on('connection', (socket) => {
                 console.log('Applying card effect for:', actualCard.id);
                 const effectsBefore = game.activeEffects.length;
                 config.effects.onGuess(game, socket.id);
-                // If blackHand or amnesia effect was added, notify both players immediately
-                if ((actualCard.id === 'blackHand' || actualCard.id === 'amnesia') && game.activeEffects.length > effectsBefore) {
+                // If blackHand, amnesia, or moonshine effect was added, notify both players immediately
+                if ((actualCard.id === 'blackHand' || actualCard.id === 'amnesia' || actualCard.id === 'moonshine') && game.activeEffects.length > effectsBefore) {
                     console.log(`${actualCard.id}: Notifying players of updated effects`);
                     socket.emit('activeEffectsUpdated', {
                         activeEffects: game.activeEffects,
