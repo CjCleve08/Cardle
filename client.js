@@ -2815,6 +2815,18 @@ socket.on('cardSelected', (data) => {
     // Skip if spectator
     if (window.isSpectator) return;
     
+    // Validate data
+    if (!data || !data.playerId || !data.card) {
+        console.error('cardSelected: Invalid data received', data);
+        return;
+    }
+    
+    // Validate game state
+    if (!gameState || !currentPlayer || !gameState.gameId) {
+        console.error('cardSelected: Invalid game state', { gameState: !!gameState, currentPlayer, gameId: gameState?.gameId });
+        return;
+    }
+    
     if (data.playerId === currentPlayer) {
         selectedCard = data.card;
         
@@ -2853,15 +2865,28 @@ socket.on('cardSelected', (data) => {
             // Don't hide card selection - show it again for next card (player's own cards)
             // Finesse mode is already cleared above, so next selection will use normal selectCard flow
             setTimeout(() => {
-                showCardSelection();
-                generateCards(); // Regenerate with player's own cards (not opponent's)
+                // Validate state before showing card selection again
+                if (gameState && currentPlayer && gameState.gameId && gameState.currentTurn === currentPlayer) {
+                    showCardSelection();
+                    generateCards(); // Regenerate with player's own cards (not opponent's)
+                } else {
+                    console.error('cardSelected: Cannot show card selection - invalid state', {
+                        hasGameState: !!gameState,
+                        currentPlayer,
+                        gameId: gameState?.gameId,
+                        currentTurn: gameState?.currentTurn
+                    });
+                    cardChainActive = false; // Reset on error
+                    hideCardSelection();
+                    showGameBoard();
+                }
             }, 100);
         } else {
             // Final card in chain - hide selection and show board
             cardChainActive = false; // Clear flag
             window.snackTimeMode = false; // Clear snack time mode
-        hideCardSelection();
-        showGameBoard();
+            hideCardSelection();
+            showGameBoard();
         }
     }
 });
@@ -3134,23 +3159,43 @@ socket.on('turnChanged', (data) => {
         
         // Helper function to show card selection
         const showCardSelectionNow = () => {
-            showCardSelection();
-            document.getElementById('wordInput').disabled = false;
-            document.getElementById('wordInput').value = '';
+            // Validate state before showing cards
+            if (!gameState || !currentPlayer || !gameState.gameId) {
+                console.error('showCardSelectionNow: Invalid game state', { gameState: !!gameState, currentPlayer, gameId: gameState?.gameId });
+                showGameMessage('⚠️', 'Game Error', 'Game state is invalid. Please refresh.');
+                return;
+            }
+            
+            // Double-check it's still our turn (race condition protection)
+            if (gameState.currentTurn !== currentPlayer) {
+                console.warn('showCardSelectionNow: Turn changed before showing cards', { currentTurn: gameState.currentTurn, currentPlayer });
+                return;
+            }
+            
             selectedCard = null; // Reset selected card for new turn
             cardChainActive = false; // Reset card chain flag
-            // Focus input after a short delay to ensure card selection is visible
-            setTimeout(() => {
-                document.getElementById('wordInput').focus();
-            }, 100);
+            window.snackTimeMode = false; // Clear snack time mode
+            window.finesseMode = false; // Clear finesse mode
+            window.handRevealMode = false; // Clear hand reveal mode
+            
+            showCardSelection();
+            const wordInput = document.getElementById('wordInput');
+            if (wordInput) {
+                wordInput.disabled = false;
+                wordInput.value = '';
+                // Focus input after a short delay to ensure card selection is visible
+                setTimeout(() => {
+                    wordInput.focus();
+                }, 100);
+            }
         };
         
         // Check if it's the first turn (no guesses made yet)
         const isFirstTurn = !gameState || !gameState.totalGuesses || gameState.totalGuesses === 0;
         
         if (isFirstTurn) {
-            // First turn - show immediately
-            showCardSelectionNow();
+            // First turn - show immediately with small delay for state to settle
+            setTimeout(showCardSelectionNow, 150);
         } else {
             // Not first turn - wait 3 seconds before showing card selection
             setTimeout(showCardSelectionNow, 3000);
@@ -3930,8 +3975,11 @@ socket.on('error', (data) => {
     if (typeof soundManager !== 'undefined') {
         soundManager.playError();
     }
-    showGameMessage('⚠️', 'Invalid Word', data.message);
-    // Don't clear input/card on error - let player fix their guess
+    // Use appropriate title based on context, default to 'Error'
+    const title = data.title || '⚠️ Error';
+    showGameMessage('⚠️', title, data.message || 'An error occurred. Please try again.');
+    // Don't clear input/card on error - let player fix their guess or try again
+    console.error('Socket error received:', data);
 });
 
 socket.on('matchmakingStatus', (data) => {
@@ -4185,6 +4233,10 @@ async function initializeGame(data) {
     
     // Ensure selectedCard is cleared for new game
     selectedCard = null;
+    cardChainActive = false; // Reset card chain flag
+    window.snackTimeMode = false; // Clear snack time mode
+    window.finesseMode = false; // Clear finesse mode
+    window.handRevealMode = false; // Clear hand reveal mode
     
     // Ensure card selection is in correct state
     const cardSelection = document.getElementById('cardSelection');
@@ -4193,14 +4245,46 @@ async function initializeGame(data) {
         cardSelection.style.display = 'none';
     }
     
+    // Validate that currentPlayer is set before checking turn
+    if (!currentPlayer) {
+        console.error('initializeGame: currentPlayer is not set! Cannot determine turn state.');
+        // Try to get it from data if available
+        if (data.yourPlayerId) {
+            currentPlayer = data.yourPlayerId;
+            console.log('initializeGame: Set currentPlayer from data.yourPlayerId:', currentPlayer);
+        } else {
+            console.error('initializeGame: Cannot determine currentPlayer - game may be in invalid state');
+            showGameMessage('⚠️', 'Initialization Error', 'Unable to initialize game. Please try again.');
+            return;
+        }
+    }
+    
+    // Validate that gameState is set
+    if (!gameState || !gameState.gameId) {
+        console.error('initializeGame: gameState or gameId is missing!');
+        showGameMessage('⚠️', 'Initialization Error', 'Game state is invalid. Please try again.');
+        return;
+    }
+    
     if (data.currentTurn === currentPlayer) {
         // It's my turn - show card selection and enable input
         showGameBoard();
         // First turn - show immediately (no guesses made yet)
-        // Small delay to ensure all state is cleared
+        // Small delay to ensure all state is cleared and validated
         setTimeout(() => {
-            showCardSelection();
-        }, 100);
+            // Double-check state before showing cards
+            if (gameState && currentPlayer && gameState.gameId && gameState.currentTurn === currentPlayer) {
+                showCardSelection();
+            } else {
+                console.error('initializeGame: State validation failed before showing cards', {
+                    hasGameState: !!gameState,
+                    currentPlayer,
+                    gameId: gameState?.gameId,
+                    currentTurn: gameState?.currentTurn
+                });
+                showGameMessage('⚠️', 'Initialization Error', 'Game state invalid. Please refresh.');
+            }
+        }, 150);
         const wordInput = document.getElementById('wordInput');
         if (wordInput) {
             wordInput.disabled = false;
@@ -4642,6 +4726,20 @@ function showCardSelection() {
         return;
     }
     
+    // Validate game state before showing card selection
+    if (!gameState || !currentPlayer || !gameState.gameId) {
+        console.error('showCardSelection: Invalid game state', { gameState: !!gameState, currentPlayer, gameId: gameState?.gameId });
+        showGameMessage('⚠️', 'Game Error', 'Game state is invalid. Cannot show card selection.');
+        return;
+    }
+    
+    // Check if it's actually the player's turn
+    if (gameState.currentTurn !== currentPlayer) {
+        console.warn('showCardSelection: Not player\'s turn', { currentTurn: gameState.currentTurn, currentPlayer });
+        // Don't show card selection if it's not our turn
+        return;
+    }
+    
     const cardSelection = document.getElementById('cardSelection');
     if (cardSelection) {
         cardSelection.style.display = 'flex';
@@ -5006,7 +5104,23 @@ function drawCardFromDeck() {
 
 function generateCards(forceGrayOut = false) {
     const container = document.getElementById('cardsContainer');
+    if (!container) {
+        console.error('generateCards: cardsContainer not found');
+        return;
+    }
     container.innerHTML = '';
+    
+    // Validate game state before generating cards
+    if (!gameState || !currentPlayer || !gameState.gameId) {
+        console.error('generateCards: Invalid game state - cannot generate cards', {
+            hasGameState: !!gameState,
+            currentPlayer,
+            gameId: gameState?.gameId
+        });
+        // Don't show error message here - it might be called during initialization
+        // Just log and return empty
+        return;
+    }
     
     // Initialize deck pool if not exists
     if (!window.deckPool || window.deckPool.length === 0) {
@@ -5022,12 +5136,19 @@ function generateCards(forceGrayOut = false) {
     while (window.playerCardHand.length < 3) {
         const newCard = drawCardFromDeck();
         if (newCard) {
-        window.playerCardHand.push(newCard);
+            window.playerCardHand.push(newCard);
         } else {
             // If we can't draw a card, break to prevent infinite loop
             console.error('Cannot draw card from deck. Deck pool length:', window.deckPool?.length);
             break;
         }
+    }
+    
+    // Final check - if we still don't have cards, show error
+    if (!window.playerCardHand || window.playerCardHand.length === 0) {
+        console.error('generateCards: No cards in hand after initialization');
+        container.innerHTML = '<div class="error-message">Unable to load cards. Please refresh.</div>';
+        return;
     }
     
     // Check if blocked card is still in hand - clear it if not
@@ -5278,7 +5399,28 @@ function generateCards(forceGrayOut = false) {
         cardElement.appendChild(cardImage);
         
         if (!shouldGrayOut) {
-        cardElement.onclick = () => selectCard(card, cardElement);
+            // Only add onclick if gameState and currentPlayer are ready
+            cardElement.onclick = () => {
+                // Additional validation before allowing click
+                if (!gameState || !currentPlayer || !gameState.gameId) {
+                    console.error('Card clicked but game state not ready:', { gameState: !!gameState, currentPlayer, gameId: gameState?.gameId });
+                    if (typeof soundManager !== 'undefined') {
+                        soundManager.playError();
+                    }
+                    showGameMessage('⚠️', 'Game Not Ready', 'Game is still initializing. Please wait a moment.');
+                    return;
+                }
+                // Check if it's actually the player's turn
+                if (gameState.currentTurn !== currentPlayer) {
+                    console.warn('Card clicked but not player\'s turn');
+                    if (typeof soundManager !== 'undefined') {
+                        soundManager.playError();
+                    }
+                    showGameMessage('⚠️', 'Not Your Turn', 'Please wait for your turn.');
+                    return;
+                }
+                selectCard(card, cardElement);
+            };
         }
         
         // Add hover sound to card
@@ -5298,7 +5440,31 @@ function generateCards(forceGrayOut = false) {
 function selectCard(card, cardElement) {
     // Safety check: Ensure we have valid game state
     if (!gameState || !currentPlayer) {
-        console.error('selectCard: Invalid game state or currentPlayer');
+        console.error('selectCard: Invalid game state or currentPlayer', { gameState: !!gameState, currentPlayer });
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
+        showGameMessage('⚠️', 'Game Not Ready', 'Game is still initializing. Please wait a moment and try again.');
+        return;
+    }
+    
+    // Check if gameState has a valid gameId
+    if (!gameState.gameId) {
+        console.error('selectCard: Missing gameId in gameState');
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
+        showGameMessage('⚠️', 'Game Error', 'Game ID is missing. Please try refreshing.');
+        return;
+    }
+    
+    // Check if it's actually the player's turn
+    if (gameState.currentTurn !== currentPlayer) {
+        console.warn('selectCard: Not player\'s turn', { currentTurn: gameState.currentTurn, currentPlayer });
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
+        showGameMessage('⚠️', 'Not Your Turn', 'Please wait for your turn to select a card.');
         return;
     }
     
@@ -5362,6 +5528,16 @@ function selectCard(card, cardElement) {
     
     // If we're in a chain or this is another modifier, mark as part of chain
     const isInChain = cardChainActive || cardIsModifier;
+    
+    // Double-check gameId and currentPlayer before emitting
+    if (!gameState.gameId || !currentPlayer) {
+        console.error('selectCard: Cannot emit - missing gameId or currentPlayer', { gameId: gameState.gameId, currentPlayer });
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
+        showGameMessage('⚠️', 'Game Error', 'Unable to select card. Game state is invalid.');
+        return;
+    }
     
     socket.emit('selectCard', {
         gameId: gameState.gameId,
@@ -8415,7 +8591,7 @@ function renderFriendsList(friends) {
             : '';
         const isFriendAdmin = isAdminEmail(friend.email || '');
         return `
-        <div class="friend-item" data-friend-id="${friend.id || ''}" data-friend-name="${friend.name || 'Unknown'}" data-friend-email="${friend.email || ''}">
+        <div class="friend-item" data-friend-id="${friend.id || ''}" data-friend-name="${friend.name || 'Unknown'}" data-friend-email="${friend.email || ''}" data-friend-photourl="${friend.photoURL || ''}">
             <div class="friend-avatar" style="${avatarStyle}">${friend.photoURL ? '' : avatarInitial}</div>
             <div class="friend-info">
                 <div class="friend-name-container">
@@ -8446,8 +8622,9 @@ function renderFriendsList(friends) {
             const friendId = item.dataset.friendId;
             const friendName = item.dataset.friendName;
             const friendEmail = item.dataset.friendEmail;
+            const friendPhotoURL = item.dataset.friendPhotourl || '';
             if (friendId) {
-                openFriendStats(friendId, friendName, friendEmail);
+                openFriendStats(friendId, friendName, friendEmail, friendPhotoURL);
             }
         });
     });
@@ -8512,7 +8689,7 @@ async function getFriendStats(friendId) {
 }
 
 // Open friend stats popup
-async function openFriendStats(friendId, friendName, friendEmail) {
+async function openFriendStats(friendId, friendName, friendEmail, friendPhotoURL = '') {
     const overlay = document.getElementById('friendStatsOverlay');
     if (!overlay) return;
     
@@ -8532,10 +8709,40 @@ async function openFriendStats(friendId, friendName, friendEmail) {
         }
     }
     
-    // Set avatar
+    // Set avatar - use provided photoURL or fetch from Firestore
     const avatarEl = document.getElementById('friendStatsAvatar');
     if (avatarEl) {
-        avatarEl.textContent = friendName ? friendName.charAt(0).toUpperCase() : '👤';
+        // First set initial as fallback
+        const initial = friendName ? friendName.charAt(0).toUpperCase() : '👤';
+        avatarEl.textContent = initial;
+        avatarEl.style.backgroundImage = '';
+        avatarEl.style.backgroundSize = '';
+        avatarEl.style.backgroundPosition = '';
+        
+        // Use provided photoURL if available, otherwise fetch from Firestore
+        let photoURL = friendPhotoURL || null;
+        
+        if (!photoURL && window.firebaseDb && friendId) {
+            try {
+                const userDoc = await window.firebaseDb.collection('users').doc(friendId).get();
+                if (userDoc.exists) {
+                    const userData = userDoc.data();
+                    photoURL = userData.photoURL || null;
+                }
+            } catch (error) {
+                console.error('Error fetching friend photoURL:', error);
+            }
+        }
+        
+        // Set avatar image or initial
+        if (photoURL) {
+            avatarEl.style.backgroundImage = `url(${photoURL})`;
+            avatarEl.style.backgroundSize = 'cover';
+            avatarEl.style.backgroundPosition = 'center';
+            avatarEl.textContent = '';
+        } else {
+            avatarEl.textContent = initial;
+        }
     }
     
     // Fetch and display stats

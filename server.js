@@ -3233,7 +3233,16 @@ io.on('connection', (socket) => {
     
     socket.on('selectCard', (data) => {
         const game = games.get(data.gameId);
-        if (!game || game.currentTurn !== socket.id) return;
+        if (!game) {
+            socket.emit('error', { message: 'Game not found. Please try refreshing.' });
+            console.error(`selectCard: Game ${data.gameId} not found for player ${socket.id}`);
+            return;
+        }
+        if (game.currentTurn !== socket.id) {
+            socket.emit('error', { message: 'It is not your turn to select a card.' });
+            console.warn(`selectCard: Player ${socket.id} tried to select card but it's not their turn. Current turn: ${game.currentTurn}`);
+            return;
+        }
         
         // Check if player is card locked
         const isCardLocked = game.activeEffects.some(e => 
@@ -3254,6 +3263,17 @@ io.on('connection', (socket) => {
         }
         
         const player = game.players.find(p => p.id === socket.id);
+        if (!player) {
+            socket.emit('error', { message: 'Player not found in game.' });
+            console.error(`selectCard: Player ${socket.id} not found in game ${data.gameId}`);
+            return;
+        }
+        
+        if (!data.card || !data.card.id) {
+            socket.emit('error', { message: 'Invalid card data. Please try selecting the card again.' });
+            console.error(`selectCard: Invalid card data from player ${socket.id}`, data.card);
+            return;
+        }
         
         // Initialize card chain tracking if needed
         if (!game.cardChains) {
