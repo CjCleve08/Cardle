@@ -54,7 +54,7 @@
                         <div class="new-card-container">
                             <div class="new-card-flip-inner">
                                 <div class="new-card-face new-card-front">
-                                    <img src="images/Card Images/BlackHand.png" alt="Black Hand" class="new-card-image">
+                                    <img src="images/Card Images/Amnesia.png" alt="Amnesia" class="new-card-image">
                                 </div>
                                 <div class="new-card-face new-card-back">
                                     <img src="images/Card Images/FlipedCard.png" alt="Flipped Card" class="new-card-image">
@@ -63,8 +63,8 @@
                             <div class="new-card-glow"></div>
                         </div>
                         <div class="new-card-info">
-                            <h3 class="new-card-name" id="newCardName">Black Hand</h3>
-                            <p class="new-card-description" id="newCardDescription">Flips all your opponent's cards around for their next turn</p>
+                            <h3 class="new-card-name" id="newCardName">Amnesia</h3>
+                            <p class="new-card-description" id="newCardDescription">Blocks out all previous guesses for your opponent's next turn</p>
                         </div>
                     </div>
                     <div class="new-card-footer">
@@ -243,6 +243,10 @@
                             <span>Ranked</span>
                         </button>
                                 <div class="play-actions-secondary">
+                                <button id="findCasualMatchBtn" class="btn btn-secondary btn-large btn-find-match">
+                            <span class="btn-icon">🎮</span>
+                            <span>Casual</span>
+                        </button>
                                 <button id="createGameBtn" class="btn btn-secondary btn-large">
                             <span class="btn-icon">✨</span>
                             <span>Create Game</span>
@@ -299,6 +303,20 @@
                                     <div class="rank-progress-text" id="rankProgressText">0 chips to next rank</div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Daily Chip Claim -->
+                    <div id="dailyChipClaim" class="daily-chip-claim">
+                        <div class="daily-chip-claim-content">
+                            <div class="daily-chip-claim-icon">🎁</div>
+                            <div class="daily-chip-claim-info">
+                                <div class="daily-chip-claim-title">Daily Bonus</div>
+                                <div class="daily-chip-claim-subtitle" id="dailyChipClaimSubtitle">Claim 50 chips!</div>
+                            </div>
+                            <button id="dailyChipClaimBtn" class="btn btn-primary btn-daily-claim">
+                                <span>Claim</span>
+                            </button>
                         </div>
                     </div>
                         </div>
@@ -1135,6 +1153,19 @@
             <div class="challenge-buttons">
                 <button class="game-message-button btn-accept" id="challengeAcceptBtn">Accept</button>
                 <button class="game-message-button btn-deny" id="challengeDenyBtn">Deny</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Dialog Overlay -->
+    <div id="confirmDialogOverlay" class="game-message-overlay">
+        <div class="game-message-content">
+            <div class="game-message-icon" id="confirmDialogIcon">⚠️</div>
+            <div class="game-message-title" id="confirmDialogTitle">Confirm Action</div>
+            <div class="game-message-text" id="confirmDialogText"></div>
+            <div class="challenge-buttons">
+                <button class="game-message-button btn-deny" id="confirmDialogCancelBtn">Cancel</button>
+                <button class="game-message-button btn-accept" id="confirmDialogConfirmBtn">Confirm</button>
             </div>
         </div>
     </div>

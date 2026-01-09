@@ -1819,24 +1819,28 @@ header h1 {
 /* Play Tab Styles */
 /* Current Rank Display */
 .current-rank-section {
-    margin-bottom: 32px;
+    margin-bottom: 24px;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .current-rank-card {
-    background: linear-gradient(135deg, rgba(26, 26, 27, 0.95), rgba(18, 18, 19, 0.95));
-    border: 1px solid rgba(58, 58, 60, 0.5);
-    border-radius: 16px;
-    padding: 24px;
+    background: linear-gradient(135deg, rgba(26, 26, 27, 0.95), rgba(42, 42, 43, 0.95));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 20px 24px;
     backdrop-filter: blur(10px);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
 }
 
 .current-rank-card:hover {
-    background: linear-gradient(135deg, rgba(36, 36, 37, 0.95), rgba(28, 28, 29, 0.95));
-    border-color: rgba(106, 170, 100, 0.5);
-    box-shadow: 0 6px 24px rgba(106, 170, 100, 0.2);
-    transform: translateY(-2px);
+    border-color: rgba(106, 170, 100, 0.4);
+    box-shadow: 0 4px 12px rgba(106, 170, 100, 0.2), 0 2px 4px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+    background: linear-gradient(135deg, rgba(30, 30, 31, 0.98), rgba(46, 46, 47, 0.98));
 }
 
 .current-rank-header {
@@ -2050,67 +2054,249 @@ header h1 {
     border-top-color: inherit;
 }
 
+/* Daily Chip Claim */
+.daily-chip-claim {
+    background: linear-gradient(135deg, rgba(26, 26, 27, 0.95), rgba(42, 42, 43, 0.95));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(10px);
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.daily-chip-claim.daily-claim-available {
+    border-color: rgba(74, 144, 226, 0.4);
+    box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1);
+    animation: pulse-glow-subtle 3s ease-in-out infinite;
+}
+
+.daily-chip-claim.daily-claim-cooldown {
+    border-color: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    opacity: 0.6;
+}
+
+@keyframes pulse-glow-subtle {
+    0%, 100% {
+        box-shadow: 0 2px 8px rgba(74, 144, 226, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1);
+        border-color: rgba(74, 144, 226, 0.4);
+    }
+    50% {
+        box-shadow: 0 3px 12px rgba(74, 144, 226, 0.3), 0 2px 4px rgba(0, 0, 0, 0.15);
+        border-color: rgba(74, 144, 226, 0.5);
+    }
+}
+
+.daily-chip-claim-content {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.daily-chip-claim-icon {
+    font-size: 24px;
+    line-height: 1;
+    flex-shrink: 0;
+    opacity: 0.9;
+}
+
+.daily-chip-claim-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.daily-chip-claim-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #d7dadc;
+    margin-bottom: 2px;
+}
+
+.daily-chip-claim-subtitle {
+    font-size: 12px;
+    color: #818384;
+}
+
+.btn-daily-claim {
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 8px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-height: auto;
+}
+
+.btn-daily-claim:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .play-actions {
     display: flex;
     flex-direction: column;
-    gap: 24px;
-    margin-bottom: 40px;
+    gap: 16px;
+    margin-bottom: 32px;
     width: 100%;
-    max-width: 700px;
+    max-width: 800px;
     margin-left: auto;
     margin-right: auto;
 }
 
 .btn-find-match {
     width: 100%;
-    min-height: 180px;
+    min-height: 120px;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-find-match::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    transition: left 0.5s ease;
+}
+
+.btn-find-match:hover::before {
+    left: 100%;
+}
+
+/* Ranked button - bigger */
+#findMatchBtn.btn-find-match {
+    min-height: 160px;
+    font-size: 1.25rem;
+    padding: 28px 24px;
+}
+
+#findMatchBtn.btn-find-match .btn-icon {
+    font-size: 2rem;
+}
+
+/* Casual button - smaller */
+#findCasualMatchBtn.btn-find-match {
+    min-height: 100px;
+    font-size: 0.9375rem;
+    padding: 16px 20px;
+}
+
+#findCasualMatchBtn.btn-find-match .btn-icon {
+    font-size: 1.3rem;
 }
 
 .play-actions-secondary {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
     width: 100%;
 }
 
-@media (max-width: 600px) {
-    .play-actions-secondary {
-        grid-template-columns: 1fr;
+.play-actions-secondary .btn-large {
+    min-height: 100px;
+    font-size: 0.9375rem;
+    padding: 16px 20px;
+}
+
+.play-actions-secondary .btn-large .btn-icon {
+    font-size: 1.3rem;
+}
+
+@media (max-width: 768px) {
+    .play-actions {
+        gap: 12px;
     }
     
-    .btn-find-match {
-        min-height: 160px;
+    .play-actions-secondary {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    #findMatchBtn.btn-find-match {
+        min-height: 140px;
+        font-size: 1.125rem;
+        padding: 24px 20px;
+    }
+    
+    #findMatchBtn.btn-find-match .btn-icon {
+        font-size: 1.8rem;
+    }
+    
+    #findCasualMatchBtn.btn-find-match {
+        min-height: 90px;
+    }
+    
+    .play-actions-secondary .btn-large {
+        min-height: 90px;
     }
 }
 
 .btn-large {
-    padding: 28px 24px;
-    font-size: 1.125rem;
-    font-weight: 700;
-    min-height: 160px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    padding: 20px 24px;
+    font-size: 1rem;
+    font-weight: 600;
+    min-height: 120px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.1);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 14px;
-    border-radius: 16px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    gap: 10px;
+    border-radius: 12px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: linear-gradient(135deg, rgba(26, 26, 27, 0.95), rgba(42, 42, 43, 0.95));
+    backdrop-filter: blur(10px);
 }
 
 .btn-large .btn-icon {
-    font-size: 1.8rem;
+    font-size: 1.5rem;
+    opacity: 0.9;
 }
 
 .btn-large:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2);
+    border-color: rgba(106, 170, 100, 0.4);
+    background: linear-gradient(135deg, rgba(30, 30, 31, 0.98), rgba(46, 46, 47, 0.98));
 }
 
 .btn-large:active {
-        transform: translateY(0);
-    }
+    transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+.btn-primary.btn-large {
+    background: linear-gradient(135deg, rgba(106, 170, 100, 0.2), rgba(90, 154, 84, 0.2));
+    border-color: rgba(106, 170, 100, 0.5);
+    color: #6aaa64;
+}
+
+.btn-primary.btn-large:hover {
+    background: linear-gradient(135deg, rgba(106, 170, 100, 0.3), rgba(90, 154, 84, 0.3));
+    border-color: rgba(106, 170, 100, 0.7);
+    box-shadow: 0 4px 16px rgba(106, 170, 100, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.btn-secondary.btn-large {
+    background: linear-gradient(135deg, rgba(26, 26, 27, 0.95), rgba(42, 42, 43, 0.95));
+    border-color: rgba(255, 255, 255, 0.1);
+    color: #d7dadc;
+}
+
+.btn-secondary.btn-large:hover {
+    background: linear-gradient(135deg, rgba(30, 30, 31, 0.98), rgba(46, 46, 47, 0.98));
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+}
 
 .matchmaking-status {
     display: flex;
@@ -2118,10 +2304,15 @@ header h1 {
     align-items: center;
     gap: 12px;
     padding: 20px;
-    background: rgba(106, 170, 100, 0.1);
+    background: linear-gradient(135deg, rgba(26, 26, 27, 0.95), rgba(42, 42, 43, 0.95));
     border: 1px solid rgba(106, 170, 100, 0.3);
-    border-radius: 8px;
+    border-radius: 12px;
     margin-bottom: 20px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    backdrop-filter: blur(10px);
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .matchmaking-spinner {
@@ -2135,14 +2326,22 @@ header h1 {
 
 .join-section {
     margin-bottom: 20px;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .game-id-display {
-    background: rgba(106, 170, 100, 0.1);
+    background: linear-gradient(135deg, rgba(26, 26, 27, 0.95), rgba(42, 42, 43, 0.95));
     border: 1px solid rgba(106, 170, 100, 0.3);
-    border-radius: 8px;
+    border-radius: 12px;
     padding: 20px;
     text-align: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    backdrop-filter: blur(10px);
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .game-id-label {
@@ -5137,6 +5336,11 @@ header h1 {
     transition: opacity 0.3s ease;
 }
 
+/* Confirm dialog should appear above all other modals */
+#confirmDialogOverlay {
+    z-index: 20000 !important;
+}
+
 .game-message-overlay.show {
     display: flex;
     opacity: 1;
@@ -5521,6 +5725,8 @@ header h1 {
     flex-direction: column;
     justify-content: center;
     align-items: center;
+    perspective: 1000px;
+    position: relative;
     transition: all 0.3s ease;
     cursor: default;
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
@@ -5532,6 +5738,36 @@ header h1 {
     transform: translateY(-5px);
     border-color: #6aaa64;
     box-shadow: 0 8px 16px rgba(106, 170, 100, 0.3);
+}
+
+.hand-card-flip-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transform-style: preserve-3d;
+    transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hand-card-item.flipped .hand-card-flip-container {
+    transform: rotateY(180deg);
+}
+
+.hand-card-face {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.hand-card-front {
+    transform: rotateY(0deg);
+}
+
+.hand-card-back {
+    transform: rotateY(180deg);
 }
 
 .hand-card-image {

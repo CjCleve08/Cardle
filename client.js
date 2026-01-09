@@ -309,6 +309,8 @@ function showLobby() {
         });
         // Generate rank ladder
         generateRankLadder();
+        // Update daily chip claim UI
+        updateDailyClaimUI();
     }
 }
 
@@ -767,7 +769,8 @@ function getCardImagePath(cardId) {
         'snackTime': 'SnackTime.png',
         'remJob': 'RemJob.png',
         'hiddenKeyboard': 'CardeBlanche.png',
-        'blackHand': 'BlackHand.png'
+        'blackHand': 'BlackHand.png',
+        'amnesia': 'Amnesia.png'
     };
     
     const imageName = cardImageMap[cardId] || 'Blank.png';
@@ -854,7 +857,8 @@ function getDefaultStats() {
         gamesWithGuesses: 0,
         chipPoints: 0, // Starting chip points (rating system)
         winStreak: 0, // Current consecutive wins
-        bestWinStreak: 0 // Best win streak achieved
+        bestWinStreak: 0, // Best win streak achieved
+        lastDailyClaim: null // Timestamp of last daily claim (ISO string)
     };
 }
 
@@ -1057,6 +1061,143 @@ async function updateStatsDisplay() {
     });
 }
 
+// Daily Chip Claim System
+const DAILY_CHIP_REWARD = 50;
+const DAILY_CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+
+// Check if daily claim is available
+function isDailyClaimAvailable(lastClaimDate) {
+    if (!lastClaimDate) {
+        return true; // Never claimed before
+    }
+    
+    const lastClaim = new Date(lastClaimDate);
+    const now = new Date();
+    const timeSinceLastClaim = now.getTime() - lastClaim.getTime();
+    
+    return timeSinceLastClaim >= DAILY_CLAIM_COOLDOWN_MS;
+}
+
+// Get time until next claim is available (in milliseconds)
+function getTimeUntilNextClaim(lastClaimDate) {
+    if (!lastClaimDate) {
+        return 0; // Available now
+    }
+    
+    const lastClaim = new Date(lastClaimDate);
+    const now = new Date();
+    const timeSinceLastClaim = now.getTime() - lastClaim.getTime();
+    const timeUntilNext = DAILY_CLAIM_COOLDOWN_MS - timeSinceLastClaim;
+    
+    return Math.max(0, timeUntilNext);
+}
+
+// Format time remaining as human-readable string
+function formatTimeRemaining(ms) {
+    if (ms <= 0) return 'Available now';
+    
+    const hours = Math.floor(ms / (60 * 60 * 1000));
+    const minutes = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
+    const seconds = Math.floor((ms % (60 * 1000)) / 1000);
+    
+    if (hours > 0) {
+        return `${hours}h ${minutes}m`;
+    } else if (minutes > 0) {
+        return `${minutes}m ${seconds}s`;
+    } else {
+        return `${seconds}s`;
+    }
+}
+
+// Claim daily chips
+async function claimDailyChips() {
+    const stats = await getPlayerStats();
+    
+    // Check if claim is available
+    if (!isDailyClaimAvailable(stats.lastDailyClaim)) {
+        const timeRemaining = getTimeUntilNextClaim(stats.lastDailyClaim);
+        showGameMessage('⏰', 'Daily Claim', `You can claim again in ${formatTimeRemaining(timeRemaining)}`);
+        return;
+    }
+    
+    // Update stats
+    stats.chipPoints = (stats.chipPoints || 0) + DAILY_CHIP_REWARD;
+    stats.lastDailyClaim = new Date().toISOString();
+    
+    // Save stats
+    await savePlayerStats(stats);
+    
+    // Update UI
+    await updateStatsDisplay();
+    await updateRankDisplay();
+    updateDailyClaimUI();
+    
+    // Show success message
+    showGameMessage('🎁', 'Daily Bonus Claimed!', `You received ${DAILY_CHIP_REWARD} chips!`);
+    
+    // Play success sound if available
+    if (typeof soundManager !== 'undefined') {
+        soundManager.playCardSelect();
+    }
+}
+
+// Update daily claim UI
+async function updateDailyClaimUI() {
+    // Clear any existing countdown interval
+    if (window.dailyClaimCountdownInterval) {
+        clearInterval(window.dailyClaimCountdownInterval);
+        window.dailyClaimCountdownInterval = null;
+    }
+    
+    const dailyClaimContainer = document.getElementById('dailyChipClaim');
+    const claimBtn = document.getElementById('dailyChipClaimBtn');
+    const claimSubtitle = document.getElementById('dailyChipClaimSubtitle');
+    
+    if (!dailyClaimContainer || !claimBtn || !claimSubtitle) {
+        return; // UI elements not found
+    }
+    
+    const stats = await getPlayerStats();
+    const isAvailable = isDailyClaimAvailable(stats.lastDailyClaim);
+    
+    if (isAvailable) {
+        // Claim is available
+        claimBtn.disabled = false;
+        claimBtn.textContent = 'Claim';
+        claimSubtitle.textContent = 'Claim 50 chips!';
+        dailyClaimContainer.classList.remove('daily-claim-cooldown');
+        dailyClaimContainer.classList.add('daily-claim-available');
+    } else {
+        // Claim is on cooldown
+        claimBtn.disabled = true;
+        const timeRemaining = getTimeUntilNextClaim(stats.lastDailyClaim);
+        claimSubtitle.textContent = `Next claim in ${formatTimeRemaining(timeRemaining)}`;
+        dailyClaimContainer.classList.remove('daily-claim-available');
+        dailyClaimContainer.classList.add('daily-claim-cooldown');
+        
+        // Update countdown every second (only if still on cooldown)
+        if (timeRemaining > 0) {
+            window.dailyClaimCountdownInterval = setInterval(() => {
+                getPlayerStats().then(updatedStats => {
+                    const timeRemaining = getTimeUntilNextClaim(updatedStats.lastDailyClaim);
+                    if (timeRemaining <= 0) {
+                        if (window.dailyClaimCountdownInterval) {
+                            clearInterval(window.dailyClaimCountdownInterval);
+                            window.dailyClaimCountdownInterval = null;
+                        }
+                        updateDailyClaimUI(); // Refresh UI
+                    } else {
+                        const subtitleEl = document.getElementById('dailyChipClaimSubtitle');
+                        if (subtitleEl) {
+                            subtitleEl.textContent = `Next claim in ${formatTimeRemaining(timeRemaining)}`;
+                        }
+                    }
+                });
+            }, 1000);
+        }
+    }
+}
+
 // Clear cached stats when user changes (login/logout)
 function clearStatsCache() {
     cachedStats = null;
@@ -1065,13 +1206,49 @@ function clearStatsCache() {
 // Ranking System (Rainbow Six Siege style)
 const RANK_TIERS = [
     { name: 'Copper', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 0, maxChips: 1199, color: '#8B4513' },
-    { name: 'Bronze', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 1200, maxChips: 2399, color: '#CD7F32' },
+    { name: 'Bronze', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 1200, maxChips: 2399, color: '#CD7F32', protected: true },
     { name: 'Silver', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 2400, maxChips: 3599, color: '#C0C0C0' },
-    { name: 'Gold', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 3600, maxChips: 4799, color: '#FFD700' },
+    { name: 'Gold', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 3600, maxChips: 4799, color: '#FFD700', protected: true },
     { name: 'Platinum', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 4800, maxChips: 5999, color: '#00CED1' },
-    { name: 'Diamond', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 6000, maxChips: 7999, color: '#B9F2FF' },
+    { name: 'Diamond', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 6000, maxChips: 7999, color: '#B9F2FF', protected: true },
     { name: 'Champion', subRanks: ['V', 'IV', 'III', 'II', 'I'], minChips: 8000, maxChips: 9999, color: '#FF1493' }
 ];
+
+// Get the highest protected rank threshold that the player has reached
+// Protected ranks (every other rank): Bronze (1200), Gold (3600), Diamond (6000)
+// Once you reach a protected rank, you cannot drop below its minimum chip threshold
+function getProtectedRankThreshold(chipPoints) {
+    // Check in reverse order (highest first) to find the highest protected rank reached
+    const protectedThresholds = [
+        { rank: 'Diamond', minChips: 6000 },
+        { rank: 'Gold', minChips: 3600 },
+        { rank: 'Bronze', minChips: 1200 }
+    ];
+    
+    for (const threshold of protectedThresholds) {
+        if (chipPoints >= threshold.minChips) {
+            return threshold.minChips;
+        }
+    }
+    
+    return 0; // No protection below Bronze
+}
+
+// Apply rank protection - prevents dropping below protected rank thresholds
+// Example: If player has 1500 chips (Bronze), they cannot drop below 1200 (Bronze minimum)
+// Example: If player has 4000 chips (Gold), they cannot drop below 3600 (Gold minimum)
+function applyRankProtection(currentChipPoints, newChipPoints) {
+    // Get the highest protected rank threshold the player has reached
+    const protectedThreshold = getProtectedRankThreshold(currentChipPoints);
+    
+    // If player has reached a protected rank, don't let them drop below it
+    if (protectedThreshold > 0 && newChipPoints < protectedThreshold) {
+        console.log(`Rank protection: Preventing drop from ${currentChipPoints} to ${newChipPoints}. Setting to ${protectedThreshold} (protected rank threshold)`);
+        return protectedThreshold;
+    }
+    
+    return newChipPoints;
+}
 
 // Get rank image path based on tier and sub-rank
 function getRankImagePath(tier, subRank) {
@@ -1413,42 +1590,25 @@ function generateRankLadder() {
         const chipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
         const currentRank = getRankFromChips(chipPoints);
         
-        // Calculate position based on actual rank structure (matching getRankFromChips logic)
-        let rankPosition = 0; // 0 to 1 (0% to 100%)
-        let rankCount = 0;
+        // Calculate total chip range across all tiers
+        const minChips = RANK_TIERS[0].minChips;
+        const maxChips = RANK_TIERS[RANK_TIERS.length - 1].maxChips;
+        const totalChipRange = maxChips - minChips;
         
-        for (const tier of RANK_TIERS) {
-            if (chipPoints >= tier.minChips && chipPoints <= tier.maxChips) {
-                // We're in this tier
-                    const tierRange = tier.maxChips - tier.minChips;
-                    const subRankRange = tierRange / tier.subRanks.length;
-                    const chipsInTier = chipPoints - tier.minChips;
-                    const subRankIndex = Math.min(
-                        Math.floor(chipsInTier / subRankRange),
-                        tier.subRanks.length - 1
-                    );
-                    
-                    // Calculate progress within the current sub-rank
-                    const currentSubRankStart = subRankIndex * subRankRange;
-                    const nextSubRankStart = (subRankIndex + 1) * subRankRange;
-                    const progressInSubRank = ((chipsInTier - currentSubRankStart) / (nextSubRankStart - currentSubRankStart));
-                    
-                    // Position = (ranks before this tier + current sub-rank index + progress in sub-rank) / total ranks
-                    rankPosition = (rankCount + subRankIndex + progressInSubRank) / totalRanks;
-                    break;
-            } else if (chipPoints > tier.maxChips) {
-                // We've passed this tier, add all its sub-ranks to the count
-                    rankCount += tier.subRanks.length;
-            }
-        }
+        // Calculate position based on chip value within total range
+        // Clamp chipPoints to valid range
+        const clampedChips = Math.max(minChips, Math.min(maxChips, chipPoints));
+        const chipsFromStart = clampedChips - minChips;
+        const rankPosition = chipsFromStart / totalChipRange;
         
         const fillPercentage = rankPosition * 100;
         const indicatorPosition = fillPercentage;
         progressBarFill.style.width = `${fillPercentage}%`;
         progressBarFill.style.background = `linear-gradient(90deg, ${currentRank.color}, ${currentRank.color})`;
         
-        // Position current rank indicator
-        currentRankIndicator.style.left = `${indicatorPosition}%`;
+        // Position current rank indicator (clamp to 0-100%)
+        const clampedPosition = Math.max(0, Math.min(100, indicatorPosition));
+        currentRankIndicator.style.left = `${clampedPosition}%`;
         
         // Update rank badge with image
         const rankImagePath = getRankImagePath(currentRank.tier, currentRank.subRank);
@@ -1461,14 +1621,9 @@ function generateRankLadder() {
             const marker = document.createElement('div');
             marker.className = 'rank-marker';
             
-            // Calculate position for this tier
-            let tierStartIndex = 0;
-            for (let i = 0; i < tierIndex; i++) {
-                    tierStartIndex += RANK_TIERS[i].subRanks.length;
-            }
-            
-            // Position at the start of the tier
-            const markerPosition = (tierStartIndex / (totalRanks - 1)) * 100;
+            // Calculate position for this tier based on chip value
+            const tierChipsFromStart = tier.minChips - minChips;
+            const markerPosition = (tierChipsFromStart / totalChipRange) * 100;
             marker.style.left = `${markerPosition}%`;
             marker.style.borderColor = tier.color;
             
@@ -2141,6 +2296,21 @@ socket.on('gameStarted', (data) => {
     
     // Remove yourPlayerId from data before storing in gameState, but preserve isTutorial
     const { yourPlayerId, ...gameStateData } = data;
+    
+    // CRITICAL: Ensure activeEffects is always properly initialized for new games
+    // This prevents cards from being grayed out due to stale cardLock effects from previous games
+    if (!gameStateData.activeEffects || !Array.isArray(gameStateData.activeEffects)) {
+        gameStateData.activeEffects = [];
+    } else if (gameStateData.activeEffects.length > 0) {
+        // If server sent activeEffects with content, log a warning but trust the server
+        // (shouldn't happen for new games, but if it does, we want to know)
+        console.warn('New game has activeEffects - this should be empty for new games:', gameStateData.activeEffects);
+        // However, for safety, clear any cardLock effects targeting currentPlayer that might be stale
+        gameStateData.activeEffects = gameStateData.activeEffects.filter(e => 
+            !(e && e.type === 'cardLock' && e.target === currentPlayer)
+        );
+    }
+    
     gameState = gameStateData;
     
     // Ensure isTutorial is preserved in gameState
@@ -2435,11 +2605,15 @@ socket.on('gameStarted', (data) => {
             // Hide matchmaking status if visible
             const matchmakingStatus = document.getElementById('matchmakingStatus');
             const findMatchBtn = document.getElementById('findMatchBtn');
+            const findCasualMatchBtn = document.getElementById('findCasualMatchBtn');
             if (matchmakingStatus) {
                 matchmakingStatus.style.display = 'none';
             }
             if (findMatchBtn) {
                 findMatchBtn.disabled = false;
+            }
+            if (findCasualMatchBtn) {
+                findCasualMatchBtn.disabled = false;
             }
     
             if (ScreenManager.show('game')) {
@@ -2574,7 +2748,12 @@ socket.on('cardSelected', (data) => {
 
 socket.on('activeEffectsUpdated', (data) => {
     // Update gameState with new active effects
-    if (gameState && gameState.gameId === data.gameId) {
+    // CRITICAL: Only update if gameId matches current game (prevent stale updates from previous games)
+    if (gameState && gameState.gameId === data.gameId && data.gameId) {
+        // Check if amnesia was just cleared
+        const hadAmnesiaBefore = gameState.activeEffects && gameState.activeEffects.some(e =>
+            e.type === 'amnesia' && e.target === currentPlayer && !e.used
+        );
         // Check if timeRush was active before (to detect if it was cleared)
         const currentTurnPlayerId = gameState.currentTurn;
         const hadTimeRushBefore = gameState.activeEffects && gameState.activeEffects.some(e => 
@@ -2582,12 +2761,70 @@ socket.on('activeEffectsUpdated', (data) => {
         );
         const oldTimeLimit = hadTimeRushBefore ? 20 : TURN_TIME_LIMIT;
         
-        // Update with new active effects
+        // Check if blackHand effect changed (to update hand panel immediately)
+        const hadBlackHandBefore = gameState.activeEffects && gameState.activeEffects.some(e => 
+            e.type === 'blackHand' && e.target === currentPlayer && !e.used
+        );
+        
+        // Remove any temporary blackHand effects that might have been optimistically added
+        if (gameState.activeEffects) {
+            // Keep only one blackHand effect if multiple exist (server's version is authoritative)
+            const blackHandEffects = gameState.activeEffects.filter(e => 
+                e.type === 'blackHand' && e.target === currentPlayer
+            );
+            if (blackHandEffects.length > 1) {
+                // Remove temporary ones, keep the first
+                gameState.activeEffects = gameState.activeEffects.filter((e, index, arr) => {
+                    if (e.type === 'blackHand' && e.target === currentPlayer) {
+                        return index === arr.findIndex(ee => ee.type === 'blackHand' && ee.target === currentPlayer);
+                    }
+                    return true;
+                });
+            }
+        }
+        
+        // Update with new active effects (server's authoritative version)
         gameState.activeEffects = data.activeEffects;
         console.log('Active effects updated:', data.activeEffects);
         
+        // Check if amnesia is still active
+        const hasAmnesiaAfter = gameState.activeEffects && gameState.activeEffects.some(e =>
+            e.type === 'amnesia' && e.target === currentPlayer && !e.used
+        );
+        
+        // If amnesia was active before and is now cleared, show all guesses again
+        if (hadAmnesiaBefore && !hasAmnesiaAfter) {
+            console.log('Amnesia effect cleared - showing all guesses again');
+            // Use a small delay to ensure any pending animations complete
+            setTimeout(() => {
+                showAllGuesses();
+            }, 300);
+        } else if (!hadAmnesiaBefore && hasAmnesiaAfter) {
+            // Amnesia was just added - immediately blank out all previous guesses
+            console.log('Amnesia effect just added - blanking out all previous guesses');
+            setTimeout(() => {
+                hideAllPreviousGuesses();
+            }, 100);
+        }
+        
+        // Check if blackHand effect changed
+        const hasBlackHandAfter = gameState.activeEffects && gameState.activeEffects.some(e => 
+            e.type === 'blackHand' && e.target === currentPlayer && !e.used
+        );
+        
         // Update keyboard visibility if hiddenKeyboard effect changed
         updateKeyboardVisibility();
+        
+        // Update hand panel and card selection if blackHand effect changed
+        if (hadBlackHandBefore !== hasBlackHandAfter) {
+            console.log('Black Hand effect changed - updating hand panel immediately');
+            // Update immediately (activeEffectsUpdated confirms the effect is now in gameState)
+            updateHandPanel();
+            // Also update card selection if it's visible
+            if (document.getElementById('cardSelection') && document.getElementById('cardSelection').classList.contains('active')) {
+                generateCards();
+            }
+        }
         
         // Check if timeRush is active now
         const hasTimeRushAfter = gameState.activeEffects && gameState.activeEffects.some(e => 
@@ -2693,8 +2930,34 @@ socket.on('turnChanged', (data) => {
     updatePlayerStatus();
     updateKeyboardVisibility(); // Update keyboard visibility when turn changes
     
+    // Update hand panel when turn changes (to reflect blackHand effect changes)
+    updateHandPanel();
+    
     // Always show game board so players can see previous guesses
     showGameBoard();
+    
+    // Handle Amnesia effect - check if guesses should be blanked
+    const amnesiaActive = gameState && gameState.activeEffects && Array.isArray(gameState.activeEffects) && gameState.activeEffects.some(e =>
+        e && e.type === 'amnesia' && e.target === currentPlayer && e.used === false
+    );
+    
+    console.log('turnChanged - amnesia check:', {
+        amnesiaActive,
+        myTurn,
+        currentPlayer,
+        activeEffects: gameState?.activeEffects?.filter(e => e?.type === 'amnesia')
+    });
+    
+    if (amnesiaActive) {
+        // Amnesia is active on me - blank out all previous guesses (regardless of whose turn it is)
+        console.log('Amnesia active - blanking out all previous guesses');
+        setTimeout(() => {
+            hideAllPreviousGuesses();
+        }, 200);
+    } else {
+        // Amnesia not active - show all guesses that were blanked
+        showAllGuesses();
+    }
     
     // Play turn change sound
     if (typeof soundManager !== 'undefined') {
@@ -2805,6 +3068,13 @@ socket.on('guessSubmitted', (data) => {
         }
     } else {
         // This is opponent's guess
+        // Check if amnesia is active - if so, blank out this guess (it's a previous guess)
+        const amnesiaActive = gameState && gameState.activeEffects && gameState.activeEffects.some(e =>
+            e.type === 'amnesia' && e.target === currentPlayer && !e.used
+        );
+        
+        // Note: Previous guesses are already blanked when amnesia is played
+        // New guesses during the turn will be displayed normally
         if (data.hidden || !data.guess) {
             // Guess is completely hidden (hiddenGuess card)
             displayOpponentGuessHidden(data.row);
@@ -3364,11 +3634,11 @@ socket.on('gameOver', (data) => {
             let newChipPoints = currentChipPoints;
             
             if (data.disconnected && data.chipChange !== undefined) {
-                // Disconnect scenario: use server-provided chip change
+                // Disconnect scenario: use server-provided chip change (always 10 chips for disconnect wins)
                 chipPointsChange = data.chipChange;
                 newChipPoints = Math.max(0, currentChipPoints + chipPointsChange);
             } else if (won && data.winnerChipChange !== undefined) {
-                // Winner: use server-provided chip gain
+                // Winner: use server-provided chip gain (only for non-disconnect wins)
                 chipPointsChange = data.winnerChipChange;
                 newChipPoints = Math.max(0, currentChipPoints + chipPointsChange);
             } else if (!won && data.loserChipChange !== undefined) {
@@ -3380,6 +3650,15 @@ socket.on('gameOver', (data) => {
                 console.warn('Server did not provide chip change values. Skipping chip update for security.');
                 chipPointsChange = 0;
                 newChipPoints = currentChipPoints;
+            }
+            
+            // Apply rank protection - prevent dropping below protected ranks (Bronze, Gold, Diamond)
+            const protectedNewChipPoints = applyRankProtection(currentChipPoints, newChipPoints);
+            if (protectedNewChipPoints !== newChipPoints) {
+                // Adjust chipPointsChange to reflect the protection
+                chipPointsChange = protectedNewChipPoints - currentChipPoints;
+                newChipPoints = protectedNewChipPoints;
+                console.log(`Rank protection applied: prevented drop below protected rank threshold. New chips: ${newChipPoints}`);
             }
         
         // Display chip points change on game over screen
@@ -3495,12 +3774,14 @@ socket.on('matchmakingStatus', (data) => {
     const matchmakingStatus = document.getElementById('matchmakingStatus');
     const matchmakingText = document.getElementById('matchmakingText');
     const findMatchBtn = document.getElementById('findMatchBtn');
+    const findCasualMatchBtn = document.getElementById('findCasualMatchBtn');
     
     if (data.status === 'searching') {
         // Show matchmaking status
         matchmakingStatus.style.display = 'flex';
         matchmakingText.textContent = 'Searching for opponent...';
-        findMatchBtn.disabled = true;
+        if (findMatchBtn) findMatchBtn.disabled = true;
+        if (findCasualMatchBtn) findCasualMatchBtn.disabled = true;
     } else if (data.status === 'matched') {
         // Play match found sound
         if (typeof soundManager !== 'undefined') {
@@ -3508,11 +3789,13 @@ socket.on('matchmakingStatus', (data) => {
         }
         // Hide matchmaking status (game will start)
         matchmakingStatus.style.display = 'none';
-        findMatchBtn.disabled = false;
+        if (findMatchBtn) findMatchBtn.disabled = false;
+        if (findCasualMatchBtn) findCasualMatchBtn.disabled = false;
     } else if (data.status === 'cancelled') {
         // Hide matchmaking status
         matchmakingStatus.style.display = 'none';
-        findMatchBtn.disabled = false;
+        if (findMatchBtn) findMatchBtn.disabled = false;
+        if (findCasualMatchBtn) findCasualMatchBtn.disabled = false;
     }
 });
 
@@ -3520,8 +3803,44 @@ socket.on('cardPlayed', (data) => {
     // Show splash for both players when a card is played
     console.log('Card played event received:', data);
     if (data && data.card) {
-        queueCardSplash(data.card, data.playerName);
+        // If opponent played Black Hand, immediately flip the cards before showing splash
+        if (data.card.id === 'blackHand' && data.playerId !== currentPlayer) {
+            console.log('Opponent played Black Hand - immediately flipping cards');
+            // Optimistically add the effect to gameState temporarily so updateHandPanel will flip cards
+            if (gameState && gameState.activeEffects) {
+                const tempEffect = {
+                    type: 'blackHand',
+                    target: currentPlayer,
+                    description: 'Your cards are flipped for this turn',
+                    used: false
+                };
+                gameState.activeEffects.push(tempEffect);
+                // Update hand panel immediately with animation
+                updateHandPanel();
+            }
+        }
         
+        // If opponent played Amnesia, immediately blank out all previous guesses
+        if (data.card.id === 'amnesia' && data.playerId !== currentPlayer) {
+            console.log('Opponent played Amnesia - immediately blanking out all previous guesses');
+            // Optimistically add the effect to gameState temporarily
+            if (gameState && gameState.activeEffects) {
+                const tempEffect = {
+                    type: 'amnesia',
+                    target: currentPlayer,
+                    description: 'All previous guesses are hidden for your turn',
+                    used: false
+                };
+                gameState.activeEffects.push(tempEffect);
+                // Immediately blank out all previous guesses
+                setTimeout(() => {
+                    hideAllPreviousGuesses();
+                }, 100);
+            }
+        }
+        
+        queueCardSplash(data.card, data.playerName);
+
         // Show tutorial message if opponent played a card (only once, first time)
         if (window.tutorialMode && data.playerId !== currentPlayer && !window.tutorialMessagesShown?.has('opponentCard')) {
             // Wait for card splash to finish, then show tutorial message
@@ -3608,14 +3927,34 @@ async function initializeGame(data) {
     }
     
     currentRow = 0;
-    // Reset card hand and initialize deck pool for new game
-    window.playerCardHand = [];
+    
+    // CRITICAL: Clear all game state that could cause cards to be grayed out
     window.blockedCardId = null; // Clear blocked card for new game
     window.finesseMode = false; // Clear Finesse mode
     window.opponentCardsForFinesse = null;
     window.finesseGameId = null;
     window.handRevealMode = false; // Clear hand reveal mode
     window.opponentCardsForReveal = null;
+    window.handBlackHandFlippedState = false; // Clear black hand flip state
+    selectedCard = null; // Clear any selected card
+    
+    // Ensure activeEffects is properly initialized (double-check)
+    if (gameState) {
+        if (!gameState.activeEffects || !Array.isArray(gameState.activeEffects)) {
+            gameState.activeEffects = [];
+        }
+        // Safety: Remove any cardLock effects targeting currentPlayer (shouldn't exist in new game)
+        const oldLength = gameState.activeEffects.length;
+        gameState.activeEffects = gameState.activeEffects.filter(e => 
+            !(e && e.type === 'cardLock' && e.target === currentPlayer)
+        );
+        if (gameState.activeEffects.length !== oldLength) {
+            console.warn('Removed stale cardLock effects from new game initialization:', oldLength - gameState.activeEffects.length);
+        }
+    }
+    
+    // Reset card hand and initialize deck pool for new game
+    window.playerCardHand = [];
     await initializeDeckPool();
     
     // Validate that we have cards in hand after initialization
@@ -3661,18 +4000,36 @@ async function initializeGame(data) {
         scaleGameBoard();
     }, 50);
     
+    // Ensure selectedCard is cleared for new game
+    selectedCard = null;
+    
+    // Ensure card selection is in correct state
+    const cardSelection = document.getElementById('cardSelection');
+    if (cardSelection) {
+        cardSelection.classList.remove('active');
+        cardSelection.style.display = 'none';
+    }
+    
     if (data.currentTurn === currentPlayer) {
         // It's my turn - show card selection and enable input
         showGameBoard();
         // First turn - show immediately (no guesses made yet)
-        showCardSelection();
-        document.getElementById('wordInput').disabled = false;
-        selectedCard = null;
+        // Small delay to ensure all state is cleared
+        setTimeout(() => {
+            showCardSelection();
+        }, 100);
+        const wordInput = document.getElementById('wordInput');
+        if (wordInput) {
+            wordInput.disabled = false;
+        }
     } else {
         // It's opponent's turn - hide card selection, disable input
         hideCardSelection();
         showGameBoard();
-        document.getElementById('wordInput').disabled = true;
+        const wordInput = document.getElementById('wordInput');
+        if (wordInput) {
+            wordInput.disabled = true;
+        }
     }
 }
 
@@ -4129,7 +4486,16 @@ function showCardSelection() {
         }
         
         // Check if player is card locked - if so, show cards but grayed out
-        if (isCardLocked()) {
+        // Double-check that we have valid gameState and the lock is legitimate
+        const cardLocked = isCardLocked();
+        if (cardLocked) {
+            // Verify this is a legitimate card lock (not stale state)
+            if (!gameState || !gameState.gameId || !currentPlayer) {
+                console.error('showCardSelection: Invalid game state when checking card lock, ignoring lock');
+                generateCards(false); // Don't gray out if state is invalid
+                return;
+            }
+            
             // Update title to show Forced Miss
             const titleElement = cardSelection.querySelector('h3');
             if (titleElement) {
@@ -4174,6 +4540,16 @@ function showGameBoard() {
     document.getElementById('gameBoard').style.display = 'block';
 }
 
+// Proper Fisher-Yates shuffle algorithm for truly random shuffling
+function shuffleArray(array) {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+}
+
 // Deck cycling system (like Clash Royale)
 async function initializeDeckPool() {
     // For tutorial mode, always use premade deck
@@ -4183,7 +4559,7 @@ async function initializeDeckPool() {
         const premadeCards = premadeDeck.map(id => allCards.find(c => c.id === id)).filter(Boolean);
         if (premadeCards.length > 0) {
             console.log('Tutorial mode: Using premade deck');
-            window.deckPool = [...premadeCards].sort(() => Math.random() - 0.5);
+            window.deckPool = shuffleArray(premadeCards);
         } else {
             console.error('Tutorial mode: Premade deck is empty!');
             window.deckPool = [];
@@ -4206,14 +4582,14 @@ async function initializeDeckPool() {
             const premadeCards = premadeDeck.map(id => allCards.find(c => c.id === id)).filter(Boolean);
             if (premadeCards.length > 0) {
                 console.warn('Using premade deck as fallback');
-                window.deckPool = [...premadeCards].sort(() => Math.random() - 0.5);
+                window.deckPool = shuffleArray(premadeCards);
             } else {
                 console.error('Premade deck is also empty! Cannot initialize deck pool.');
                 window.deckPool = [];
             }
         } else {
-        // Create a shuffled pool of deck cards
-        window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
+        // Create a shuffled pool of deck cards using proper shuffle algorithm
+        window.deckPool = shuffleArray(deckCards);
         }
     }
     
@@ -4238,8 +4614,8 @@ function initializeDeckPoolSync() {
     const allCards = getAllCards();
     const deckCards = deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
     
-    // Create a shuffled pool of deck cards
-    window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
+    // Create a shuffled pool of deck cards using proper shuffle algorithm
+    window.deckPool = shuffleArray(deckCards);
     
     // Initialize hand if not exists
     if (!window.playerCardHand) {
@@ -4286,21 +4662,62 @@ function updateHandPanel() {
         }
     }
     
-    // Clear existing content
-    handCardsContainer.innerHTML = '';
-    
     // Check if blackHand effect is active (cards are flipped)
     const isBlackHandActive = gameState && gameState.activeEffects && 
         gameState.activeEffects.some(e => 
             e.type === 'blackHand' && e.target === currentPlayer && !e.used
         );
     
+    // Check previous state to determine if we need to animate
+    const wasFlippedBefore = window.handBlackHandFlippedState || false;
+    const shouldFlipNow = isBlackHandActive;
+    const needsFlipAnimation = wasFlippedBefore !== shouldFlipNow;
+    
+    // If existing cards need to flip, animate them first
+    if (needsFlipAnimation && handCardsContainer.children.length > 0) {
+        const existingCards = Array.from(handCardsContainer.querySelectorAll('.hand-card-item'));
+        existingCards.forEach((cardElement, index) => {
+            if (shouldFlipNow) {
+                // Flip to back
+                setTimeout(() => {
+                    cardElement.classList.add('flipped');
+                }, index * 50);
+            } else {
+                // Flip to front
+                setTimeout(() => {
+                    cardElement.classList.remove('flipped');
+                }, index * 50);
+            }
+        });
+        
+        // Wait for animation to complete before rebuilding
+        setTimeout(() => {
+            // Rebuild cards after animation
+            updateHandPanel();
+        }, 600 + (existingCards.length * 50));
+        
+        // Update state
+        window.handBlackHandFlippedState = shouldFlipNow;
+        return; // Exit early, rebuild will happen in setTimeout
+    }
+    
+    // Clear existing content if no animation needed
+    handCardsContainer.innerHTML = '';
+    
+    // Update state
+    window.handBlackHandFlippedState = shouldFlipNow;
+    
     // Display current hand (up to 3 cards)
     if (window.playerCardHand && window.playerCardHand.length > 0) {
-        window.playerCardHand.slice(0, 3).forEach((card) => {
+        window.playerCardHand.slice(0, 3).forEach((card, index) => {
             const cardElement = document.createElement('div');
             const isBlocked = window.blockedCardId === card.id;
             cardElement.className = 'hand-card-item';
+            
+            // Add flipped class if blackHand is active
+            if (isBlackHandActive) {
+                cardElement.classList.add('flipped');
+            }
             
             if (isBlocked) {
                 cardElement.classList.add('blocked');
@@ -4308,17 +4725,31 @@ function updateHandPanel() {
                 // Animation will still run, but opacity stays at 0.4 via CSS
             }
             
-            // Create image element for the card
-            const cardImage = document.createElement('img');
-            // If blackHand is active, show flipped card image instead
-            if (isBlackHandActive) {
-                cardImage.src = 'images/Card Images/FlipedCard.png';
-            } else {
-                cardImage.src = getCardImagePath(card.id);
-            }
-            cardImage.alt = card.title || 'Unknown Card';
-            cardImage.className = 'hand-card-image';
-            cardElement.appendChild(cardImage);
+            // Create flip container
+            const flipContainer = document.createElement('div');
+            flipContainer.className = 'hand-card-flip-container';
+            
+            // Create front face (normal card)
+            const frontFace = document.createElement('div');
+            frontFace.className = 'hand-card-face hand-card-front';
+            const frontImage = document.createElement('img');
+            frontImage.src = getCardImagePath(card.id);
+            frontImage.alt = card.title || 'Unknown Card';
+            frontImage.className = 'hand-card-image';
+            frontFace.appendChild(frontImage);
+            
+            // Create back face (flipped card)
+            const backFace = document.createElement('div');
+            backFace.className = 'hand-card-face hand-card-back';
+            const backImage = document.createElement('img');
+            backImage.src = 'images/Card Images/FlipedCard.png';
+            backImage.alt = 'Flipped Card';
+            backImage.className = 'hand-card-image';
+            backFace.appendChild(backImage);
+            
+            flipContainer.appendChild(frontFace);
+            flipContainer.appendChild(backFace);
+            cardElement.appendChild(flipContainer);
             
             handCardsContainer.appendChild(cardElement);
         });
@@ -4362,12 +4793,12 @@ function drawCardFromDeck() {
         const allCards = getAllCards();
         const deckCards = deckIds.map(id => allCards.find(c => c.id === id)).filter(Boolean);
         if (deckCards.length > 0) {
-        window.deckPool = [...deckCards].sort(() => Math.random() - 0.5);
+        window.deckPool = shuffleArray(deckCards);
         } else {
             // If still empty, try fallback
             const fallbackCards = getDeckCards();
             if (fallbackCards && fallbackCards.length > 0) {
-                window.deckPool = [...fallbackCards].sort(() => Math.random() - 0.5);
+                window.deckPool = shuffleArray(fallbackCards);
             } else {
                 console.error('drawCardFromDeck: No cards available in deck!');
                 return null; // Return null instead of undefined
@@ -4628,15 +5059,20 @@ function generateCards(forceGrayOut = false) {
     const selectedCards = availableCards.slice(0, 3);
     
     // Check if blackHand effect is active (cards are flipped)
-    const isBlackHandActive = gameState && gameState.activeEffects && 
+    const isBlackHandActive = gameState && gameState.activeEffects && Array.isArray(gameState.activeEffects) &&
         gameState.activeEffects.some(e => 
-            e.type === 'blackHand' && e.target === currentPlayer && !e.used
+            e && e.type === 'blackHand' && e.target === currentPlayer && e.used === false
         );
+    
+    // Safety check: Don't force gray out unless explicitly requested and cardLock is active
+    // If forceGrayOut is true but cardLock is not actually active, don't gray out
+    const isActuallyLocked = isCardLocked();
+    const shouldForceGrayOut = forceGrayOut && isActuallyLocked;
     
     selectedCards.forEach((card, index) => {
         const cardElement = document.createElement('div');
         const isBlocked = window.blockedCardId === card.id;
-        const shouldGrayOut = forceGrayOut || isBlocked;
+        const shouldGrayOut = shouldForceGrayOut || isBlocked;
         cardElement.className = 'card';
         if (shouldGrayOut) {
             cardElement.classList.add('blocked');
@@ -4677,6 +5113,12 @@ function generateCards(forceGrayOut = false) {
 }
 
 function selectCard(card, cardElement) {
+    // Safety check: Ensure we have valid game state
+    if (!gameState || !currentPlayer) {
+        console.error('selectCard: Invalid game state or currentPlayer');
+        return;
+    }
+    
     // Check if player is card locked
     if (isCardLocked()) {
         if (typeof soundManager !== 'undefined') {
@@ -4897,9 +5339,15 @@ function selectCard(card, cardElement) {
 }
 
 function isCardLocked() {
-    if (!gameState || !gameState.activeEffects || !currentPlayer) return false;
+    // Safety checks to prevent false positives
+    if (!gameState || !currentPlayer) return false;
+    if (!gameState.activeEffects || !Array.isArray(gameState.activeEffects)) {
+        // If activeEffects is not an array, assume not locked (shouldn't happen, but safety check)
+        return false;
+    }
+    // Only check cardLock effects that target the current player and are not used
     return gameState.activeEffects.some(e => 
-        e.type === 'cardLock' && e.target === currentPlayer && !e.used
+        e && e.type === 'cardLock' && e.target === currentPlayer && e.used === false
     );
 }
 
@@ -5207,39 +5655,166 @@ function displayOpponentGuess(guess, feedback, row) {
     // Ensure the row exists (for unlimited guesses)
     ensureBoardRowExists(row);
     
+    // Check if amnesia is active - if so, this guess should be blanked (it's a previous guess)
+    const amnesiaActive = gameState && gameState.activeEffects && gameState.activeEffects.some(e =>
+        e.type === 'amnesia' && e.target === currentPlayer && !e.used
+    );
+    
     // First, fill in the letters
     for (let i = 0; i < 5; i++) {
         const cell = document.getElementById(`cell-${row}-${i}`);
         if (cell) {
-        cell.textContent = guess[i];
-        cell.classList.add('filled');
+            // If amnesia is active, blank this cell immediately (it's a previous guess)
+            if (amnesiaActive && !cell.hasAttribute('data-amnesia-blanked')) {
+                // Store original content before blanking - need to store what the cell SHOULD have
+                const originalText = guess[i] || '';
+                // Store the feedback class that should be applied
+                const feedbackClass = feedback && feedback[i] ? feedback[i] : 'absent';
+                const originalClasses = Array.from(cell.classList).join(' ');
+                
+                cell.setAttribute('data-amnesia-original-text', originalText);
+                cell.setAttribute('data-amnesia-original-classes', originalClasses);
+                cell.setAttribute('data-amnesia-feedback-class', feedbackClass);
+                
+                // Blank it out
+                cell.textContent = '';
+                cell.classList.remove('correct', 'present', 'absent');
+                cell.classList.add('absent');
+                cell.style.backgroundColor = '#3a3a3c';
+                cell.setAttribute('data-amnesia-blanked', 'true');
+            } else {
+                // Normal display
+                cell.textContent = guess[i];
+                cell.classList.add('filled');
+            }
         }
     }
     
-    // Then animate the feedback with a delay
-    setTimeout(() => {
-        for (let i = 0; i < 5; i++) {
-            const cell = document.getElementById(`cell-${row}-${i}`);
-            if (cell) {
-            setTimeout(() => {
-                if (feedback && feedback[i]) {
-                    if (feedback[i] === 'correct') {
-                        cell.classList.add('correct');
-                    } else if (feedback[i] === 'present') {
-                        cell.classList.add('present');
+    // Only animate feedback if amnesia is not active (previous guesses are already blanked)
+    if (!amnesiaActive) {
+        // Then animate the feedback with a delay
+        setTimeout(() => {
+            for (let i = 0; i < 5; i++) {
+                const cell = document.getElementById(`cell-${row}-${i}`);
+                if (cell) {
+                setTimeout(() => {
+                    if (feedback && feedback[i]) {
+                        if (feedback[i] === 'correct') {
+                            cell.classList.add('correct');
+                        } else if (feedback[i] === 'present') {
+                            cell.classList.add('present');
+                        } else {
+                            cell.classList.add('absent');
+                        }
                     } else {
+                        // No feedback available
                         cell.classList.add('absent');
                     }
-                } else {
-                    // No feedback available
-                    cell.classList.add('absent');
+                }, i * 150); // Stagger the animations
+            }
+            }
+            // Update scroll buttons after animation
+            setTimeout(updateScrollButtons, 1000);
+        }, 200);
+    }
+}
+
+// Blank out all previous guesses (for Amnesia effect) - makes them gray/blank instead of hiding
+function hideAllPreviousGuesses() {
+    const boardContainer = document.getElementById('boardContainer');
+    if (!boardContainer) {
+        console.log('hideAllPreviousGuesses: boardContainer not found');
+        return;
+    }
+    
+    let blankedCount = 0;
+    const rows = boardContainer.querySelectorAll('.board-row');
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('.board-cell');
+        cells.forEach(cell => {
+            // Blank out all filled cells (previous guesses) - make them gray/blank
+            if (cell.classList.contains('filled') && !cell.hasAttribute('data-amnesia-blanked')) {
+                // Store original content - preserve everything
+                const originalText = cell.textContent || '';
+                const originalClasses = Array.from(cell.classList).join(' ');
+                const originalBgColor = cell.style.backgroundColor || '';
+                
+                cell.setAttribute('data-amnesia-original-text', originalText);
+                cell.setAttribute('data-amnesia-original-classes', originalClasses);
+                if (originalBgColor) {
+                    cell.setAttribute('data-amnesia-original-bg', originalBgColor);
                 }
-            }, i * 150); // Stagger the animations
-        }
-        }
-        // Update scroll buttons after animation
-        setTimeout(updateScrollButtons, 1000);
-    }, 200);
+                
+                // Blank out the cell - make it gray and empty
+                cell.textContent = '';
+                // Remove feedback classes but keep 'filled' and 'board-cell'
+                cell.classList.remove('correct', 'present', 'absent');
+                cell.classList.add('absent'); // Gray background
+                cell.style.backgroundColor = '#3a3a3c'; // Dark gray background
+                cell.setAttribute('data-amnesia-blanked', 'true');
+                blankedCount++;
+            }
+        });
+    });
+    console.log(`hideAllPreviousGuesses: Blanked ${blankedCount} cells`);
+}
+
+// Show all guesses (when Amnesia effect ends) - restore by directly fixing blanked cells
+function showAllGuesses() {
+    const boardContainer = document.getElementById('boardContainer');
+    if (!boardContainer) return;
+    
+    // Find all blanked cells and restore them from gameState data
+    if (gameState && gameState.players) {
+        gameState.players.forEach(player => {
+            if (player.guesses && Array.isArray(player.guesses)) {
+                player.guesses.forEach(guessData => {
+                    if (guessData.guess && guessData.feedback && guessData.row !== undefined) {
+                        const row = guessData.row;
+                        
+                        // Check each cell in this row and restore if it was blanked
+                        for (let i = 0; i < 5; i++) {
+                            const cell = document.getElementById(`cell-${row}-${i}`);
+                            if (cell && cell.hasAttribute('data-amnesia-blanked')) {
+                                // Restore the text
+                                cell.textContent = guessData.guess[i] || '';
+                                
+                                // Remove amnesia styling
+                                cell.style.backgroundColor = '';
+                                cell.classList.remove('absent');
+                                
+                                // Restore proper classes
+                                cell.classList.add('filled');
+                                
+                                // Apply the correct feedback class
+                                if (guessData.feedback && guessData.feedback[i]) {
+                                    cell.classList.remove('correct', 'present', 'absent');
+                                    if (guessData.feedback[i] === 'correct') {
+                                        cell.classList.add('correct');
+                                    } else if (guessData.feedback[i] === 'present') {
+                                        cell.classList.add('present');
+                                    } else {
+                                        cell.classList.add('absent');
+                                    }
+                                } else {
+                                    cell.classList.add('absent');
+                                }
+                                
+                                // Clean up data attributes
+                                cell.removeAttribute('data-amnesia-blanked');
+                                cell.removeAttribute('data-amnesia-original-text');
+                                cell.removeAttribute('data-amnesia-original-classes');
+                                cell.removeAttribute('data-amnesia-original-bg');
+                                cell.removeAttribute('data-amnesia-feedback-class');
+                            }
+                        }
+                    }
+                });
+            }
+        });
+    }
+    
+    console.log('showAllGuesses: Restored all blanked guesses from gameState');
 }
 
 function displayOpponentGuessHidden(row) {
@@ -6540,7 +7115,13 @@ function validateDeckForGame() {
     return { valid: true };
 }
 
-document.getElementById('findMatchBtn').addEventListener('click', async () => {
+// Daily chip claim button
+document.getElementById('dailyChipClaimBtn')?.addEventListener('click', async () => {
+    await claimDailyChips();
+});
+
+// Shared function for starting matchmaking (ranked or casual)
+async function startMatchmaking(isRanked = true) {
     const name = getPlayerName();
     if (!name) {
         showGameMessage('⚠️', 'Name Required', 'Please enter your name');
@@ -6576,59 +7157,104 @@ document.getElementById('findMatchBtn').addEventListener('click', async () => {
     
     const firebaseUid = currentUser ? currentUser.uid : null;
     const photoURL = window.currentUserPhotoURL || (currentUser ? currentUser.photoURL : null);
-    socket.emit('findMatch', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL });
-});
-
-document.getElementById('cancelMatchmakingBtn').addEventListener('click', () => {
-    socket.emit('cancelMatchmaking');
-});
-
-document.getElementById('createGameBtn').addEventListener('click', async () => {
-    const name = getPlayerName();
-    if (name) {
-        // Cancel matchmaking if active
-        socket.emit('cancelMatchmaking');
-        
-        // Ensure decks are loaded before creating game
-        // Clear cache to ensure fresh data
-        cachedDecks = null;
-        await getAllDecks();
-        
-        // Double-check that deck is actually loaded
-        const testDeck = await getPlayerDeck();
-        if (!testDeck || testDeck.length === 0) {
-            console.error('Deck is empty after loading!');
-            showGameMessage('⚠️', 'Deck Error', 'Your deck could not be loaded. Please check your deck in the lobby.');
-            setTimeout(() => {
-                switchTab('deck');
-            }, 100);
-            return;
-        }
-        
-        // Validate deck before creating game
-        const validation = validateDeckForGame();
-        if (!validation.valid) {
-            showGameMessage('⚠️', 'Incomplete Deck', validation.message);
-            // Switch to deck tab so user can fix their deck (delay to ensure popup is visible)
-            setTimeout(() => {
-                switchTab('deck');
-            }, 100);
-            return;
-        }
-        
-        const firebaseUid = currentUser ? currentUser.uid : null;
-        const photoURL = window.currentUserPhotoURL || (currentUser ? currentUser.photoURL : null);
-        socket.emit('createGame', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL });
+    
+    if (isRanked) {
+        socket.emit('findMatch', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL });
     } else {
-        showGameMessage('⚠️', 'Sign In Required', 'Please sign in to create a game');
+        socket.emit('findCasualMatch', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL });
     }
-});
+}
 
-document.getElementById('joinGameBtn').addEventListener('click', () => {
-    // Cancel matchmaking if active
-    socket.emit('cancelMatchmaking');
-    document.getElementById('joinGroup').style.display = 'block';
-});
+// Play tab button event listeners
+function attachPlayTabListeners() {
+    const findMatchBtn = document.getElementById('findMatchBtn');
+    if (findMatchBtn) {
+        findMatchBtn.addEventListener('click', async () => {
+            await startMatchmaking(true); // Ranked
+        });
+    }
+
+    const findCasualMatchBtn = document.getElementById('findCasualMatchBtn');
+    if (findCasualMatchBtn) {
+        findCasualMatchBtn.addEventListener('click', async () => {
+            console.log('Casual matchmaking button clicked');
+            await startMatchmaking(false); // Casual
+        });
+    } else {
+        console.error('findCasualMatchBtn not found in DOM');
+    }
+
+    const cancelMatchmakingBtn = document.getElementById('cancelMatchmakingBtn');
+    if (cancelMatchmakingBtn) {
+        cancelMatchmakingBtn.addEventListener('click', () => {
+            socket.emit('cancelMatchmaking');
+        });
+    }
+
+    const createGameBtn = document.getElementById('createGameBtn');
+    if (createGameBtn) {
+        createGameBtn.addEventListener('click', async () => {
+            const name = getPlayerName();
+            if (name) {
+                // Cancel matchmaking if active
+                socket.emit('cancelMatchmaking');
+                
+                // Ensure decks are loaded before creating game
+                // Clear cache to ensure fresh data
+                cachedDecks = null;
+                await getAllDecks();
+                
+                // Double-check that deck is actually loaded
+                const testDeck = await getPlayerDeck();
+                if (!testDeck || testDeck.length === 0) {
+                    console.error('Deck is empty after loading!');
+                    showGameMessage('⚠️', 'Deck Error', 'Your deck could not be loaded. Please check your deck in the lobby.');
+                    setTimeout(() => {
+                        switchTab('deck');
+                    }, 100);
+                    return;
+                }
+                
+                // Validate deck before creating game
+                const validation = validateDeckForGame();
+                if (!validation.valid) {
+                    showGameMessage('⚠️', 'Incomplete Deck', validation.message);
+                    // Switch to deck tab so user can fix their deck (delay to ensure popup is visible)
+                    setTimeout(() => {
+                        switchTab('deck');
+                    }, 100);
+                    return;
+                }
+                
+                const firebaseUid = currentUser ? currentUser.uid : null;
+                const photoURL = window.currentUserPhotoURL || (currentUser ? currentUser.photoURL : null);
+                socket.emit('createGame', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL });
+            } else {
+                showGameMessage('⚠️', 'Sign In Required', 'Please sign in to create a game');
+            }
+        });
+    }
+
+    const joinGameBtn = document.getElementById('joinGameBtn');
+    if (joinGameBtn) {
+        joinGameBtn.addEventListener('click', () => {
+            // Cancel matchmaking if active
+            socket.emit('cancelMatchmaking');
+            const joinGroup = document.getElementById('joinGroup');
+            if (joinGroup) {
+                joinGroup.style.display = 'block';
+            }
+        });
+    }
+}
+
+// Attach listeners when DOM is ready or immediately if already ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', attachPlayTabListeners);
+} else {
+    // DOM is already ready, attach immediately
+    attachPlayTabListeners();
+}
 
 // More tab menu functionality
 let moreTabMenuOpen = false;
@@ -8233,6 +8859,23 @@ function spectateFriendGame(friendFirebaseUid, gameId) {
         return;
     }
     
+    // If already spectating a different game, leave it first
+    if (window.isSpectator && window.spectatorGameId && window.spectatorGameId !== gameId) {
+        console.log('Already spectating a different game, leaving first');
+        leaveSpectatorMode();
+        // Wait a moment for cleanup before starting new spectate
+        setTimeout(() => {
+            spectateFriendGame(friendFirebaseUid, gameId);
+        }, 100);
+        return;
+    }
+    
+    // Clear chat messages before starting to spectate (in case switching games)
+    const chatMessages = document.getElementById('chatMessages');
+    if (chatMessages) {
+        chatMessages.innerHTML = '';
+    }
+    
     // Get spectator name (current user's display name if available)
     let spectatorName = 'Someone';
     if (currentUser && currentUser.displayName) {
@@ -8289,6 +8932,12 @@ function initializeSpectatorView(data) {
     const player2Board = document.getElementById('player2Board');
     if (player1Board) player1Board.innerHTML = '';
     if (player2Board) player2Board.innerHTML = '';
+    
+    // Clear chat messages when starting to spectate a new game
+    const chatMessages = document.getElementById('chatMessages');
+    if (chatMessages) {
+        chatMessages.innerHTML = '';
+    }
     
     // Set player names
     if (gameState.players && gameState.players.length >= 2) {
@@ -8532,10 +9181,17 @@ function leaveSpectatorMode() {
         socket.emit('leaveSpectate', { gameId: window.spectatorGameId });
     }
     
+    // Clear chat messages when leaving spectator mode
+    const chatMessages = document.getElementById('chatMessages');
+    if (chatMessages) {
+        chatMessages.innerHTML = '';
+    }
+    
     // Clear spectator state
     window.isSpectator = false;
     window.spectatorGameId = null;
     window.spectatorGameWord = null;
+    window.spectatedPlayerId = null;
     
     // Hide spectator indicator and leave button
     const spectatorIndicator = document.getElementById('spectatorIndicator');
@@ -9659,6 +10315,18 @@ function isCreator() {
     return email === 'cjcleve2008@gmail.com';
 }
 
+// Check if current user is an admin
+function isAdmin() {
+    if (!currentUser) return false;
+    const email = currentUser.email?.toLowerCase() || '';
+    // Admin emails
+    const adminEmails = [
+        'cjcleve2008@gmail.com',
+        'perkerewiczgus@gmail.com'
+    ];
+    return adminEmails.includes(email);
+}
+
 // Load community posts
 async function loadCommunityPosts() {
     if (!window.firebaseDb || !currentUser) {
@@ -10007,8 +10675,9 @@ async function openPostDetail(postId, event) {
             ? `background-image: url(${authorInfo.photoURL}); background-size: cover; background-position: center;` 
             : '';
         
-        // Check if current user is the post author (for delete button)
+        // Check if current user is the post author or an admin (for delete button)
         const isPostAuthor = postData.authorId === currentUser.uid;
+        const canDelete = isPostAuthor || isAdmin();
         
         titleEl.innerHTML = `
             <div class="post-detail-header">
@@ -10021,8 +10690,8 @@ async function openPostDetail(postId, event) {
                             <span class="post-time">${timeAgo}</span>
                         </div>
                     </div>
-                    ${isPostAuthor ? `
-                    <button class="post-delete-btn" onclick="deletePost('${postId}', event)" title="Delete Post">
+                    ${canDelete ? `
+                    <button class="post-delete-btn" onclick="deletePost('${postId}', event)" title="${isAdmin() && !isPostAuthor ? 'Delete Post (Admin)' : 'Delete Post'}">
                         <span class="post-delete-icon">🗑️</span>
                     </button>
                     ` : ''}
@@ -10174,7 +10843,68 @@ async function addComment(postId, content) {
     }
 }
 
-// Delete post (only creator can delete)
+// Show confirmation dialog (returns a Promise that resolves to true/false)
+function showConfirmDialog(icon, title, message) {
+    return new Promise((resolve) => {
+        const overlay = document.getElementById('confirmDialogOverlay');
+        const iconEl = document.getElementById('confirmDialogIcon');
+        const titleEl = document.getElementById('confirmDialogTitle');
+        const textEl = document.getElementById('confirmDialogText');
+        const confirmBtn = document.getElementById('confirmDialogConfirmBtn');
+        const cancelBtn = document.getElementById('confirmDialogCancelBtn');
+        
+        if (!overlay || !iconEl || !titleEl || !textEl || !confirmBtn || !cancelBtn) {
+            console.error('Confirm dialog elements not found');
+            resolve(false);
+            return;
+        }
+        
+        // Set content
+        iconEl.textContent = icon || '⚠️';
+        titleEl.textContent = title || 'Confirm Action';
+        textEl.textContent = message || 'Are you sure?';
+        
+        // Reset classes
+        overlay.classList.remove('show', 'hiding');
+        
+        // Force reflow
+        void overlay.offsetWidth;
+        
+        // Show overlay
+        overlay.classList.add('show');
+        
+        // Close handler
+        const closeDialog = (result) => {
+            overlay.classList.add('hiding');
+            setTimeout(() => {
+                overlay.classList.remove('show', 'hiding');
+                resolve(result);
+            }, 300);
+        };
+        
+        // Button handlers - remove old listeners by replacing onclick
+        confirmBtn.onclick = () => closeDialog(true);
+        cancelBtn.onclick = () => closeDialog(false);
+        
+        // Close on overlay click (outside content)
+        overlay.onclick = (e) => {
+            if (e.target === overlay) {
+                closeDialog(false);
+            }
+        };
+        
+        // Close on Escape key
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                closeDialog(false);
+                document.removeEventListener('keydown', handleEscape);
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+    });
+}
+
+// Delete post (post author or admin can delete)
 async function deletePost(postId, event) {
     if (event) event.stopPropagation();
     
@@ -10183,22 +10913,32 @@ async function deletePost(postId, event) {
         return;
     }
     
-    // Confirm deletion
-    if (!confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
-        return;
-    }
-    
     try {
-        // Verify user is the author before deleting
+        // Verify user is the author or admin before deleting
         const postDoc = await window.firebaseDb.collection('communityPosts').doc(postId).get();
         if (!postDoc.exists) {
-            alert('Post not found');
+            showGameMessage('❌', 'Error', 'Post not found');
             return;
         }
         
         const postData = postDoc.data();
-        if (postData.authorId !== currentUser.uid) {
-            alert('You can only delete your own posts');
+        const isPostAuthor = postData.authorId === currentUser.uid;
+        const userIsAdmin = isAdmin();
+        
+        if (!isPostAuthor && !userIsAdmin) {
+            showGameMessage('❌', 'Permission Denied', 'You can only delete your own posts');
+            return;
+        }
+        
+        // Confirm deletion (different message for admins)
+        const confirmTitle = userIsAdmin && !isPostAuthor ? 'Delete Post (Admin)' : 'Delete Post';
+        const confirmMessage = userIsAdmin && !isPostAuthor
+            ? 'Are you sure you want to delete this post as an admin? This action cannot be undone.'
+            : 'Are you sure you want to delete this post? This action cannot be undone.';
+        
+        const confirmed = await showConfirmDialog('🗑️', confirmTitle, confirmMessage);
+        
+        if (!confirmed) {
             return;
         }
         
@@ -10225,7 +10965,7 @@ async function deletePost(postId, event) {
         
     } catch (error) {
         console.error('Error deleting post:', error);
-        alert('Failed to delete post. Please try again.');
+        showGameMessage('❌', 'Error', 'Failed to delete post. Please try again.');
     }
 }
 
@@ -10783,6 +11523,22 @@ async function loadConversationMessages(friendId) {
     }
 }
 
+// Render a single message (helper function for incremental updates)
+function renderSingleMessage(message) {
+    const isOwn = message.senderId === currentUser.uid;
+    const timestamp = message.createdAt?.toDate ? message.createdAt.toDate() : new Date(message.createdAt || Date.now());
+    const timeStr = formatMessageTime(timestamp);
+    
+    return `
+        <div class="message-item ${isOwn ? 'message-own' : 'message-other'}" data-message-id="${message.id}">
+            <div class="message-content">
+                ${escapeHtml(message.text || '')}
+            </div>
+            <div class="message-time">${timeStr}</div>
+        </div>
+    `;
+}
+
 // Render messages in chat
 function renderMessages(messages) {
     const messagesEl = document.getElementById('messagesChatMessages');
@@ -10806,7 +11562,7 @@ function renderMessages(messages) {
         const timeStr = formatMessageTime(timestamp);
         
         return `
-            <div class="message-item ${isOwn ? 'message-own' : 'message-other'}">
+            <div class="message-item ${isOwn ? 'message-own' : 'message-other'}" data-message-id="${message.id}">
                 <div class="message-content">
                     ${escapeHtml(message.text || '')}
                 </div>
@@ -10852,9 +11608,26 @@ function formatMessageTime(date) {
 }
 
 // Send a message
+// Track if a message is currently being sent to prevent duplicates
+let isSendingMessage = false;
+
 async function sendMessage(friendId, text) {
     if (!currentUser || !window.firebaseDb) return;
     if (!text.trim()) return;
+    
+    // Prevent duplicate sends
+    if (isSendingMessage) {
+        console.log('Message already being sent, ignoring duplicate');
+        return;
+    }
+    
+    isSendingMessage = true;
+    
+    // Disable send button while sending
+    const sendBtn = document.getElementById('messagesSendBtn');
+    const chatInput = document.getElementById('messagesChatInput');
+    if (sendBtn) sendBtn.disabled = true;
+    if (chatInput) chatInput.disabled = true;
     
     try {
         const conversationId = getConversationId(currentUser.uid, friendId);
@@ -10871,7 +11644,6 @@ async function sendMessage(friendId, text) {
         await window.firebaseDb.collection('messages').add(messageData);
         
         // Clear input
-        const chatInput = document.getElementById('messagesChatInput');
         if (chatInput) chatInput.value = '';
         
         // Update preview for this friend
@@ -10881,19 +11653,17 @@ async function sendMessage(friendId, text) {
         // This prevents the "jump to top" issue
         const messagesEl = document.getElementById('messagesChatMessages');
         if (messagesEl && currentChatFriendId === friendId) {
-            const tempMessage = {
-                id: 'temp_' + Date.now(),
-                senderId: currentUser.uid,
-                receiverId: friendId,
-                text: text.trim(),
-                createdAt: new Date()
-            };
+            // Remove empty state if present
+            const emptyStateEl = messagesEl.querySelector('.messages-empty-state');
+            if (emptyStateEl) emptyStateEl.remove();
             
-            // Add message to bottom of list
+            // Add message to bottom of list with a temp ID and store the text for matching
+            const tempId = 'temp_' + Date.now();
+            const messageText = text.trim();
             const messageHTML = `
-                <div class="message-item message-own">
+                <div class="message-item message-own" data-message-id="${tempId}" data-temp-text="${escapeHtml(messageText)}">
                     <div class="message-content">
-                        ${escapeHtml(text.trim())}
+                        ${escapeHtml(messageText)}
                     </div>
                     <div class="message-time">Just now</div>
                 </div>
@@ -10909,11 +11679,16 @@ async function sendMessage(friendId, text) {
             });
         }
         
-        // Messages will reload automatically via the real-time listener (which will replace the temp message)
+        // Messages will be updated via the real-time listener (which will replace the temp message)
         
     } catch (error) {
         console.error('Error sending message:', error);
-        alert('Failed to send message. Please try again.');
+        showGameMessage('❌', 'Error', 'Failed to send message. Please try again.');
+    } finally {
+        // Re-enable send button
+        isSendingMessage = false;
+        if (sendBtn) sendBtn.disabled = false;
+        if (chatInput) chatInput.disabled = false;
     }
 }
 
@@ -10954,16 +11729,49 @@ function setupMessageListener(friendId) {
                     const messageTime = message.createdAt?.toDate ? message.createdAt.toDate() : new Date(message.createdAt || 0);
                     lastMessageTimes[friendId] = messageTime.getTime();
                     
-                    // Only reload if chat is open with this friend (to avoid unnecessary reloads)
+                    // Only update if chat is open with this friend
                     if (currentChatFriendId === friendId) {
-                        // Remove any temporary messages first
                         const messagesEl = document.getElementById('messagesChatMessages');
                         if (messagesEl) {
-                            const tempMessages = messagesEl.querySelectorAll('[id^="temp_"]');
-                            tempMessages.forEach(temp => temp.remove());
+                            // Check if message already exists in DOM (to prevent duplicates)
+                            const existingMessage = messagesEl.querySelector(`[data-message-id="${message.id}"]`);
+                            if (!existingMessage) {
+                                // Find temp message with matching text (from optimistic update)
+                                const tempMessages = Array.from(messagesEl.querySelectorAll('[data-message-id^="temp_"]'));
+                                const matchingTemp = tempMessages.find(temp => {
+                                    const content = temp.querySelector('.message-content');
+                                    return content && content.textContent.trim() === message.text.trim();
+                                });
+                                
+                                if (matchingTemp) {
+                                    // Replace the matching temp message with the real one
+                                    const messageHTML = renderSingleMessage(message);
+                                    matchingTemp.outerHTML = messageHTML;
+                                } else {
+                                    // No matching temp message, check if message already exists by text
+                                    const allMessages = Array.from(messagesEl.querySelectorAll('.message-item'));
+                                    const hasMatchingText = allMessages.some(msg => {
+                                        const content = msg.querySelector('.message-content');
+                                        return content && content.textContent.trim() === message.text.trim();
+                                    });
+                                    
+                                    if (!hasMatchingText) {
+                                        // Remove empty state if present
+                                        const emptyStateEl = messagesEl.querySelector('.messages-empty-state');
+                                        if (emptyStateEl) emptyStateEl.remove();
+                                        
+                                        // Add the real message
+                                        const messageHTML = renderSingleMessage(message);
+                                        messagesEl.insertAdjacentHTML('beforeend', messageHTML);
+                                    }
+                                }
+                                
+                                // Smooth scroll to bottom
+                                requestAnimationFrame(() => {
+                                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                                });
+                            }
                         }
-                        // Reload all messages
-                        loadConversationMessages(friendId);
                     }
                     // Update preview
                     if (message.text) {
@@ -11002,10 +11810,28 @@ function setupMessageListener(friendId) {
                         messageRef.update({ read: true }).catch(error => {
                             console.error('Error marking message as read:', error);
                         });
+                        
+                        // Add message to chat smoothly (don't reload everything)
+                        const messagesEl = document.getElementById('messagesChatMessages');
+                        if (messagesEl) {
+                            // Check if message already exists (prevent duplicates)
+                            const existingMessage = messagesEl.querySelector(`[data-message-id="${message.id}"]`);
+                            if (!existingMessage) {
+                                // Remove empty state if present
+                                const emptyStateEl = messagesEl.querySelector('.messages-empty-state');
+                                if (emptyStateEl) emptyStateEl.remove();
+                                
+                                // Add the new message to the bottom
+                                const messageHTML = renderSingleMessage(message);
+                                messagesEl.insertAdjacentHTML('beforeend', messageHTML);
+                                
+                                // Smooth scroll to bottom
+                                requestAnimationFrame(() => {
+                                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                                });
+                            }
+                        }
                     }
-                    
-                    // Reload all messages (always reload for received messages to show them)
-                    loadConversationMessages(friendId);
                     // Update preview
                     if (message.text) {
                         updateFriendPreview(friendId, message.text);

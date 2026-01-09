@@ -558,6 +558,35 @@ const CARD_CONFIG = {
                 }
             }
         }
+    },
+    'amnesia': {
+        metadata: {
+            id: 'amnesia',
+            title: 'Amnesia',
+            description: 'Blocks out all previous guesses for your opponent\'s next turn',
+            type: 'hurt'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            onGuess: (game, playerId) => {
+                // Find the opponent
+                const opponent = game.players.find(p => p.id !== playerId);
+                if (opponent) {
+                    // Add amnesia effect targeting the opponent
+                    game.activeEffects.push({
+                        type: 'amnesia',
+                        target: opponent.id,
+                        description: 'All previous guesses are hidden for your turn',
+                        used: false
+                    });
+                }
+            }
+        }
     }
 };
 
@@ -710,11 +739,13 @@ const onlineUsers = new Map(); // socket.id -> firebaseUid (track all online use
 const pendingChallenges = new Map(); // challengeId -> { challengerSocketId, challengerFirebaseUid, challengerName, targetFirebaseUid, targetName }
 const firebaseUidToSocket = new Map(); // firebaseUid -> socket.id (for finding socket by firebaseUid)
 
-// Matchmaking queue
-const matchmakingQueue = [];
+// Matchmaking queues
+const matchmakingQueue = []; // Ranked matchmaking
+const casualMatchmakingQueue = []; // Casual matchmaking
 
 // Track bot matchmaking timeouts
 const matchmakingTimeouts = new Map(); // socket.id -> timeout
+const casualMatchmakingTimeouts = new Map(); // socket.id -> timeout
 
 // Bot names pool - realistic gaming usernames
 const BOT_NAME_BASES = [
@@ -1376,8 +1407,8 @@ function botSelectCard(game, botId, botHand) {
         }
     } else {
         // Bot is behind - prefer offensive cards, but will use any if needed
-        const offensiveCards = availableCards.filter(c => 
-            ['falseFeedback', 'cardLock', 'blindGuess', 'timeRush', 'wordScramble'].includes(c.id)
+        const offensiveCards = availableCards.filter(c =>
+            ['falseFeedback', 'cardLock', 'blindGuess', 'timeRush', 'wordScramble', 'amnesia'].includes(c.id)
         );
         if (offensiveCards.length > 0) {
             return offensiveCards[Math.floor(Math.random() * offensiveCards.length)];
@@ -1790,7 +1821,27 @@ function submitBotGuess(gameId, botId, guess, card) {
     if (actualCard && CARD_CONFIG[actualCard.id]) {
         const config = CARD_CONFIG[actualCard.id];
         if (!isModifierCard(actualCard.id) && config.effects?.onGuess) {
+            const effectsBefore = game.activeEffects.length;
             config.effects.onGuess(game, botId);
+            // If blackHand or amnesia effect was added, notify human player immediately
+            if ((actualCard.id === 'blackHand' || actualCard.id === 'amnesia') && game.activeEffects.length > effectsBefore) {
+                console.log(`${actualCard.id} (Bot): Notifying human player of updated effects`);
+                const humanSocket = io.sockets.sockets.get(opponent.id);
+                if (humanSocket) {
+                    humanSocket.emit('activeEffectsUpdated', {
+                        activeEffects: game.activeEffects,
+                        gameId: gameId
+                    });
+                }
+                // Also notify the bot (though bot doesn't need it, for consistency)
+                const botSocket = io.sockets.sockets.get(botId);
+                if (botSocket) {
+                    botSocket.emit('activeEffectsUpdated', {
+                        activeEffects: game.activeEffects,
+                        gameId: gameId
+                    });
+                }
+            }
         }
     }
     
@@ -2106,6 +2157,7 @@ io.on('connection', (socket) => {
     });
     
     // Matchmaking handlers
+    // Ranked matchmaking
     socket.on('findMatch', (data) => {
         // Track user as online
         if (data.firebaseUid) {
@@ -2215,6 +2267,8 @@ io.on('connection', (socket) => {
                 isRanked: true  // Games created via findMatch are ranked
             };
             
+            game.status = 'playing';
+            
             games.set(gameId, game);
             players.set(player1.id, { gameId: gameId, playerId: player1.id });
             players.set(player2.id, { gameId: gameId, playerId: player2.id });
@@ -2289,7 +2343,193 @@ io.on('connection', (socket) => {
         }
     });
     
+    // Casual matchmaking
+    socket.on('findCasualMatch', (data) => {
+        // Track user as online
+        if (data.firebaseUid) {
+            onlineUsers.set(socket.id, data.firebaseUid);
+            firebaseUidToSocket.set(data.firebaseUid, socket.id);
+            console.log('User', data.firebaseUid, 'connected and added to onlineUsers (casual)');
+        }
+        
+        // Check if player is already in queue
+        const existingIndex = casualMatchmakingQueue.findIndex(p => p.id === socket.id);
+        if (existingIndex !== -1) {
+            socket.emit('matchmakingStatus', { status: 'alreadyInQueue' });
+            return;
+        }
+        
+        // Check if player is already in an active game (not finished)
+        const playerData = players.get(socket.id);
+        if (playerData) {
+            const game = games.get(playerData.gameId);
+            if (game && game.status !== 'finished') {
+                socket.emit('error', { message: 'You are already in a game' });
+                return;
+            }
+            // If game is finished, remove player from players Map so they can matchmake again
+            if (game && game.status === 'finished') {
+                players.delete(socket.id);
+            }
+        }
+        
+        // Add player to casual queue
+        const player = {
+            id: socket.id,
+            name: data.playerName,
+            firebaseUid: data.firebaseUid || null,
+            photoURL: data.photoURL || null
+        };
+        
+        casualMatchmakingQueue.push(player);
+        socket.emit('matchmakingStatus', { status: 'searching' });
+        
+        console.log(`Player ${data.playerName} (${socket.id}) joined casual matchmaking queue. Queue size: ${casualMatchmakingQueue.length}`);
+        
+        // Set timeout to match with bot if no player found (20 seconds)
+        const botTimeout = setTimeout(() => {
+            const queueIndex = casualMatchmakingQueue.findIndex(p => p.id === socket.id);
+            if (queueIndex === -1) return; // Already matched
+            
+            const queuedPlayer = casualMatchmakingQueue[queueIndex];
+            casualMatchmakingQueue.splice(queueIndex, 1);
+            casualMatchmakingTimeouts.delete(socket.id);
+            
+            console.log(`No casual match found for ${data.playerName}, creating bot game...`);
+            createBotGame(socket, data.playerName, queuedPlayer.firebaseUid || null, false, false); // isTutorial=false, isRanked=false
+        }, 20000); // 20 second timeout
+        
+        casualMatchmakingTimeouts.set(socket.id, botTimeout);
+        
+        // Check if we can match players
+        if (casualMatchmakingQueue.length >= 2) {
+            // Match the first two players
+            const player1 = casualMatchmakingQueue.shift();
+            const player2 = casualMatchmakingQueue.shift();
+            
+            // Clear bot timeouts for matched players
+            const timeout1 = casualMatchmakingTimeouts.get(player1.id);
+            const timeout2 = casualMatchmakingTimeouts.get(player2.id);
+            if (timeout1) {
+                clearTimeout(timeout1);
+                casualMatchmakingTimeouts.delete(player1.id);
+            }
+            if (timeout2) {
+                clearTimeout(timeout2);
+                casualMatchmakingTimeouts.delete(player2.id);
+            }
+            
+            // Create a game for them
+            const gameId = generateGameId();
+            const word = getRandomWord();
+            
+            const game = {
+                gameId: gameId,
+                word: word,
+                players: [
+                    {
+                        id: player1.id,
+                        name: player1.name,
+                        firebaseUid: player1.firebaseUid || null,
+                        photoURL: player1.photoURL || null,
+                        guesses: [],
+                        row: 0
+                    },
+                    {
+                        id: player2.id,
+                        name: player2.name,
+                        firebaseUid: player2.firebaseUid || null,
+                        photoURL: player2.photoURL || null,
+                        guesses: [],
+                        row: 0
+                    }
+                ],
+                currentTurn: player1.id, // Randomly choose first player (or could use Math.random())
+                activeEffects: [],
+                status: 'waiting',
+                totalGuesses: 0,
+                lastPlayedCards: new Map(),  // Track last card played by each player
+                mirroredCards: new Map(),  // Track what card each Card Mirror actually mirrored (playerId -> card)
+                isRanked: false  // Games created via findCasualMatch are NOT ranked
+            };
+            
+            games.set(gameId, game);
+            players.set(player1.id, { gameId: gameId, playerId: player1.id });
+            players.set(player2.id, { gameId: gameId, playerId: player2.id });
+            
+            // Track users' games for friend status (even when waiting)
+            if (player1.firebaseUid) {
+                userToGame.set(player1.firebaseUid, gameId);
+                console.log('Casual matchmade game created: Tracked user', player1.firebaseUid, 'in game', gameId, '(waiting)');
+            }
+            if (player2.firebaseUid) {
+                userToGame.set(player2.firebaseUid, gameId);
+                console.log('Casual matchmade game created: Tracked user', player2.firebaseUid, 'in game', gameId, '(waiting)');
+            }
+            
+            // Join both players to the game room
+            const player1Socket = io.sockets.sockets.get(player1.id);
+            const player2Socket = io.sockets.sockets.get(player2.id);
+            
+            if (player1Socket) {
+                player1Socket.join(gameId);
+                player1Socket.emit('matchmakingStatus', { status: 'matched' });
+                player1Socket.emit('playerJoinedGame', { playerId: player1.id, gameId: gameId });
+            }
+            
+            if (player2Socket) {
+                player2Socket.join(gameId);
+                player2Socket.emit('matchmakingStatus', { status: 'matched' });
+                player2Socket.emit('playerJoinedGame', { playerId: player2.id, gameId: gameId });
+            }
+            
+            // Notify both players
+            io.to(gameId).emit('playerJoined', { players: game.players });
+            
+            // Start the game
+            setTimeout(() => {
+                game.status = 'playing';
+                console.log('Casual matchmade game starting. Current turn:', game.currentTurn);
+                console.log('Players with firebaseUid:', game.players.map(p => ({ id: p.id, name: p.name, firebaseUid: p.firebaseUid })));
+                const gameStateForClients = {
+                    gameId: game.gameId,
+                    currentTurn: game.currentTurn,
+                    players: game.players.map(p => ({
+                        id: p.id,
+                        name: p.name,
+                        firebaseUid: p.firebaseUid || null,
+                        photoURL: p.photoURL || null,
+                        guesses: p.guesses || [],
+                        row: p.row || 0,
+                        isBot: p.isBot || false
+                    })),
+                    status: game.status,
+                    activeEffects: game.activeEffects,
+                    totalGuesses: game.totalGuesses,
+                    isRanked: game.isRanked || false
+                };
+                
+                game.players.forEach(player => {
+                    const playerSocket = io.sockets.sockets.get(player.id);
+                    if (playerSocket) {
+                        console.log(`Sending gameStarted (casual) to ${player.id} (${player.name}) with players:`, gameStateForClients.players.map(p => ({ name: p.name, firebaseUid: p.firebaseUid })));
+                        playerSocket.emit('gameStarted', {
+                            ...gameStateForClients,
+                            yourPlayerId: player.id
+                        });
+                        // Track user's game for friend status
+                        if (player.firebaseUid) {
+                            userToGame.set(player.firebaseUid, game.gameId);
+                            console.log('Casual matchmade game started: Tracked user', player.firebaseUid, 'in game', game.gameId);
+                        }
+                    }
+                });
+            }, 1000);
+        }
+    });
+    
     socket.on('cancelMatchmaking', () => {
+        // Check ranked queue
         const index = matchmakingQueue.findIndex(p => p.id === socket.id);
         if (index !== -1) {
             matchmakingQueue.splice(index, 1);
@@ -2302,7 +2542,23 @@ io.on('connection', (socket) => {
             }
             
             socket.emit('matchmakingStatus', { status: 'cancelled' });
-            console.log(`Player ${socket.id} left matchmaking queue. Queue size: ${matchmakingQueue.length}`);
+            console.log(`Player ${socket.id} left ranked matchmaking queue. Queue size: ${matchmakingQueue.length}`);
+        }
+        
+        // Check casual queue
+        const casualIndex = casualMatchmakingQueue.findIndex(p => p.id === socket.id);
+        if (casualIndex !== -1) {
+            casualMatchmakingQueue.splice(casualIndex, 1);
+            
+            // Clear bot timeout
+            const casualTimeout = casualMatchmakingTimeouts.get(socket.id);
+            if (casualTimeout) {
+                clearTimeout(casualTimeout);
+                casualMatchmakingTimeouts.delete(socket.id);
+            }
+            
+            socket.emit('matchmakingStatus', { status: 'cancelled' });
+            console.log(`Player ${socket.id} left casual matchmaking queue. Queue size: ${casualMatchmakingQueue.length}`);
         }
     });
     
@@ -3847,7 +4103,23 @@ io.on('connection', (socket) => {
             // Only apply effects if it's not a modifier card (modifiers are handled in selectCard)
             if (!isModifierCard(actualCard.id) && config.effects?.onGuess) {
                 console.log('Applying card effect for:', actualCard.id);
+                const effectsBefore = game.activeEffects.length;
                 config.effects.onGuess(game, socket.id);
+                // If blackHand or amnesia effect was added, notify both players immediately
+                if ((actualCard.id === 'blackHand' || actualCard.id === 'amnesia') && game.activeEffects.length > effectsBefore) {
+                    console.log(`${actualCard.id}: Notifying players of updated effects`);
+                    socket.emit('activeEffectsUpdated', {
+                        activeEffects: game.activeEffects,
+                        gameId: data.gameId
+                    });
+                    const opponentSocket = io.sockets.sockets.get(opponent.id);
+                    if (opponentSocket) {
+                        opponentSocket.emit('activeEffectsUpdated', {
+                            activeEffects: game.activeEffects,
+                            gameId: data.gameId
+                        });
+                    }
+                }
             } else if (isModifierCard(actualCard.id)) {
                 console.log('Skipping modifier card effect:', actualCard.id, '(modifiers handled in selectCard)');
             } else {
@@ -4169,6 +4441,27 @@ io.on('connection', (socket) => {
                 // Notify client that the card is unblocked
                 socket.emit('cardUnblocked', {});
             }
+            
+            // Clear amnesia effect after the opponent's turn ends
+            const amnesiaEffect = game.activeEffects.find(e => 
+                e.type === 'amnesia' && e.target === socket.id && !e.used
+            );
+            if (amnesiaEffect) {
+                game.activeEffects = game.activeEffects.filter(e => e !== amnesiaEffect);
+                console.log(`Cleared amnesia effect for player ${socket.id} after their turn`);
+                // Notify both players that amnesia was cleared
+                socket.emit('activeEffectsUpdated', {
+                    activeEffects: game.activeEffects,
+                    gameId: data.gameId
+                });
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('activeEffectsUpdated', {
+                        activeEffects: game.activeEffects,
+                        gameId: data.gameId
+                    });
+                }
+            }
         } else {
             // Extra guess: don't count toward limit, don't switch turns
             // Player gets another turn immediately
@@ -4191,11 +4484,12 @@ io.on('connection', (socket) => {
         
         // Remove used effects (mark as used and remove)
         game.activeEffects = game.activeEffects.filter(e => {
-            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, remJobHide, greenToGrey, wordScramble, hiddenKeyboard, and blackHand after they've been used on this guess
+            // Remove hiddenGuess, hiddenFeedback, falseFeedback, gamblerHide, gamblerReveal, blindGuess, remJobHide, greenToGrey, wordScramble, hiddenKeyboard, blackHand, and amnesia after they've been used on this guess
             // Note: timeRush is removed in the turn switch section above, not here
+            // Note: amnesia is removed after the opponent's turn ends (in the turn switch section)
             if (e.target === socket.id && (
-                e.type === 'hiddenGuess' || 
-                e.type === 'hiddenFeedback' || 
+                e.type === 'hiddenGuess' ||
+                e.type === 'hiddenFeedback' ||
                 e.type === 'falseFeedback' ||
                 e.type === 'gamblerHide' ||
                 e.type === 'gamblerReveal' ||
@@ -4376,20 +4670,18 @@ io.on('connection', (socket) => {
                         let chipChangeLoser = 0;
                         
                         if (game.isRanked) {
-                            // Winner gets normal win chips (calculated client-side, but we'll send the info)
-                            // For disconnect wins, use a standard amount (20 base + efficiency bonus if applicable)
-                            const baseWinChips = 20;
-                            let efficiencyBonus = 0;
-                            if (remainingPlayerGuesses > 0 && remainingPlayerGuesses <= 6) {
-                                efficiencyBonus = (7 - remainingPlayerGuesses) * 5;
-                            }
-                            chipChangeWinner = baseWinChips + efficiencyBonus;
+                            // Winner gets 10 chips for disconnect wins (fixed amount)
+                            chipChangeWinner = 10;
                             
                             // Loser loses 50 chips
                             chipChangeLoser = -50;
+                        } else {
+                            // Non-ranked games: no chip changes
+                            chipChangeWinner = 0;
+                            chipChangeLoser = 0;
                         }
                         
-                        console.log(`Sending gameOver to remaining player ${remainingPlayer.id} with chipChange: ${chipChangeWinner}`);
+                        console.log(`Disconnect handler: game.isRanked=${game.isRanked}, sending chipChange=${chipChangeWinner} to player ${remainingPlayer.id}`);
                         remainingSocket.emit('gameOver', {
                             winner: remainingPlayer.id,
                             word: game.word,
