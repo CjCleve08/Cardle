@@ -838,7 +838,7 @@ function getCardImagePath(cardId) {
         'hiddenKeyboard': 'CardeBlanche.png',
         'blackHand': 'BlackHand.png',
         'amnesia': 'Amnesia.png',
-        'moonshine': 'Moonshine.png'
+        'moonshine': 'MoonShine.png'
     };
     
     const imageName = cardImageMap[cardId] || 'Blank.png';
