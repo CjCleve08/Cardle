@@ -166,7 +166,8 @@ function showNewCardAnnouncement() {
         const skipAnnouncement = (e) => {
             cleanupCardRotationTracking();
             announcementScreen.removeEventListener('click', skipAnnouncement);
-            ScreenManager.show('lobby');
+            // Call showLobby() instead of just ScreenManager.show() to ensure all initialization happens
+            showLobby();
         };
         announcementScreen.addEventListener('click', skipAnnouncement);
     }
@@ -358,16 +359,20 @@ function showLobby() {
     registerUserAsOnline();
     
     if (ScreenManager.show('lobby')) {
-        updateLobbyUserInfo();
-        // Load and display stats
-        updateStatsDisplay().catch(error => {
-            console.error('Error loading stats:', error);
-        });
-        // Update rank display
-        updateRankDisplay().catch(error => {
-            console.error('Error loading rank:', error);
-        });
-        // Generate rank ladder
+        // Use setTimeout to ensure DOM is ready and screen is fully shown
+        setTimeout(() => {
+            updateLobbyUserInfo();
+            // Load and display stats
+            updateStatsDisplay().catch(error => {
+                console.error('Error loading stats:', error);
+            });
+            // Update rank display
+            updateRankDisplay().catch(error => {
+                console.error('Error loading rank:', error);
+            });
+        }, 100);
+        
+        // Generate rank ladder (doesn't need DOM elements)
         generateRankLadder();
         // Update daily chip claim UI
         updateDailyClaimUI();
@@ -680,6 +685,7 @@ function hideAuthErrors() {
 }
 
 function updateLobbyUserInfo() {
+    // Ensure DOM elements are ready - wait for next tick if needed
     const userInfoHeader = document.getElementById('userInfoHeader');
     const userDisplayNameHeader = document.getElementById('userDisplayNameHeader');
     const logoutBtn = document.getElementById('logoutBtn');
@@ -687,6 +693,29 @@ function updateLobbyUserInfo() {
     const profileEmail = document.getElementById('profileEmail');
     const profileAccountType = document.getElementById('profileAccountType');
     const profileAvatar = document.getElementById('profileAvatar');
+    
+    // Debug: Check if profile elements exist
+    if (!profileName || !profileEmail || !profileAccountType || !profileAvatar) {
+        console.warn('Profile elements not found, retrying...', {
+            profileName: !!profileName,
+            profileEmail: !!profileEmail,
+            profileAccountType: !!profileAccountType,
+            profileAvatar: !!profileAvatar,
+            readyState: document.readyState
+        });
+        // Retry after a short delay if elements aren't ready
+        if (document.readyState === 'loading' || !profileName) {
+            setTimeout(() => updateLobbyUserInfo(), 200);
+            return;
+        }
+    }
+    
+    console.log('updateLobbyUserInfo called:', {
+        isGuestMode: isGuestMode,
+        guestName: guestName,
+        hasCurrentUser: !!currentUser,
+        currentUserEmail: currentUser?.email
+    });
     
     if (isGuestMode && guestName) {
         // Guest mode
@@ -706,7 +735,7 @@ function updateLobbyUserInfo() {
         if (profileAvatar) profileAvatar.textContent = '👤';
     } else if (currentUser) {
         // Authenticated user
-        const displayName = currentUser.displayName || currentUser.email?.split('@')[0] || 'Player';
+        const displayName = (currentUser.displayName && currentUser.displayName.trim()) || currentUser.email?.split('@')[0] || 'Player';
         if (userDisplayNameHeader) {
             userDisplayNameHeader.textContent = displayName;
         }
@@ -716,9 +745,13 @@ function updateLobbyUserInfo() {
         if (logoutBtn) {
             logoutBtn.style.display = 'block';
         }
-        // Update profile tab
-        if (profileName) profileName.textContent = displayName;
-        if (profileEmail) profileEmail.textContent = currentUser.email || '-';
+        // Update profile tab - ensure it's not still showing "Loading..."
+        if (profileName) {
+            profileName.textContent = displayName || 'Player';
+        }
+        if (profileEmail) {
+            profileEmail.textContent = currentUser.email || '-';
+        }
         if (profileAccountType) {
             const provider = currentUser.providerData?.[0]?.providerId || 'email';
             profileAccountType.textContent = provider === 'google.com' ? 'Google Account' : 'Email Account';
@@ -728,15 +761,15 @@ function updateLobbyUserInfo() {
             const applyAvatar = (url) => {
                 if (url) {
                     profileAvatar.style.backgroundImage = `url(${url})`;
-                profileAvatar.style.backgroundSize = 'cover';
-                profileAvatar.style.backgroundPosition = 'center';
-                profileAvatar.textContent = '';
-            } else {
+                    profileAvatar.style.backgroundSize = 'cover';
+                    profileAvatar.style.backgroundPosition = 'center';
+                    profileAvatar.textContent = '';
+                } else {
                     profileAvatar.style.backgroundImage = '';
                     profileAvatar.style.backgroundSize = '';
                     profileAvatar.style.backgroundPosition = '';
-                profileAvatar.textContent = displayName.charAt(0).toUpperCase();
-            }
+                    profileAvatar.textContent = displayName.charAt(0).toUpperCase();
+                }
             };
             // Default to Auth photoURL while we fetch Firestore
             const initialPhoto = currentUser.photoURL || null;
@@ -750,8 +783,9 @@ function updateLobbyUserInfo() {
                         window.currentUserPhotoURL = docPhoto || initialPhoto || null;
                         applyAvatar(window.currentUserPhotoURL);
                     }
-                }).catch(() => {
+                }).catch((error) => {
                     // Ignore Firestore errors here, keep initial photo
+                    console.warn('Error fetching user photo from Firestore:', error);
                 });
             }
         }
@@ -7907,8 +7941,11 @@ function switchTab(tabName) {
         });
     }
     
-    // If switching to profile tab, update stats display
+    // If switching to profile tab, update stats display and user info
     if (tabName === 'profile') {
+        // Update user info (name, email, avatar) first
+        updateLobbyUserInfo();
+        // Then update stats display
         updateStatsDisplay().catch(error => {
             console.error('Error loading stats:', error);
         });
