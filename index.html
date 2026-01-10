@@ -42,7 +42,7 @@
             </div>
         </div>
 
-        <!-- New Card Announcement Screen - Amnesia -->
+        <!-- New Card Announcement Screen - Slow Motion -->
         <div id="newCardAnnouncement" class="screen">
             <div class="new-card-announcement-scaling-container" id="newCardAnnouncementScalingContainer">
                 <div class="new-card-content">
@@ -54,7 +54,7 @@
                         <div class="new-card-container">
                             <div class="new-card-flip-inner">
                                 <div class="new-card-face new-card-front">
-                                    <img src="images/Card Images/Amnesia.png" alt="Amnesia" class="new-card-image">
+                                    <img src="images/Card Images/SlowMotion.png" alt="Slow Motion" class="new-card-image">
                                 </div>
                                 <div class="new-card-face new-card-back">
                                     <img src="images/Card Images/FlipedCard.png" alt="Flipped Card" class="new-card-image">
@@ -63,8 +63,8 @@
                             <div class="new-card-glow"></div>
                         </div>
                         <div class="new-card-info">
-                            <h3 class="new-card-name" id="newCardName">Amnesia</h3>
-                            <p class="new-card-description" id="newCardDescription">Blocks out all previous guesses for your opponent's next turn</p>
+                            <h3 class="new-card-name" id="newCardName">Slow Motion</h3>
+                            <p class="new-card-description" id="newCardDescription">Adds 30 seconds to your current timer</p>
                         </div>
                     </div>
                     <div class="new-card-footer">
@@ -74,37 +74,6 @@
             </div>
         </div>
 
-        <!-- New Card Announcement Screen - Moonshine -->
-        <div id="moonshineCardAnnouncement" class="screen">
-            <div class="new-card-announcement-scaling-container" id="moonshineCardAnnouncementScalingContainer">
-                <div class="new-card-content">
-                    <div class="new-card-header">
-                        <h2 class="new-card-title">New Card Added!</h2>
-                        <p class="new-card-subtitle">Discover the latest power card</p>
-                    </div>
-                    <div class="new-card-display">
-                        <div class="new-card-container">
-                            <div class="new-card-flip-inner">
-                                <div class="new-card-face new-card-front">
-                                    <img src="images/Card Images/MoonShine.png" alt="Moonshine" class="new-card-image">
-                                </div>
-                                <div class="new-card-face new-card-back">
-                                    <img src="images/Card Images/FlipedCard.png" alt="Flipped Card" class="new-card-image">
-                                </div>
-                            </div>
-                            <div class="new-card-glow"></div>
-                        </div>
-                        <div class="new-card-info">
-                            <h3 class="new-card-name" id="moonshineCardName">Moonshine</h3>
-                            <p class="new-card-description" id="moonshineCardDescription">Adds a drunk effect to your opponent's screen for their next turn</p>
-                        </div>
-                    </div>
-                    <div class="new-card-footer">
-                        <p class="new-card-hint">Click anywhere to continue</p>
-                    </div>
-                </div>
-            </div>
-        </div>
 
         <!-- Login Screen -->
         <div id="login" class="screen">
@@ -1161,6 +1130,27 @@
                     <button id="rematchBtn" class="btn btn-primary game-over-button">Rematch</button>
                     <button id="backToLobbyBtn" class="btn btn-secondary game-over-button">Back to Lobby</button>
                 </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Spectator Game Over Screen -->
+        <div id="spectatorGameOver" class="screen">
+            <div class="game-over-scaling-container" id="spectatorGameOverScalingContainer">
+                <div class="game-over-content">
+                    <div class="game-over-icon" id="spectatorGameOverIcon">👁️</div>
+                    <h2 id="spectatorGameOverTitle" class="game-over-title">Game Ended</h2>
+                    <p id="spectatorGameOverMessage" class="game-over-message"></p>
+                    <div class="game-over-word" id="spectatorGameOverWord"></div>
+                    <div class="game-over-definition" id="spectatorGameOverDefinition"></div>
+                    
+                    <div class="spectator-game-over-info">
+                        <p class="spectator-info-text">You were spectating this game. Your chips were not affected.</p>
+                    </div>
+                    
+                    <div class="game-over-buttons">
+                        <button id="spectatorBackToLobbyBtn" class="btn btn-primary game-over-button">Back to Lobby</button>
+                    </div>
                 </div>
             </div>
         </div>

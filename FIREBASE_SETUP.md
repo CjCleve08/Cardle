@@ -83,6 +83,13 @@ You need to set up Firestore security rules so users can read/write their own da
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Helper function to check if user is an admin
+    function isAdmin() {
+      return request.auth != null && 
+             request.auth.token.email != null &&
+             request.auth.token.email in ['cjcleve2008@gmail.com', 'perkerewiczgus@gmail.com'];
+    }
+    
     // Users can read any user document (for friend search), but only write their own
     match /users/{userId} {
       allow read: if request.auth != null;
@@ -125,8 +132,9 @@ service cloud.firestore {
          // Allow updates to likes and likedBy fields (anyone can like)
          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'likedBy', 'commentCount', 'updatedAt'])));
       
-      // Only the author can delete their own post
-      allow delete: if request.auth != null && request.auth.uid == resource.data.authorId;
+      // Only the author or admins can delete posts
+      allow delete: if request.auth != null && 
+        (request.auth.uid == resource.data.authorId || isAdmin());
       
       // Comments subcollection - nested under each post
       match /comments/{commentId} {
@@ -137,8 +145,9 @@ service cloud.firestore {
         allow create: if request.auth != null && 
           request.auth.uid == request.resource.data.authorId;
         
-        // Only the comment author can delete their own comment
-        allow delete: if request.auth != null && request.auth.uid == resource.data.authorId;
+        // Only the comment author or admins can delete comments
+        allow delete: if request.auth != null && 
+          (request.auth.uid == resource.data.authorId || isAdmin());
         
         // Comments cannot be updated (only created or deleted)
         allow update: if false;
@@ -183,7 +192,7 @@ service cloud.firestore {
 - **`/stats/{userId}`**: Users can only read and write their own game statistics
 - **`/friends/{friendDocId}`**: Users can read/write friend relationships they're part of
 - **`/decks/{userId}`**: Users can only read/write their own decks
-- **`/communityPosts/{postId}`**: Users can read all posts, create their own, update likes/comment counts, and delete their own posts
+- **`/communityPosts/{postId}`**: Users can read all posts, create their own, update likes/comment counts, and delete their own posts (admins can delete any post)
 - **`/communityPosts/{postId}/comments/{commentId}`**: Users can read all comments, create their own, and delete their own comments
 - **`/messages/{messageId}`**: Users can read messages where they're the sender or receiver, create messages where they're the sender, update read status, and delete messages they sent
 

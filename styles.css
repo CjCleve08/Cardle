@@ -393,8 +393,7 @@ header h1 {
 }
 
 /* New Card Announcement Screens */
-#newCardAnnouncement.screen,
-#moonshineCardAnnouncement.screen {
+#newCardAnnouncement.screen {
     display: none;
     background: #121213;
     justify-content: center;
@@ -408,8 +407,7 @@ header h1 {
     width: 100%;
 }
 
-#newCardAnnouncement.screen.active,
-#moonshineCardAnnouncement.screen.active {
+#newCardAnnouncement.screen.active {
     display: flex;
     animation: cardAnnouncementFadeIn 0.5s ease-out;
 }
@@ -4854,6 +4852,36 @@ header h1 {
 .game-over-button:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px rgba(106, 170, 100, 0.4);
+}
+
+/* Spectator Game Over Screen */
+#spectatorGameOver.screen {
+    position: relative;
+    overflow: hidden;
+}
+
+.spectator-game-over-info {
+    margin: 30px 0;
+    padding: 20px;
+    background: rgba(58, 58, 60, 0.5);
+    border: 2px solid rgba(138, 138, 138, 0.3);
+    border-radius: 12px;
+    max-width: 500px;
+    animation: messageFadeIn 0.5s ease-out 0.5s both;
+}
+
+.spectator-info-text {
+    font-size: 1rem;
+    color: #818384;
+    margin: 0;
+    line-height: 1.5;
+    text-align: center;
+    font-style: italic;
+}
+
+.spectator-info-text::before {
+    content: 'ℹ️ ';
+    margin-right: 8px;
 }
 
 .input-group {

@@ -53,6 +53,55 @@ let turnTimer = null;
 let turnTimeRemaining = 60; // 60 seconds per turn
 const TURN_TIME_LIMIT = 60;
 
+// State tracking to prevent duplicate event processing and freezing
+let lastProcessedTurnChange = null; // Track last processed turnChange event
+let turnChangeTimeoutId = null; // Track timeout to prevent conflicts
+let cardSelectionTimeoutId = null; // Track card selection timeout
+let isProcessingTurnChange = false; // Prevent concurrent processing
+
+// Recovery function to ensure UI state is correct
+function ensureUIStateCorrect() {
+    if (!gameState || !currentPlayer) return;
+    
+    const wordInput = document.getElementById('wordInput');
+    if (!wordInput) return;
+    
+    const isMyTurn = gameState.currentTurn === currentPlayer;
+    const shouldBeEnabled = isMyTurn && !window.isSpectator;
+    
+    // If input state doesn't match turn state, fix it
+    // wordInput.disabled should be !shouldBeEnabled (if shouldBeEnabled is true, disabled should be false)
+    if (wordInput.disabled !== !shouldBeEnabled) {
+        console.warn('UI state mismatch detected - fixing input state', {
+            disabled: wordInput.disabled,
+            shouldBeEnabled,
+            isMyTurn,
+            currentTurn: gameState.currentTurn,
+            currentPlayer
+        });
+        wordInput.disabled = !shouldBeEnabled;
+        
+        // If it's my turn, ensure card selection is shown
+        if (shouldBeEnabled && !document.getElementById('cardSelection')?.style.display) {
+            const cardSelection = document.getElementById('cardSelection');
+            if (cardSelection && cardSelection.style.display === 'none') {
+                console.warn('Card selection should be visible but is hidden - fixing');
+                showCardSelection();
+            }
+        }
+    }
+}
+
+// Run recovery check periodically
+let uiStateRecoveryInterval = setInterval(ensureUIStateCorrect, 2000); // Check every 2 seconds
+
+// Clear interval on page unload to prevent memory leaks
+window.addEventListener('beforeunload', () => {
+    if (uiStateRecoveryInterval) {
+        clearInterval(uiStateRecoveryInterval);
+    }
+});
+
 // Show splash and credits screens before lobby
 function showSplashThenLobby() {
     // Show splash screen first
@@ -111,36 +160,13 @@ function showNewCardAnnouncement() {
     // Set up mouse tracking for card rotation
     setupCardRotationTracking();
     
-    // Wait for user click to continue - then show Moonshine card
+    // Wait for user click to continue - then return to lobby
     const announcementScreen = document.getElementById('newCardAnnouncement');
     if (announcementScreen) {
         const skipAnnouncement = (e) => {
             cleanupCardRotationTracking();
             announcementScreen.removeEventListener('click', skipAnnouncement);
-            showMoonshineCardAnnouncement();
-        };
-        announcementScreen.addEventListener('click', skipAnnouncement);
-    }
-}
-
-function showMoonshineCardAnnouncement() {
-    ScreenManager.show('moonshineCardAnnouncement');
-    
-    // Scale the announcement screen to fit after a small delay to ensure layout is complete
-    setTimeout(() => {
-        scaleMoonshineCardAnnouncement();
-    }, 100);
-    
-    // Set up mouse tracking for card rotation
-    setupCardRotationTracking();
-    
-    // Wait for user click to continue - then go to lobby
-    const announcementScreen = document.getElementById('moonshineCardAnnouncement');
-    if (announcementScreen) {
-        const skipAnnouncement = (e) => {
-            cleanupCardRotationTracking();
-            announcementScreen.removeEventListener('click', skipAnnouncement);
-            showLobby();
+            ScreenManager.show('lobby');
         };
         announcementScreen.addEventListener('click', skipAnnouncement);
     }
@@ -154,15 +180,7 @@ function setupCardRotationTracking() {
     cleanupCardRotationTracking();
     
     // Find which card announcement screen is currently active
-    const amnesiaScreen = document.getElementById('newCardAnnouncement');
-    const moonshineScreen = document.getElementById('moonshineCardAnnouncement');
-    
-    let announcementScreen = null;
-    if (amnesiaScreen && amnesiaScreen.classList.contains('active')) {
-        announcementScreen = amnesiaScreen;
-    } else if (moonshineScreen && moonshineScreen.classList.contains('active')) {
-        announcementScreen = moonshineScreen;
-    }
+    const announcementScreen = document.getElementById('newCardAnnouncement');
     
     // Find the card flip inner within the active screen
     const cardFlipInner = announcementScreen ? announcementScreen.querySelector('.new-card-flip-inner') : null;
@@ -272,17 +290,6 @@ function cleanupCardRotationTracking() {
 function scaleNewCardAnnouncement() {
     const announcementScreen = document.getElementById('newCardAnnouncement');
     const scalingContainer = document.getElementById('newCardAnnouncementScalingContainer');
-    
-    if (!announcementScreen || !scalingContainer) return;
-    
-    // Use shared scaling logic
-    scaleCardAnnouncementScreen(announcementScreen, scalingContainer);
-}
-
-// Scale Moonshine card announcement screen to fit viewport
-function scaleMoonshineCardAnnouncement() {
-    const announcementScreen = document.getElementById('moonshineCardAnnouncement');
-    const scalingContainer = document.getElementById('moonshineCardAnnouncementScalingContainer');
     
     if (!announcementScreen || !scalingContainer) return;
     
@@ -838,7 +845,8 @@ function getCardImagePath(cardId) {
         'hiddenKeyboard': 'CardeBlanche.png',
         'blackHand': 'BlackHand.png',
         'amnesia': 'Amnesia.png',
-        'moonshine': 'MoonShine.png'
+        'moonshine': 'MoonShine.png',
+        'slowMotion': 'SlowMotion.png'
     };
     
     const imageName = cardImageMap[cardId] || 'Blank.png';
@@ -2103,7 +2111,7 @@ const ScreenManager = {
     
     // Initialize all screens
     init() {
-        const screenIds = ['splash', 'credits', 'newCardAnnouncement', 'moonshineCardAnnouncement', 'login', 'signup', 'guestName', 'lobby', 'waiting', 'vs', 'game', 'gameOver'];
+        const screenIds = ['splash', 'credits', 'newCardAnnouncement', 'login', 'signup', 'guestName', 'lobby', 'waiting', 'vs', 'game', 'gameOver', 'spectatorGameOver'];
         screenIds.forEach(id => {
             const element = document.getElementById(id);
             if (!element) {
@@ -2293,7 +2301,10 @@ socket.on('playerJoinedGame', (data) => {
 socket.on('playerJoined', (data) => {
     updatePlayersList(data.players);
     if (data.players.length === 2) {
-        document.getElementById('waitingMessage').textContent = 'Starting game...';
+        const waitingMessage = document.getElementById('waitingMessage');
+        if (waitingMessage) {
+            waitingMessage.textContent = 'Starting game...';
+        }
     }
 });
 
@@ -2830,6 +2841,30 @@ socket.on('cardSelected', (data) => {
     if (data.playerId === currentPlayer) {
         selectedCard = data.card;
         
+        // Handle Slow Motion card as fallback (primary handler is slowMotionPlayed event)
+        // This is a backup in case the server event doesn't fire or arrives late
+        // Use a small delay to allow the server event to fire first
+        if (data.card && data.card.id === 'slowMotion' && gameState && gameState.currentTurn === currentPlayer) {
+            setTimeout(() => {
+                // Only use fallback if slowMotionUsed flag wasn't set by the server event
+                if (!window.slowMotionUsed && gameState && gameState.currentTurn === currentPlayer) {
+                    console.log('Slow Motion: Fallback handler in cardSelected - adding 30 seconds (server event may not have fired)');
+                    if (typeof turnTimeRemaining !== 'undefined' && turnTimeRemaining !== null) {
+                        const oldTime = turnTimeRemaining;
+                        turnTimeRemaining += 30;
+                        if (!window.slowMotionMaxTime || turnTimeRemaining > window.slowMotionMaxTime) {
+                            window.slowMotionMaxTime = turnTimeRemaining;
+                        }
+                        window.slowMotionUsed = true;
+                        updateTimerDisplay(true);
+                        console.log(`Slow Motion (fallback): Timer increased from ${oldTime} to ${turnTimeRemaining} seconds`);
+                    }
+                } else {
+                    console.log('Slow Motion: Fallback skipped - server event already processed');
+                }
+            }, 100);
+        }
+        
         // If Counter card was played, effects will be cleared server-side
         // We'll receive activeEffectsUpdated event to update our gameState
         
@@ -2886,8 +2921,79 @@ socket.on('cardSelected', (data) => {
             cardChainActive = false; // Clear flag
             window.snackTimeMode = false; // Clear snack time mode
             hideCardSelection();
+            // If Slow Motion was just used, ensure timer is preserved
+            if (window.slowMotionUsed && turnTimeRemaining > TURN_TIME_LIMIT) {
+                console.log(`Slow Motion active - preserving timer at ${turnTimeRemaining} before showing game board`);
+            }
             showGameBoard();
         }
+    }
+});
+
+socket.on('slowMotionPlayed', (data) => {
+    // Handle Slow Motion card - add time to current timer for both players
+    // Both players receive this event and both should update their timer display
+    console.log('Slow Motion played event received:', data);
+    
+    // Check if it's for the current game
+    if (!gameState || gameState.gameId !== data.gameId) {
+        console.log('Slow Motion: Wrong game, skipping timer update', {
+            gameId: gameState?.gameId,
+            dataGameId: data.gameId
+        });
+        return;
+    }
+    
+    // Convert to strings for comparison to avoid type mismatch issues
+    const currentTurnStr = String(gameState.currentTurn || '').trim();
+    const playerIdStr = String(data.playerId || '').trim();
+    const currentPlayerStr = String(currentPlayer || '').trim();
+    
+    // The player who played Slow Motion should be the current turn
+    // Both players should update their timer to stay in sync (both are watching the same timer)
+    const isCurrentTurn = currentTurnStr === playerIdStr;
+    const isMyTurn = currentTurnStr === currentPlayerStr;
+    
+    console.log('Slow Motion: Processing for both players', {
+        currentTurn: currentTurnStr,
+        playerId: playerIdStr,
+        currentPlayer: currentPlayerStr,
+        isCurrentTurn: isCurrentTurn,
+        isMyTurn: isMyTurn,
+        turnTimeRemaining: turnTimeRemaining
+    });
+    
+    // Update timer for BOTH players - both are watching the same timer countdown
+    // Only requirement is that it's the current player's turn (whoever that is)
+    // Both players will receive this event and both should update to stay in sync
+    if (gameState.currentTurn && isCurrentTurn) {
+        // Safety check - ensure turnTimeRemaining is defined
+        if (typeof turnTimeRemaining === 'undefined' || turnTimeRemaining === null) {
+            console.error('Slow Motion: turnTimeRemaining is not defined, initializing to 60');
+            turnTimeRemaining = TURN_TIME_LIMIT || 60;
+        }
+        
+        const oldTime = turnTimeRemaining;
+        const addSeconds = data.addSeconds || 30;
+        // Add seconds to CURRENT time (not starting from 60)
+        turnTimeRemaining += addSeconds;
+        // Store the maximum extended time for circle calculation (use this as the "full" time)
+        if (!window.slowMotionMaxTime || turnTimeRemaining > window.slowMotionMaxTime) {
+            window.slowMotionMaxTime = turnTimeRemaining;
+        }
+        // Mark that Slow Motion was used so subsequent calls don't reset it
+        window.slowMotionUsed = true;
+        // Update display immediately - force recalculation of circle with new time
+        updateTimerDisplay(true);
+        console.log(`✅ Slow Motion: Timer increased from ${oldTime} to ${turnTimeRemaining} seconds (added ${addSeconds}, max: ${window.slowMotionMaxTime}, isMyTurn: ${isMyTurn}, currentPlayer: ${currentPlayerStr})`);
+    } else {
+        console.warn('❌ Slow Motion: Conditions not met - cannot update timer', {
+            hasCurrentTurn: !!gameState.currentTurn,
+            currentTurn: currentTurnStr,
+            playerId: playerIdStr,
+            isCurrentTurn: isCurrentTurn,
+            turnTimeRemaining: turnTimeRemaining
+        });
     }
 });
 
@@ -3041,8 +3147,49 @@ socket.on('activeEffectsUpdated', (data) => {
 });
 
 socket.on('turnChanged', (data) => {
-    // Skip if spectator (spectators are handled by a separate handler below)
+    // Prevent duplicate processing
+    if (isProcessingTurnChange) {
+        console.warn('turnChanged: Already processing, skipping duplicate event');
+        return;
+    }
+    
+    // Clear any pending timeouts to prevent conflicts
+    if (turnChangeTimeoutId) {
+        clearTimeout(turnChangeTimeoutId);
+        turnChangeTimeoutId = null;
+    }
+    if (cardSelectionTimeoutId) {
+        clearTimeout(cardSelectionTimeoutId);
+        cardSelectionTimeoutId = null;
+    }
+    
+    isProcessingTurnChange = true;
+    
+    // Handle spectators in the same handler (removes need for duplicate handler)
+    if (window.isSpectator && window.spectatorGameId && data.gameId === window.spectatorGameId) {
+        // Update gameState for spectator
+        if (gameState) {
+            gameState.currentTurn = data.currentTurn;
+            gameState.players = data.players;
+            gameState.status = data.status;
+            gameState.activeEffects = data.activeEffects;
+            if (data.totalGuesses !== undefined) {
+                gameState.totalGuesses = data.totalGuesses;
+            }
+        } else {
+            gameState = data;
+        }
+        
+        // Update turn indicator and start timer
+        stopTurnTimer();
+        updateTurnIndicator();
+        isProcessingTurnChange = false;
+        return;
+    }
+    
+    // Skip if spectator (but not in spectator mode)
     if (window.isSpectator) {
+        isProcessingTurnChange = false;
         return;
     }
     
@@ -3080,6 +3227,10 @@ socket.on('turnChanged', (data) => {
     }
     
     stopTurnTimer(); // Stop timer when turn changes
+    
+    // Clear Slow Motion flag on turn change (new turn, new timer)
+    window.slowMotionUsed = false;
+    window.slowMotionMaxTime = null; // Clear the max time tracking
     
     // Both players should track the timer, but only the player whose turn it is can trigger timeout
     const currentTurnStr = String(data.currentTurn).trim();
@@ -3125,7 +3276,7 @@ socket.on('turnChanged', (data) => {
     if (amnesiaActive) {
         // Amnesia is active on me - blank out all previous guesses (regardless of whose turn it is)
         console.log('Amnesia active - blanking out all previous guesses');
-        setTimeout(() => {
+        turnChangeTimeoutId = setTimeout(() => {
             hideAllPreviousGuesses();
         }, 200);
     } else {
@@ -3140,7 +3291,7 @@ socket.on('turnChanged', (data) => {
     
     if (moonshineActive) {
         // Moonshine is active - apply drunk effect
-        setTimeout(() => {
+        turnChangeTimeoutId = setTimeout(() => {
             applyDrunkEffect();
         }, 100);
     } else {
@@ -3159,6 +3310,9 @@ socket.on('turnChanged', (data) => {
         
         // Helper function to show card selection
         const showCardSelectionNow = () => {
+            // Clear processing flag
+            isProcessingTurnChange = false;
+            
             // Validate state before showing cards
             if (!gameState || !currentPlayer || !gameState.gameId) {
                 console.error('showCardSelectionNow: Invalid game state', { gameState: !!gameState, currentPlayer, gameId: gameState?.gameId });
@@ -3185,7 +3339,9 @@ socket.on('turnChanged', (data) => {
                 wordInput.value = '';
                 // Focus input after a short delay to ensure card selection is visible
                 setTimeout(() => {
-                    wordInput.focus();
+                    if (wordInput && gameState && gameState.currentTurn === currentPlayer) {
+                        wordInput.focus();
+                    }
                 }, 100);
             }
         };
@@ -3195,17 +3351,22 @@ socket.on('turnChanged', (data) => {
         
         if (isFirstTurn) {
             // First turn - show immediately with small delay for state to settle
-            setTimeout(showCardSelectionNow, 150);
+            cardSelectionTimeoutId = setTimeout(showCardSelectionNow, 150);
         } else {
             // Not first turn - wait 3 seconds before showing card selection
-            setTimeout(showCardSelectionNow, 3000);
+            cardSelectionTimeoutId = setTimeout(showCardSelectionNow, 3000);
         }
     } else {
         // It's opponent's turn - hide card selection, disable input
         console.log('✗ Hiding card selection - opponent\'s turn');
+        isProcessingTurnChange = false; // Clear flag immediately for opponent's turn
+        
         hideCardSelection();
-        document.getElementById('wordInput').disabled = true;
-        document.getElementById('wordInput').value = '';
+        const wordInput = document.getElementById('wordInput');
+        if (wordInput) {
+            wordInput.disabled = true;
+            wordInput.value = '';
+        }
         
         // Show tutorial message on opponent's turn (only once, when opponent's turn first starts)
         if (window.tutorialMode && !window.tutorialMessagesShown?.has('opponentTurn')) {
@@ -3714,6 +3875,13 @@ async function fetchWordDefinition(word) {
 
 socket.on('gameOver', (data) => {
     console.log('gameOver event received:', data);
+    
+    // CRITICAL: Skip stats updates for spectators - they should use the spectator game over screen
+    if (window.isSpectator && window.spectatorGameId) {
+        console.log('Spectator detected in gameOver - skipping main handler, using spectator handler');
+        return; // Let the spectator handler below handle it
+    }
+    
     // Prepare UI elements first
     const titleEl = document.getElementById('gameOverTitle');
     const messageEl = document.getElementById('gameOverMessage');
@@ -4388,9 +4556,19 @@ window.addEventListener('resize', () => {
 });
 
 // Scale game over screen to fit viewport
-function scaleGameOverScreen() {
-    const gameOverScreen = document.getElementById('gameOver');
-    const scalingContainer = document.getElementById('gameOverScalingContainer');
+function scaleGameOverScreen(containerElement = null) {
+    // If container is provided, use it; otherwise use default gameOver screen
+    let gameOverScreen, scalingContainer;
+    
+    if (containerElement) {
+        // For spectator game over screen
+        scalingContainer = containerElement;
+        gameOverScreen = document.getElementById('spectatorGameOver');
+    } else {
+        // For regular game over screen
+        gameOverScreen = document.getElementById('gameOver');
+        scalingContainer = document.getElementById('gameOverScalingContainer');
+    }
     
     if (!gameOverScreen || !scalingContainer) return;
     
@@ -4818,7 +4996,8 @@ function hideCardSelection() {
 }
 
 function showGameBoard() {
-    document.getElementById('gameBoard').style.display = 'block';
+    const gameBoard = document.getElementById('gameBoard');
+    if (gameBoard) gameBoard.style.display = 'block';
 }
 
 // Proper Fisher-Yates shuffle algorithm for truly random shuffling
@@ -5688,12 +5867,15 @@ function selectCard(card, cardElement) {
     } else {
         // Final card in chain - clear flag and proceed
         cardChainActive = false;
-    setTimeout(() => {
+        setTimeout(() => {
             hideCardSelection();
             showGameBoard();
-            document.getElementById('wordInput').disabled = false;
-        document.getElementById('wordInput').focus();
-    }, 100);
+            const wordInput = document.getElementById('wordInput');
+            if (wordInput) {
+                wordInput.disabled = false;
+                wordInput.focus();
+            }
+        }, 100);
     }
 }
 
@@ -5766,12 +5948,27 @@ function startTurnTimer(preserveTimeRemaining = false) {
     const timeLimit = hasTimeRush ? 20 : TURN_TIME_LIMIT;
     
     // Only reset time remaining if we're not preserving it (e.g., when Counter clears timeRush)
+    // BUT: Never reset if Slow Motion was used (time will exceed normal limit)
     if (!preserveTimeRemaining) {
-    turnTimeRemaining = timeLimit;
-    } else {
-        // If preserving, make sure it doesn't exceed the new limit
-        if (turnTimeRemaining > timeLimit) {
+        // Check if Slow Motion was used (time significantly exceeds limit)
+        if (window.slowMotionUsed && turnTimeRemaining > timeLimit) {
+            // Slow Motion was used - don't reset, preserve the extended time
+            console.log(`Preserving Slow Motion time: ${turnTimeRemaining} (limit: ${timeLimit})`);
+        } else if (turnTimeRemaining <= timeLimit + 1) {
+            // Normal case - reset to limit
             turnTimeRemaining = timeLimit;
+        } else {
+            // Time exceeds limit but Slow Motion flag not set - preserve anyway (edge case)
+            console.log(`Preserving extended time: ${turnTimeRemaining} (limit: ${timeLimit})`);
+        }
+    } else {
+        // When preserving time, only cap if Slow Motion wasn't used
+        if (!window.slowMotionUsed && turnTimeRemaining > timeLimit) {
+            // Normal preservation (timeRush cleared scenario) - cap it
+            turnTimeRemaining = timeLimit;
+        } else if (window.slowMotionUsed && turnTimeRemaining > timeLimit) {
+            // Slow Motion was used - don't cap
+            console.log(`Preserving Slow Motion time when preserving: ${turnTimeRemaining} (limit: ${timeLimit})`);
         }
     }
     
@@ -5796,7 +5993,10 @@ function startTurnTimer(preserveTimeRemaining = false) {
         turnTimer = null;
     }
     
-    updateTimerDisplay();
+    // Update display - use allowExceedLimit if Slow Motion was used or time exceeds normal limit
+    const shouldAllowExceed = window.slowMotionUsed || turnTimeRemaining > timeLimit;
+    updateTimerDisplay(shouldAllowExceed);
+    updateTimerDisplay(shouldAllowExceed);
     
     turnTimer = setInterval(() => {
         // Check if turn has changed
@@ -5851,7 +6051,7 @@ function stopTurnTimer() {
     updateTimerDisplay();
 }
 
-function updateTimerDisplay() {
+function updateTimerDisplay(allowExceedLimit = false) {
     const timerText = document.getElementById('timerText');
     const timerCircle = document.getElementById('timerCircle');
     
@@ -5878,7 +6078,8 @@ function updateTimerDisplay() {
     const timeLimit = hasTimeRush ? 20 : TURN_TIME_LIMIT;
     
     // Ensure timeRemaining doesn't exceed the current limit (in case timeRush was just cleared)
-    if (turnTimeRemaining > timeLimit) {
+    // UNLESS allowExceedLimit is true (for Slow Motion card) OR slowMotionUsed flag is set
+    if (!allowExceedLimit && !window.slowMotionUsed && turnTimeRemaining > timeLimit) {
         turnTimeRemaining = timeLimit;
     }
     
@@ -5888,9 +6089,20 @@ function updateTimerDisplay() {
     }
     
     if (timerCircle) {
-        const progress = (turnTimeRemaining / timeLimit) * 100;
+        // Calculate progress - when Slow Motion extends time, use the extended time as the base
+        // This ensures the circle shows 100% when time is extended, then counts down from there
+        let effectiveLimit = timeLimit;
+        if (window.slowMotionUsed && turnTimeRemaining > timeLimit) {
+            // Slow Motion was used - use the current extended time as the "full" time
+            // Store the maximum extended time if not already stored
+            if (!window.slowMotionMaxTime || turnTimeRemaining > window.slowMotionMaxTime) {
+                window.slowMotionMaxTime = turnTimeRemaining;
+            }
+            effectiveLimit = window.slowMotionMaxTime;
+        }
+        const progressPercent = (turnTimeRemaining / effectiveLimit) * 100;
         const circumference = 2 * Math.PI * 15.9155; // radius of the circle
-        const offset = circumference - (progress / 100) * circumference;
+        const offset = circumference - (progressPercent / 100) * circumference;
         
         timerCircle.style.strokeDashoffset = offset;
         
@@ -8228,9 +8440,12 @@ function showTutorialMessage(messageKey) {
 }
 
 // Help button event listeners
-document.getElementById('helpBtn').addEventListener('click', openHelp);
-document.getElementById('closeHelpBtn').addEventListener('click', closeHelp);
-document.getElementById('closeHelpBtnBottom').addEventListener('click', closeHelp);
+const helpBtn = document.getElementById('helpBtn');
+if (helpBtn) helpBtn.addEventListener('click', openHelp);
+const closeHelpBtn = document.getElementById('closeHelpBtn');
+if (closeHelpBtn) closeHelpBtn.addEventListener('click', closeHelp);
+const closeHelpBtnBottom = document.getElementById('closeHelpBtnBottom');
+if (closeHelpBtnBottom) closeHelpBtnBottom.addEventListener('click', closeHelp);
 
 // Rank Ladder Popup
 function openRankLadder() {
@@ -9525,28 +9740,8 @@ socket.on('spectatedPlayerHand', (data) => {
     }
 });
 
-// Listen for turn changes while spectating (this runs after the main turnChanged handler)
-// We need a separate handler because the main one has an early return for spectators
-socket.on('turnChanged', (data) => {
-    if (window.isSpectator && window.spectatorGameId && data.gameId === window.spectatorGameId) {
-        // Update gameState for spectator
-        if (gameState) {
-            gameState.currentTurn = data.currentTurn;
-            gameState.players = data.players;
-            gameState.status = data.status;
-            gameState.activeEffects = data.activeEffects;
-            if (data.totalGuesses !== undefined) {
-                gameState.totalGuesses = data.totalGuesses;
-            }
-        } else {
-            gameState = data;
-        }
-        
-        // Update turn indicator and start timer
-        stopTurnTimer();
-        updateTurnIndicator();
-    }
-});
+// REMOVED: Duplicate turnChanged handler - now handled in main handler above
+// The main handler now handles both regular players and spectators
 
 // Listen for game updates while spectating
 socket.on('guessSubmitted', (data) => {
@@ -9571,7 +9766,17 @@ socket.on('cardPlayed', (data) => {
             }
             
             // Request updated hand from spectated player after a short delay (to allow card draw)
-            setTimeout(() => {
+            // Store timeout ID so we can clear it if leaving spectator mode
+            if (!window.spectatorHandUpdateTimeouts) {
+                window.spectatorHandUpdateTimeouts = [];
+            }
+            const timeoutId = setTimeout(() => {
+                // Remove this timeout from the array when it executes
+                if (window.spectatorHandUpdateTimeouts) {
+                    const index = window.spectatorHandUpdateTimeouts.indexOf(timeoutId);
+                    if (index > -1) window.spectatorHandUpdateTimeouts.splice(index, 1);
+                }
+                
                 if (window.isSpectator && window.spectatorGameId && window.spectatedPlayerId) {
                     // Request hand update through server
                     socket.emit('requestHandForSpectatorUpdate', {
@@ -9580,19 +9785,105 @@ socket.on('cardPlayed', (data) => {
                     });
                 }
             }, 500);
+            window.spectatorHandUpdateTimeouts.push(timeoutId);
         }
     }
 });
 
+// Spectator game over handler - separate from main handler to prevent chip loss
 socket.on('gameOver', (data) => {
     if (window.isSpectator && window.spectatorGameId) {
-        // Exit spectator mode and show game over
+        console.log('Spectator game over event received:', data);
+        
+        // Exit spectator mode first (but keep spectator flag temporarily for display)
+        const wasSpectating = window.isSpectator;
+        const spectatedGameId = window.spectatorGameId;
         leaveSpectatorMode();
         
-        // Show game over screen
-        ScreenManager.show('gameOver');
+        // Show spectator-specific game over screen
+        showSpectatorGameOver(data, wasSpectating, spectatedGameId);
     }
 });
+
+function showSpectatorGameOver(data, wasSpectating, spectatedGameId) {
+    // Prepare UI elements
+    const titleEl = document.getElementById('spectatorGameOverTitle');
+    const messageEl = document.getElementById('spectatorGameOverMessage');
+    const iconEl = document.getElementById('spectatorGameOverIcon');
+    const wordEl = document.getElementById('spectatorGameOverWord');
+    const definitionEl = document.getElementById('spectatorGameOverDefinition');
+    
+    if (!titleEl || !messageEl || !iconEl || !wordEl) {
+        console.error('Spectator game over elements not found');
+        ScreenManager.show('lobby');
+        return;
+    }
+    
+    // Determine winner from game state
+    let winnerName = 'Unknown';
+    let winnerId = null;
+    
+    if (gameState && gameState.players && data.winner) {
+        const winner = gameState.players.find(p => p.id === data.winner);
+        if (winner) {
+            winnerName = winner.name || 'Player';
+            winnerId = winner.id;
+        }
+    }
+    
+    // Set icon and title
+    iconEl.textContent = '👁️';
+    titleEl.textContent = 'Game Ended';
+    
+    // Set message
+    messageEl.textContent = `${winnerName} won the game!`;
+    
+    // Show the word
+    if (data.word) {
+        wordEl.textContent = `The word was: ${data.word.toUpperCase()}`;
+        wordEl.style.display = 'block';
+    } else {
+        wordEl.style.display = 'none';
+    }
+    
+    // Hide definition (can be added later if needed)
+    if (definitionEl) {
+        definitionEl.style.display = 'none';
+    }
+    
+    // Show the spectator game over screen
+    if (!ScreenManager.show('spectatorGameOver')) {
+        console.error('Failed to show spectatorGameOver screen!');
+        ScreenManager.show('lobby');
+        return;
+    }
+    
+    // Scale the screen
+    setTimeout(() => {
+        const container = document.getElementById('spectatorGameOverScalingContainer');
+        if (container) {
+            scaleGameOverScreen(container);
+        } else {
+            // Fallback: try to scale without container parameter
+            scaleGameOverScreen();
+        }
+    }, 100);
+    
+    // Initialize back to lobby button
+    const backToLobbyBtn = document.getElementById('spectatorBackToLobbyBtn');
+    if (backToLobbyBtn) {
+        // Remove any existing listeners
+        const newBtn = backToLobbyBtn.cloneNode(true);
+        backToLobbyBtn.parentNode.replaceChild(newBtn, backToLobbyBtn);
+        
+        newBtn.addEventListener('click', () => {
+            ScreenManager.show('lobby');
+        });
+    }
+    
+    // CRITICAL: Do NOT call updateStats - spectators should never lose chips
+    console.log('Spectator game over - stats NOT updated (spectators cannot lose chips)');
+}
 
 function leaveSpectatorMode() {
     if (!window.isSpectator) {
@@ -9611,6 +9902,12 @@ function leaveSpectatorMode() {
     const chatMessages = document.getElementById('chatMessages');
     if (chatMessages) {
         chatMessages.innerHTML = '';
+    }
+    
+    // Clear any pending timeouts for spectator hand updates
+    if (window.spectatorHandUpdateTimeouts && Array.isArray(window.spectatorHandUpdateTimeouts)) {
+        window.spectatorHandUpdateTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+        window.spectatorHandUpdateTimeouts = [];
     }
     
     // Clear spectator state
@@ -10179,6 +10476,25 @@ document.addEventListener('keydown', (e) => {
 });
 
 function submitGuess() {
+    // Safety checks
+    if (!gameState || !gameState.gameId) {
+        console.error('submitGuess: Invalid game state');
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
+        showGameMessage('⚠️', 'Game Error', 'Game state is invalid. Please refresh.');
+        return;
+    }
+    
+    if (!currentPlayer) {
+        console.error('submitGuess: No current player');
+        if (typeof soundManager !== 'undefined') {
+            soundManager.playError();
+        }
+        showGameMessage('⚠️', 'Game Error', 'Player not initialized. Please refresh.');
+        return;
+    }
+    
     if (gameState.currentTurn !== currentPlayer) {
         if (typeof soundManager !== 'undefined') {
             soundManager.playError();
@@ -10206,7 +10522,13 @@ function submitGuess() {
         return;
     }
     
-    const guess = document.getElementById('wordInput').value.toUpperCase();
+    const wordInput = document.getElementById('wordInput');
+    if (!wordInput) {
+        console.error('submitGuess: wordInput element not found');
+        return;
+    }
+    
+    const guess = wordInput.value.toUpperCase();
     
     if (guess.length !== 5) {
         if (typeof soundManager !== 'undefined') {

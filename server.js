@@ -212,6 +212,11 @@ const CARD_CONFIG = {
                 // Find the opponent
                 const opponent = game.players.find(p => p.id !== playerId);
                 if (opponent) {
+                    // CRITICAL: Remove any existing cardLock effect for this target first (prevent duplicates)
+                    game.activeEffects = game.activeEffects.filter(e => 
+                        !(e.type === 'cardLock' && e.target === opponent.id && !e.used)
+                    );
+                    
                     // Add card lock effect targeting the opponent
                     game.activeEffects.push({
                         type: 'cardLock',
@@ -548,6 +553,11 @@ const CARD_CONFIG = {
                 // Find the opponent
                 const opponent = game.players.find(p => p.id !== playerId);
                 if (opponent) {
+                    // CRITICAL: Remove any existing blackHand effect for this target first (prevent duplicates)
+                    game.activeEffects = game.activeEffects.filter(e => 
+                        !(e.type === 'blackHand' && e.target === opponent.id && !e.used)
+                    );
+                    
                     // Add black hand effect targeting the opponent
                     game.activeEffects.push({
                         type: 'blackHand',
@@ -577,6 +587,11 @@ const CARD_CONFIG = {
                 // Find the opponent
                 const opponent = game.players.find(p => p.id !== playerId);
                 if (opponent) {
+                    // CRITICAL: Remove any existing amnesia effect for this target first (prevent duplicates)
+                    game.activeEffects = game.activeEffects.filter(e => 
+                        !(e.type === 'amnesia' && e.target === opponent.id && !e.used)
+                    );
+                    
                     // Add amnesia effect targeting the opponent
                     game.activeEffects.push({
                         type: 'amnesia',
@@ -606,6 +621,11 @@ const CARD_CONFIG = {
                 // Find the opponent
                 const opponent = game.players.find(p => p.id !== playerId);
                 if (opponent) {
+                    // CRITICAL: Remove any existing moonshine effect for this target first (prevent duplicates)
+                    game.activeEffects = game.activeEffects.filter(e => 
+                        !(e.type === 'moonshine' && e.target === opponent.id && !e.used)
+                    );
+                    
                     // Add moonshine effect targeting the opponent
                     game.activeEffects.push({
                         type: 'moonshine',
@@ -615,6 +635,23 @@ const CARD_CONFIG = {
                     });
                 }
             }
+        }
+    },
+    'slowMotion': {
+        metadata: {
+            id: 'slowMotion',
+            title: 'Slow Motion',
+            description: 'Adds 30 seconds to your current timer',
+            type: 'help'
+        },
+        modifier: {
+            isModifier: false,
+            splashBehavior: 'show',
+            chainBehavior: 'none',
+            needsRealCardStorage: false
+        },
+        effects: {
+            // slowMotion effect is applied immediately when card is selected (handled in selectCard/client)
         }
     }
 };
@@ -1700,6 +1737,15 @@ function processBotTurn(gameId) {
             
             // Check if this is a timeRush card - apply effect immediately when card is selected
             if (selectedCard.id === 'timeRush' && opponent) {
+                // CRITICAL: Remove any existing timeRush effect for this target first (prevent duplicates)
+                const existingTimeRush = currentGame.activeEffects.find(e => 
+                    e.type === 'timeRush' && e.target === opponent.id && !e.used
+                );
+                if (existingTimeRush) {
+                    console.log(`Time Rush (Bot): Removing existing timeRush effect for ${opponent.id} before adding new one`);
+                    currentGame.activeEffects = currentGame.activeEffects.filter(e => e !== existingTimeRush);
+                }
+                
                 // Add timeRush effect targeting the opponent
                 currentGame.activeEffects.push({
                     type: 'timeRush',
@@ -2065,6 +2111,9 @@ function submitBotGuess(gameId, botId, guess, card) {
         
         // Clear timeRush effect when the affected bot's turn ends
         // (when turn switches away from them)
+        const hadTimeRushBot = game.activeEffects.some(e => 
+            e.type === 'timeRush' && e.target === botId && !e.used
+        );
         game.activeEffects = game.activeEffects.filter(e => {
             if (e.type === 'timeRush' && e.target === botId) {
                 console.log('Removing timeRush effect after turn ended for bot:', botId);
@@ -2072,6 +2121,18 @@ function submitBotGuess(gameId, botId, guess, card) {
             }
             return true;
         });
+        
+        // CRITICAL: Notify human player when bot's timeRush is cleared
+        if (hadTimeRushBot && opponent && !opponent.isBot) {
+            console.log('Bot timeRush was cleared - notifying human player');
+            const opponentSocket = io.sockets.sockets.get(opponent.id);
+            if (opponentSocket) {
+                opponentSocket.emit('activeEffectsUpdated', {
+                    activeEffects: game.activeEffects,
+                    gameId: gameId
+                });
+            }
+        }
         
         // Clear moonshine effect when the affected bot's turn ends
         // (when turn switches away from them)
@@ -2102,6 +2163,9 @@ function submitBotGuess(gameId, botId, guess, card) {
             !(e.type === 'extraGuess' && e.target === botId)
         );
             // Clear timeRush effect even if bot has extra guess (timeRush only affects one turn)
+            const hadTimeRushBotExtra = game.activeEffects.some(e => 
+                e.type === 'timeRush' && e.target === botId && !e.used
+            );
             game.activeEffects = game.activeEffects.filter(e => {
                 if (e.type === 'timeRush' && e.target === botId) {
                     console.log('Removing timeRush effect after first guess (extra guess used) for bot:', botId);
@@ -2109,6 +2173,18 @@ function submitBotGuess(gameId, botId, guess, card) {
                 }
                 return true;
             });
+            
+            // CRITICAL: Notify human player when bot's timeRush is cleared in extra guess case
+            if (hadTimeRushBotExtra && opponent && !opponent.isBot) {
+                console.log('Bot timeRush was cleared (extra guess) - notifying human player');
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('activeEffectsUpdated', {
+                        activeEffects: game.activeEffects,
+                        gameId: gameId
+                    });
+                }
+            }
             
             // Clear moonshine effect even if bot has extra guess (moonshine only affects one turn)
             game.activeEffects = game.activeEffects.filter(e => {
@@ -3546,6 +3622,15 @@ io.on('connection', (socket) => {
         
         // Check if this is a timeRush card - apply effect immediately when card is selected
         if (realCard.id === 'timeRush' && opponent) {
+            // CRITICAL: Remove any existing timeRush effect for this target first (prevent duplicates)
+            const existingTimeRush = game.activeEffects.find(e => 
+                e.type === 'timeRush' && e.target === opponent.id && !e.used
+            );
+            if (existingTimeRush) {
+                console.log(`Time Rush: Removing existing timeRush effect for ${opponent.id} before adding new one`);
+                game.activeEffects = game.activeEffects.filter(e => e !== existingTimeRush);
+            }
+            
             // Add timeRush effect targeting the opponent
             game.activeEffects.push({
                 type: 'timeRush',
@@ -3567,6 +3652,28 @@ io.on('connection', (socket) => {
                     activeEffects: game.activeEffects,
                     gameId: data.gameId
                 });
+            }
+        }
+        
+        // Check if this is a slowMotion card - notify both players to add 30 seconds to timer
+        if (realCard.id === 'slowMotion') {
+            console.log(`Slow Motion: Player ${socket.id} played Slow Motion - notifying both players to add 30 seconds`);
+            // Notify the player who played it
+            socket.emit('slowMotionPlayed', {
+                gameId: data.gameId,
+                playerId: socket.id,
+                addSeconds: 30
+            });
+            // Also notify opponent so their timer updates too
+            if (opponent) {
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('slowMotionPlayed', {
+                        gameId: data.gameId,
+                        playerId: socket.id,
+                        addSeconds: 30
+                    });
+                }
             }
         }
         
@@ -3965,6 +4072,15 @@ io.on('connection', (socket) => {
         
         // Check if this is a timeRush card - apply effect immediately when card is selected
         if (realCard.id === 'timeRush' && opponent) {
+            // CRITICAL: Remove any existing timeRush effect for this target first (prevent duplicates)
+            const existingTimeRush = game.activeEffects.find(e => 
+                e.type === 'timeRush' && e.target === opponent.id && !e.used
+            );
+            if (existingTimeRush) {
+                console.log(`Time Rush: Removing existing timeRush effect for ${opponent.id} before adding new one`);
+                game.activeEffects = game.activeEffects.filter(e => e !== existingTimeRush);
+            }
+            
             // Add timeRush effect targeting the opponent
             game.activeEffects.push({
                 type: 'timeRush',
@@ -3986,6 +4102,28 @@ io.on('connection', (socket) => {
                     activeEffects: game.activeEffects,
                     gameId: data.gameId
                 });
+            }
+        }
+        
+        // Check if this is a slowMotion card - notify both players to add 30 seconds to timer
+        if (realCard.id === 'slowMotion') {
+            console.log(`Slow Motion: Player ${socket.id} played Slow Motion - notifying both players to add 30 seconds`);
+            // Notify the player who played it
+            socket.emit('slowMotionPlayed', {
+                gameId: data.gameId,
+                playerId: socket.id,
+                addSeconds: 30
+            });
+            // Also notify opponent so their timer updates too
+            if (opponent) {
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('slowMotionPlayed', {
+                        gameId: data.gameId,
+                        playerId: socket.id,
+                        addSeconds: 30
+                    });
+                }
             }
         }
         
@@ -4494,6 +4632,9 @@ io.on('connection', (socket) => {
             
             // Clear timeRush effect when the affected player's turn ends
             // (when turn switches away from them)
+            const hadTimeRush = game.activeEffects.some(e => 
+                e.type === 'timeRush' && e.target === socket.id && !e.used
+            );
             game.activeEffects = game.activeEffects.filter(e => {
                 if (e.type === 'timeRush' && e.target === socket.id) {
                     console.log('Removing timeRush effect after turn ended for player:', socket.id);
@@ -4501,6 +4642,22 @@ io.on('connection', (socket) => {
                 }
                 return true;
             });
+            
+            // CRITICAL: Explicitly notify clients when timeRush is cleared (don't rely only on turnChanged)
+            if (hadTimeRush) {
+                console.log('TimeRush was cleared - notifying both players');
+                socket.emit('activeEffectsUpdated', {
+                    activeEffects: game.activeEffects,
+                    gameId: data.gameId
+                });
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('activeEffectsUpdated', {
+                        activeEffects: game.activeEffects,
+                        gameId: data.gameId
+                    });
+                }
+            }
             
             // Clear blocked card when the blocked player's turn ends
             // (when turn switches away from them)
@@ -4560,6 +4717,9 @@ io.on('connection', (socket) => {
                 !(e.type === 'extraGuess' && e.target === socket.id && !e.used)
             );
             // Clear timeRush effect even if player has extra guess (timeRush only affects one turn)
+            const hadTimeRushExtra = game.activeEffects.some(e => 
+                e.type === 'timeRush' && e.target === socket.id && !e.used
+            );
             game.activeEffects = game.activeEffects.filter(e => {
                 if (e.type === 'timeRush' && e.target === socket.id) {
                     console.log('Removing timeRush effect after first guess (extra guess used):', socket.id);
@@ -4567,6 +4727,22 @@ io.on('connection', (socket) => {
                 }
                 return true;
             });
+            
+            // CRITICAL: Explicitly notify clients when timeRush is cleared in extra guess case
+            if (hadTimeRushExtra) {
+                console.log('TimeRush was cleared (extra guess) - notifying both players');
+                socket.emit('activeEffectsUpdated', {
+                    activeEffects: game.activeEffects,
+                    gameId: data.gameId
+                });
+                const opponentSocket = io.sockets.sockets.get(opponent.id);
+                if (opponentSocket) {
+                    opponentSocket.emit('activeEffectsUpdated', {
+                        activeEffects: game.activeEffects,
+                        gameId: data.gameId
+                    });
+                }
+            }
             
             // Clear moonshine effect even if player has extra guess (moonshine only affects one turn)
             game.activeEffects = game.activeEffects.filter(e => {
