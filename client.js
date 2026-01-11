@@ -1,4 +1,12 @@
-const socket = io();
+// Configure Socket.io with reconnection settings
+const socket = io({
+    reconnection: true,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
+    reconnectionAttempts: Infinity,
+    timeout: 20000,
+    transports: ['websocket', 'polling']
+});
 
 // Initialize sound manager on user interaction (required for autoplay policy)
 function initSoundOnInteraction() {
@@ -2306,6 +2314,55 @@ socket.on('connect', () => {
     // Register user as online when socket connects (if authenticated)
     registerUserAsOnline();
     console.log('Connected to server');
+    
+    // Hide any connection error messages
+    const connectionErrorEl = document.getElementById('connectionError');
+    if (connectionErrorEl) {
+        connectionErrorEl.style.display = 'none';
+    }
+});
+
+socket.on('disconnect', (reason) => {
+    console.warn('Disconnected from server:', reason);
+    
+    // Show connection status to user
+    if (reason === 'io server disconnect') {
+        // Server disconnected the client, manual reconnection needed
+        console.log('Server disconnected. Reconnecting...');
+        socket.connect();
+    } else if (reason === 'io client disconnect') {
+        // Client disconnected intentionally, don't reconnect
+        console.log('Client disconnected intentionally');
+    } else {
+        // Network error or other issue, Socket.io will auto-reconnect
+        console.log('Connection lost. Attempting to reconnect...');
+    }
+});
+
+socket.on('reconnect', (attemptNumber) => {
+    console.log('Reconnected to server after', attemptNumber, 'attempt(s)');
+    // Register user as online again after reconnection
+    registerUserAsOnline();
+    
+    // Hide any connection error messages
+    const connectionErrorEl = document.getElementById('connectionError');
+    if (connectionErrorEl) {
+        connectionErrorEl.style.display = 'none';
+    }
+});
+
+socket.on('reconnect_attempt', (attemptNumber) => {
+    console.log('Reconnection attempt', attemptNumber);
+});
+
+socket.on('reconnect_error', (error) => {
+    console.error('Reconnection error:', error);
+});
+
+socket.on('reconnect_failed', () => {
+    console.error('Failed to reconnect to server');
+    // Show persistent error message to user
+    showGameMessage('⚠️', 'Connection Lost', 'Unable to reconnect to server. Please refresh the page.');
 });
 
 socket.on('gameCreated', (data) => {

@@ -1892,6 +1892,10 @@ function submitBotGuess(gameId, botId, guess, card) {
         game.cardChains.delete(botId);
     }
     
+    // Find opponent (human) - needed for card effects and notifications
+    const opponent = game.players.find(p => p.id !== botId);
+    if (!opponent) return;
+    
     // Apply card effects using actual card (not fake one)
     if (actualCard && CARD_CONFIG[actualCard.id]) {
         const config = CARD_CONFIG[actualCard.id];
@@ -1942,8 +1946,7 @@ function submitBotGuess(gameId, botId, guess, card) {
             botGames.delete(gameId);
         }
         
-        // Find opponent (human)
-        const opponent = game.players.find(p => p.id !== botId);
+        // Opponent already found earlier in function
         if (!opponent) return;
         
         // First, send the winning guess so it displays on the board
@@ -2027,9 +2030,7 @@ function submitBotGuess(gameId, botId, guess, card) {
         return;
     }
     
-    // Find opponent (human)
-    const opponent = game.players.find(p => p.id !== botId);
-    if (!opponent) return;
+    // Opponent already found earlier in function (before card effects)
     
     // Check active effects
     const shouldHideGuess = game.activeEffects.some(e => 
