@@ -674,13 +674,14 @@ function needsRealCardStorage(cardId) {
 }
 
 // Helper function to send system chat messages
-function sendSystemChatMessage(gameId, message) {
+function sendSystemChatMessage(gameId, message, cardData = null) {
     io.to(gameId).emit('chatMessage', {
         playerId: 'system',
         playerName: 'System',
         message: message,
         timestamp: Date.now(),
-        isSystem: true
+        isSystem: true,
+        cardData: cardData // Include card data if this is a card play notification
     });
 }
 
@@ -1795,9 +1796,9 @@ function processBotTurn(gameId) {
                             playerId: botId
                         });
                         
-                        // Send system notification to chat
+                        // Send system notification to chat with card data
                         const cardName = getCardDisplayName(cardToShow);
-                        sendSystemChatMessage(currentGame.gameId, `${botPlayerForCard.name} played ${cardName}`);
+                        sendSystemChatMessage(currentGame.gameId, `${botPlayerForCard.name} played ${cardName}`, cardToShow);
                     }
                 }
             }
@@ -3389,9 +3390,9 @@ io.on('connection', (socket) => {
                     playerId: socket.id
                 });
                 
-                // Send system notification to chat
+                // Send system notification to chat with card data
                 const cardName = getCardDisplayName(data.card);
-                sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`);
+                sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`, data.card);
             }
             
             // Notify the player they can select another card from all available cards
@@ -3421,9 +3422,9 @@ io.on('connection', (socket) => {
                     playerId: socket.id
                 });
                 
-                // Send system notification to chat
+                // Send system notification to chat with card data
                 const cardName = getCardDisplayName(data.card);
-                sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`);
+                sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`, data.card);
             }
             // 'silent' or 'custom' behaviors don't emit splash here
             
@@ -3707,10 +3708,10 @@ io.on('connection', (socket) => {
             }
         }
         
-        // Send system notification to chat (only once, for visible cards)
+        // Send system notification to chat (only once, for visible cards) with card data
         if (!shouldHideFromOpponent && splashBehavior === 'show') {
             const cardName = getCardDisplayName(cardToShowOpponentForSplash);
-            sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`);
+            sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`, cardToShowOpponentForSplash);
         }
         
         // Clear the card chain and track the last played card
@@ -3875,9 +3876,9 @@ io.on('connection', (socket) => {
                     playerId: socket.id
                 });
                 
-                // Send system notification to chat
+                // Send system notification to chat with card data
                 const cardName = getCardDisplayName(stolenCard);
-                sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`);
+                sendSystemChatMessage(data.gameId, `${player ? player.name : 'Player'} played ${cardName}`, stolenCard);
             }
             
             // Notify the player they can select another card from all available cards

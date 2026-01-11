@@ -4345,7 +4345,7 @@ socket.on('cardPlayed', (data) => {
 socket.on('chatMessage', (data) => {
     // Receive and display chat message
     const isSystemMessage = data.isSystem || data.playerId === 'system';
-    displayChatMessage(data.playerName, data.message, data.timestamp, data.playerId === currentPlayer, isSystemMessage);
+    displayChatMessage(data.playerName, data.message, data.timestamp, data.playerId === currentPlayer, isSystemMessage, data.cardData);
     
     // Play chat message sound (only for messages from others, not system messages)
     if (typeof soundManager !== 'undefined' && data.playerId !== currentPlayer && !isSystemMessage) {
@@ -7458,8 +7458,17 @@ function showCardInfo(card) {
         return;
     }
     
-    cardImage.src = getCardImagePath(card.id);
-    cardImage.alt = card.title || 'Card';
+    // Ensure card has id and title (handle different card data structures)
+    const cardId = card.id || card.metadata?.id;
+    const cardTitle = card.title || card.metadata?.title || 'Card';
+    
+    if (!cardId) {
+        console.error('Card info: Card missing id', card);
+        return;
+    }
+    
+    cardImage.src = getCardImagePath(cardId);
+    cardImage.alt = cardTitle;
     overlay.style.display = 'flex';
     
     // Close on click
@@ -10426,7 +10435,7 @@ if (document.readyState === 'loading') {
 }
 
 // Chat Functions
-function displayChatMessage(playerName, message, timestamp, isOwnMessage, isSystemMessage = false) {
+function displayChatMessage(playerName, message, timestamp, isOwnMessage, isSystemMessage = false, cardData = null) {
     const chatMessages = document.getElementById('chatMessages');
     if (!chatMessages) return;
     
@@ -10437,6 +10446,14 @@ function displayChatMessage(playerName, message, timestamp, isOwnMessage, isSyst
     } else if (isOwnMessage) {
         className += ' own-message';
     }
+    
+    // Add clickable class if this is a card notification
+    if (cardData && isSystemMessage && message.includes('played')) {
+        className += ' chat-message-clickable';
+        messageDiv.dataset.cardId = cardData.id;
+        messageDiv.dataset.hasCard = 'true';
+    }
+    
     messageDiv.className = className;
     
     const time = new Date(timestamp);
@@ -10455,6 +10472,21 @@ function displayChatMessage(playerName, message, timestamp, isOwnMessage, isSyst
         </div>
         <div class="chat-message-text">${escapeHtml(message)}</div>
     `;
+    }
+    
+    // Add click handler if this is a card notification
+    if (cardData && isSystemMessage && message.includes('played')) {
+        messageDiv.style.cursor = 'pointer';
+        messageDiv.title = 'Click to view card info';
+        messageDiv.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Ensure card has required properties for showCardInfo
+            const cardForInfo = {
+                id: cardData.id,
+                title: cardData.title || cardData.metadata?.title || 'Card'
+            };
+            showCardInfo(cardForInfo);
+        });
     }
     
     chatMessages.appendChild(messageDiv);

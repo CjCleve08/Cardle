@@ -6379,6 +6379,29 @@ header h1 {
     opacity: 0.8;
 }
 
+/* Clickable card notification messages */
+.chat-message-clickable {
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-radius: 6px;
+    padding: 4px 8px;
+    margin: 4px 0;
+}
+
+.chat-message-clickable:hover {
+    background: rgba(106, 170, 100, 0.15);
+    opacity: 1;
+}
+
+.chat-message-clickable:hover .chat-message-text {
+    color: #6aaa64;
+    opacity: 1;
+}
+
+.chat-message-clickable .chat-message-text {
+    transition: color 0.2s ease;
+}
+
 .chat-input-container {
     display: flex;
     gap: 8px;
