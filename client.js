@@ -982,6 +982,9 @@ function getDefaultStats() {
         chipPoints: 0, // Starting chip points (rating system)
         winStreak: 0, // Current consecutive wins
         bestWinStreak: 0, // Best win streak achieved
+        consecutiveLosses: 0, // Current consecutive losses
+        achievements: [], // Array of unlocked achievement IDs
+        claimedAchievements: [], // Array of claimed achievement IDs (for chip rewards)
         lastDailyClaim: null // Timestamp of last daily claim (ISO string)
     };
 }
@@ -1026,6 +1029,336 @@ async function getPlayerStats() {
         return getDefaultStats();
     }
 }
+
+// Achievement definitions
+const ACHIEVEMENTS = [
+    {
+        id: 'speed_demon',
+        name: 'Speed Demon',
+        description: 'Win a game in 2 guesses or less',
+        icon: '⚡',
+        check: (gameResult, stats) => gameResult.won && gameResult.guesses <= 2
+    },
+    {
+        id: 'no_a_allowed',
+        name: 'No A Allowed',
+        description: 'Win a game without guessing any word containing "A"',
+        icon: '🚫',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const guesses = gameData?.guesses || [];
+            return guesses.every(guess => !guess || !guess.toUpperCase().includes('A'));
+        }
+    },
+    {
+        id: 'comeback_king',
+        name: 'Comeback King',
+        description: 'Win a game after losing 3 games in a row',
+        icon: '👑',
+        check: (gameResult, stats) => {
+            if (!gameResult.won) return false;
+            // Check if previous consecutive losses were 3 or more
+            // This is checked before stats are updated, so we need to check the previous value
+            // We'll track this differently - check if winStreak is 1 and previous losses were tracked
+            return stats.consecutiveLosses >= 3;
+        }
+    },
+    {
+        id: 'streak_master',
+        name: 'Streak Master',
+        description: 'Achieve a 10 game win streak',
+        icon: '🔥',
+        check: (gameResult, stats) => stats.winStreak >= 10
+    },
+    {
+        id: 'vowel_hater',
+        name: 'Vowel Hater',
+        description: 'Win a game without using any vowels (A, E, I, O, U) in any guess',
+        icon: '🔇',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const guesses = gameData?.guesses || [];
+            const vowels = ['A', 'E', 'I', 'O', 'U'];
+            return guesses.every(guess => {
+                if (!guess) return true;
+                return !vowels.some(vowel => guess.toUpperCase().includes(vowel));
+            });
+        }
+    },
+    {
+        id: 'patience_pays',
+        name: 'Patience Pays',
+        description: 'Win a game using 6 or more guesses',
+        icon: '⏳',
+        check: (gameResult, stats) => gameResult.won && gameResult.guesses >= 6
+    },
+    {
+        id: 'first_win',
+        name: 'First Victory',
+        description: 'Win your first game',
+        icon: '🏆',
+        check: (gameResult, stats) => gameResult.won && stats.wins === 1
+    },
+    {
+        id: 'century_club',
+        name: 'Century Club',
+        description: 'Play 100 games',
+        icon: '💯',
+        check: (gameResult, stats) => stats.gamesPlayed >= 100
+    },
+    {
+        id: 'letter_master',
+        name: 'Letter Master',
+        description: 'Win using only words with unique letters (no repeated letters)',
+        icon: '🔤',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const guesses = gameData?.guesses || [];
+            return guesses.every(guess => {
+                if (!guess) return true;
+                const upper = guess.toUpperCase();
+                return new Set(upper).size === upper.length;
+            });
+        }
+    },
+    {
+        id: 'early_bird',
+        name: 'Early Bird',
+        description: 'Win a game in your first 3 guesses',
+        icon: '🐦',
+        check: (gameResult, stats) => gameResult.won && gameResult.guesses <= 3
+    },
+    {
+        id: 'persistence',
+        name: 'Persistence',
+        description: 'Win a game after 10 or more guesses',
+        icon: '🔨',
+        check: (gameResult, stats) => gameResult.won && gameResult.guesses >= 10
+    },
+    {
+        id: 'winning_percentage',
+        name: 'Winning Percentage',
+        description: 'Achieve a 75% win rate with at least 20 games played',
+        icon: '📊',
+        check: (gameResult, stats) => {
+            if (stats.gamesPlayed < 20) return false;
+            const winRate = (stats.wins / stats.gamesPlayed) * 100;
+            return winRate >= 75;
+        }
+    },
+    {
+        id: 'consistency',
+        name: 'Consistency',
+        description: 'Win 3 games in a row',
+        icon: '🎯',
+        check: (gameResult, stats) => stats.winStreak >= 3
+    },
+    {
+        id: 'veteran',
+        name: 'Veteran',
+        description: 'Play 200 games',
+        icon: '🎖️',
+        check: (gameResult, stats) => stats.gamesPlayed >= 200
+    },
+    {
+        id: 'word_master',
+        name: 'Word Master',
+        description: 'Win 50 games',
+        icon: '📚',
+        check: (gameResult, stats) => stats.wins >= 50
+    },
+    {
+        id: 'dedication',
+        name: 'Dedication',
+        description: 'Play 50 games',
+        icon: '💪',
+        check: (gameResult, stats) => stats.gamesPlayed >= 50
+    },
+    {
+        id: 'lucky_streak',
+        name: 'Lucky Streak',
+        description: 'Achieve a 5 game win streak',
+        icon: '🍀',
+        check: (gameResult, stats) => stats.winStreak >= 5
+    },
+    {
+        id: 'drunk_victory',
+        name: 'Drunk Victory',
+        description: 'Win a game while moonshine effect is active on you',
+        icon: '🍺',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            return activeEffects.some(e => e.type === 'moonshine' && e.target === gameResult.playerId);
+        }
+    },
+    {
+        id: 'amnesia_legend',
+        name: 'Amnesia Legend',
+        description: 'Win a game while amnesia effect is active (all guesses hidden)',
+        icon: '🧠',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            return activeEffects.some(e => e.type === 'amnesia' && e.target === gameResult.playerId);
+        }
+    },
+    {
+        id: 'time_crunch',
+        name: 'Time Crunch',
+        description: 'Win a game while time rush effect is active (20 second timer)',
+        icon: '⏰',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            return activeEffects.some(e => e.type === 'timeRush' && e.target === gameResult.playerId);
+        }
+    },
+    {
+        id: 'blind_faith',
+        name: 'Blind Faith',
+        description: 'Win a game while blind guess effect is active',
+        icon: '👁️‍🗨️',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            return activeEffects.some(e => e.type === 'blindGuess' && e.target === gameResult.playerId);
+        }
+    },
+    {
+        id: 'card_locked_champion',
+        name: 'Card Locked Champion',
+        description: 'Win a game while card locked (unable to play cards)',
+        icon: '🔐',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            return activeEffects.some(e => e.type === 'cardLock' && e.target === gameResult.playerId);
+        }
+    },
+    {
+        id: 'false_feedback_master',
+        name: 'False Feedback Master',
+        description: 'Win a game while false feedback effect is active',
+        icon: '🎭',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            return activeEffects.some(e => e.type === 'falseFeedback' && e.target === gameResult.playerId);
+        }
+    },
+    {
+        id: 'word_scrambled_winner',
+        name: 'Word Scrambled Winner',
+        description: 'Win a game while word scramble effect is active',
+        icon: '🔀',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            return activeEffects.some(e => e.type === 'wordScramble' && e.target === gameResult.playerId);
+        }
+    },
+    {
+        id: 'green_to_grey_warrior',
+        name: 'Green to Grey Warrior',
+        description: 'Win a game while green to grey effect is active',
+        icon: '🔄',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            return activeEffects.some(e => e.type === 'greenToGrey' && e.target === gameResult.playerId);
+        }
+    },
+    {
+        id: 'black_hand_legend',
+        name: 'Black Hand Legend',
+        description: 'Win a game while black hand effect is active (cards flipped)',
+        icon: '🖤',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            return activeEffects.some(e => e.type === 'blackHand' && e.target === gameResult.playerId);
+        }
+    },
+    {
+        id: 'hidden_guess_master',
+        name: 'Hidden Guess Master',
+        description: 'Win a game while your guesses are hidden from opponent',
+        icon: '🔒',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            return activeEffects.some(e => e.type === 'hiddenGuess' && e.target === gameResult.playerId);
+        }
+    },
+    {
+        id: 'perfect_storm',
+        name: 'Perfect Storm',
+        description: 'Win a game while affected by 3 or more negative effects at once',
+        icon: '⚡',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            const negativeEffects = ['moonshine', 'timeRush', 'blindGuess', 'cardLock', 'falseFeedback', 'wordScramble', 'greenToGrey', 'blackHand', 'hiddenGuess'];
+            const playerNegativeEffects = activeEffects.filter(e => 
+                negativeEffects.includes(e.type) && e.target === gameResult.playerId
+            );
+            return playerNegativeEffects.length >= 3;
+        }
+    },
+    {
+        id: 'underdog_victory',
+        name: 'Underdog Victory',
+        description: 'Win a ranked game with fewer chips than your opponent',
+        icon: '🐕',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won || !gameResult.isRanked) return false;
+            // This would need opponent chip data, simplified for now - just check if ranked
+            return gameResult.isRanked;
+        }
+    },
+    {
+        id: 'flawless_victory',
+        name: 'Flawless Victory',
+        description: 'Win a game without being affected by any negative effects',
+        icon: '✨',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const activeEffects = gameData?.activeEffects || [];
+            const negativeEffects = ['moonshine', 'timeRush', 'blindGuess', 'cardLock', 'falseFeedback', 'wordScramble', 'greenToGrey', 'blackHand', 'hiddenGuess', 'amnesia'];
+            const playerNegativeEffects = activeEffects.filter(e => 
+                negativeEffects.includes(e.type) && e.target === gameResult.playerId
+            );
+            return playerNegativeEffects.length === 0;
+        }
+    },
+    {
+        id: 'all_vowels_win',
+        name: 'All Vowels Win',
+        description: 'Win a game using only words that contain all 5 vowels (A, E, I, O, U)',
+        icon: '🔤',
+        check: (gameResult, stats, gameData) => {
+            if (!gameResult.won) return false;
+            const guesses = gameData?.guesses || [];
+            const vowels = ['A', 'E', 'I', 'O', 'U'];
+            return guesses.length > 0 && guesses.every(guess => {
+                if (!guess) return false;
+                const upper = guess.toUpperCase();
+                return vowels.every(vowel => upper.includes(vowel));
+            });
+        }
+    },
+    {
+        id: 'achievement_collector',
+        name: 'Achievement Collector',
+        description: 'Claim your first achievement',
+        icon: '🏅',
+        check: (gameResult, stats, gameData) => {
+            const claimedAchievements = stats.claimedAchievements || [];
+            return claimedAchievements.length >= 1;
+        }
+    }
+];
 
 async function savePlayerStats(stats) {
     // For guests, use localStorage
@@ -1092,6 +1425,15 @@ async function updateStats(gameResult) {
     if (stats.bestWinStreak === undefined || stats.bestWinStreak === null) {
         stats.bestWinStreak = 0;
     }
+    if (stats.consecutiveLosses === undefined || stats.consecutiveLosses === null) {
+        stats.consecutiveLosses = 0;
+    }
+    if (!stats.achievements) {
+        stats.achievements = [];
+    }
+    
+    // Track consecutive losses before updating
+    const previousConsecutiveLosses = stats.consecutiveLosses;
     
     stats.gamesPlayed++;
     
@@ -1103,10 +1445,14 @@ async function updateStats(gameResult) {
         if (stats.winStreak > stats.bestWinStreak) {
             stats.bestWinStreak = stats.winStreak;
         }
+        // Reset consecutive losses on win
+        stats.consecutiveLosses = 0;
     } else {
         stats.losses++;
         // Reset win streak on loss
         stats.winStreak = 0;
+        // Increment consecutive losses
+        stats.consecutiveLosses++;
     }
     
     if (gameResult.guesses > 0) {
@@ -1128,9 +1474,59 @@ async function updateStats(gameResult) {
         }
     }
     
+    // Check for new achievements (before updating consecutive losses for comeback_king)
+    // For comeback_king, we need to check before resetting consecutiveLosses
+    const statsBeforeUpdate = {
+        ...stats,
+        gamesPlayed: stats.gamesPlayed + 1,
+        wins: gameResult.won ? stats.wins + 1 : stats.wins,
+        losses: gameResult.won ? stats.losses : stats.losses + 1,
+        winStreak: gameResult.won ? stats.winStreak + 1 : 0,
+        consecutiveLosses: gameResult.won ? stats.consecutiveLosses : stats.consecutiveLosses + 1
+    };
+    
+    const newAchievements = checkAchievements(gameResult, statsBeforeUpdate, gameResult.gameData || {});
+    if (newAchievements.length > 0) {
+        // Add new achievements to stats
+        newAchievements.forEach(achievementId => {
+            if (!stats.achievements.includes(achievementId)) {
+                stats.achievements.push(achievementId);
+                const achievement = ACHIEVEMENTS.find(a => a.id === achievementId);
+                if (achievement) {
+                    console.log(`🎉 New achievement unlocked: ${achievement.name} - ${achievement.description}`);
+                    // Show notification to user
+                    showGameMessage('🎉', 'Achievement Unlocked!', `${achievement.name}: ${achievement.description}`);
+                }
+            }
+        });
+    }
+    
     await savePlayerStats(stats);
     await updateStatsDisplay();
     await updateRankDisplay();
+    await updateAchievementsDisplay();
+}
+
+function checkAchievements(gameResult, stats, gameData) {
+    const unlocked = [];
+    
+    ACHIEVEMENTS.forEach(achievement => {
+        // Skip if already unlocked
+        if (stats.achievements && stats.achievements.includes(achievement.id)) {
+            return;
+        }
+        
+        // Check if achievement is unlocked
+        try {
+            if (achievement.check(gameResult, stats, gameData)) {
+                unlocked.push(achievement.id);
+            }
+        } catch (error) {
+            console.error(`Error checking achievement ${achievement.id}:`, error);
+        }
+    });
+    
+    return unlocked;
 }
 
 async function updateStatsDisplay() {
@@ -1183,6 +1579,111 @@ async function updateStatsDisplay() {
     updateRankDisplay().catch(error => {
         console.error('Error updating rank display:', error);
     });
+}
+
+async function updateAchievementsDisplay() {
+    const stats = await getPlayerStats();
+    const achievementsGrid = document.getElementById('achievementsGrid');
+    
+    if (!achievementsGrid) return;
+    
+    // Clear existing achievements
+    achievementsGrid.innerHTML = '';
+    
+    const unlockedAchievements = stats.achievements || [];
+    const claimedAchievements = stats.claimedAchievements || [];
+    
+    ACHIEVEMENTS.forEach(achievement => {
+        const isUnlocked = unlockedAchievements.includes(achievement.id);
+        const isClaimed = claimedAchievements.includes(achievement.id);
+        const canClaim = isUnlocked && !isClaimed;
+        
+        const achievementCard = document.createElement('div');
+        achievementCard.className = `achievement-card ${isUnlocked ? 'unlocked' : 'locked'} ${isClaimed ? 'claimed' : ''} ${canClaim ? 'claimable' : ''}`;
+        
+        if (canClaim) {
+            achievementCard.addEventListener('click', async () => {
+                await claimAchievement(achievement.id);
+            });
+            achievementCard.style.cursor = 'pointer';
+        }
+        
+        achievementCard.innerHTML = `
+            <div class="achievement-icon">${isUnlocked ? achievement.icon : '🔒'}</div>
+            <div class="achievement-info">
+                <div class="achievement-name">${achievement.name}</div>
+                <div class="achievement-description">${achievement.description}</div>
+            </div>
+            ${canClaim ? '<div class="achievement-claim-overlay">Claim 10 Chips</div>' : ''}
+        `;
+        
+        achievementsGrid.appendChild(achievementCard);
+    });
+}
+
+async function claimAchievement(achievementId) {
+    if (!currentUser && !isGuestMode) {
+        showGameMessage('⚠️', 'Sign In Required', 'Please sign in to claim achievements');
+        return;
+    }
+    
+    const stats = await getPlayerStats();
+    const claimedAchievements = stats.claimedAchievements || [];
+    
+    // Check if already claimed
+    if (claimedAchievements.includes(achievementId)) {
+        showGameMessage('⚠️', 'Already Claimed', 'This achievement has already been claimed');
+        return;
+    }
+    
+    // Check if achievement is unlocked
+    const unlockedAchievements = stats.achievements || [];
+    if (!unlockedAchievements.includes(achievementId)) {
+        showGameMessage('⚠️', 'Not Unlocked', 'You must unlock this achievement first');
+        return;
+    }
+    
+    // Add to claimed achievements
+    if (!stats.claimedAchievements) {
+        stats.claimedAchievements = [];
+    }
+    stats.claimedAchievements.push(achievementId);
+    
+    // Add 10 chips
+    stats.chipPoints = (stats.chipPoints || 0) + 10;
+    
+    // Save stats
+    await savePlayerStats(stats);
+    
+    // Check for new achievements (like "Achievement Collector" - claiming first achievement)
+    const statsAfterClaim = await getPlayerStats();
+    const newAchievements = checkAchievements(
+        { won: true, guesses: 0, isRanked: false, playerId: currentUser?.uid || null },
+        statsAfterClaim,
+        { guesses: [], isRanked: false, playerId: currentUser?.uid || null, activeEffects: [] }
+    );
+    
+    if (newAchievements.length > 0) {
+        statsAfterClaim.achievements = [...(statsAfterClaim.achievements || []), ...newAchievements];
+        await savePlayerStats(statsAfterClaim);
+        
+        // Show notification for new achievements
+        newAchievements.forEach(newAchievementId => {
+            const newAchievement = ACHIEVEMENTS.find(a => a.id === newAchievementId);
+            if (newAchievement) {
+                showGameMessage('🎉', 'Achievement Unlocked!', `${newAchievement.name} - ${newAchievement.description}`);
+            }
+        });
+    }
+    
+    // Update displays
+    await updateStatsDisplay();
+    await updateAchievementsDisplay();
+    await updateRankDisplay();
+    
+    // Show success message
+    const achievement = ACHIEVEMENTS.find(a => a.id === achievementId);
+    showGameMessage('🎉', 'Achievement Claimed!', `You received 10 chips for ${achievement?.name || 'this achievement'}!`);
 }
 
 // Daily Chip Claim System
@@ -3033,6 +3534,16 @@ socket.on('cardSelected', (data) => {
     if (data.playerId === currentPlayer) {
         selectedCard = data.card;
         
+        // Track card usage for achievements
+        if (data.card && data.card.id) {
+            if (!window.gameCardsPlayed) {
+                window.gameCardsPlayed = [];
+            }
+            if (!window.gameCardsPlayed.includes(data.card.id)) {
+                window.gameCardsPlayed.push(data.card.id);
+            }
+        }
+        
         // Handle Slow Motion card as fallback (primary handler is slowMotionPlayed event)
         // This is a backup in case the server event doesn't fire or arrives late
         // Use a small delay to allow the server event to fire first
@@ -4301,11 +4812,27 @@ socket.on('gameOver', (data) => {
                                 (!won && data.loserGuesses !== undefined) ? data.loserGuesses :
                                 guesses;
             
+            // Prepare game data for achievements
+            const player = gameState?.players?.find(p => p.id === currentPlayer);
+            const playerGuesses = player?.guesses || [];
+            const activeEffects = gameState?.activeEffects || [];
+            
+            const gameData = {
+                guesses: playerGuesses.map(g => g ? g.toUpperCase() : ''),
+                isRanked: true,
+                playerId: currentPlayer,
+                activeEffects: activeEffects
+            };
+            
+            // Reset tracking for next game
+            window.gameCardsPlayed = [];
+            
             updateStats({
                 won: won,
                 guesses: finalGuesses,
                 chipPoints: newChipPoints,  // Use server-calculated chip points (SECURITY: prevents manipulation)
-                isRanked: true  // Explicitly mark as ranked
+                isRanked: true,  // Explicitly mark as ranked
+                gameData: gameData
             }).catch(error => {
                 console.error('Error updating stats:', error);
             });
@@ -4320,11 +4847,27 @@ socket.on('gameOver', (data) => {
             chipPointsChangeEl.classList.remove('chip-points-gain', 'chip-points-loss');
         }
     
+        // Prepare game data for achievements
+        const player = gameState?.players?.find(p => p.id === currentPlayer);
+        const playerGuesses = player?.guesses || [];
+        const activeEffects = gameState?.activeEffects || [];
+        
+        const gameData = {
+            guesses: playerGuesses.map(g => g ? g.toUpperCase() : ''),
+            isRanked: false,
+            playerId: currentPlayer,
+            activeEffects: activeEffects
+        };
+        
+        // Reset tracking for next game
+        window.gameCardsPlayed = [];
+        
         // Update statistics for non-ranked games
     updateStats({
         won: won,
             guesses: guesses,
-            isRanked: false  // Explicitly mark as non-ranked
+            isRanked: false,  // Explicitly mark as non-ranked
+            gameData: gameData
     }).catch(error => {
         console.error('Error updating stats:', error);
     });
@@ -4549,6 +5092,9 @@ async function initializeGame(data) {
         console.log('Spectator mode: Skipping normal game initialization');
         return;
     }
+    
+    // Initialize card tracking for achievements
+    window.gameCardsPlayed = [];
     
     // Initialize tutorial mode if this is a tutorial game
     if (data.isTutorial) {
@@ -8281,6 +8827,10 @@ function switchTab(tabName) {
         // Then update stats display
         updateStatsDisplay().catch(error => {
             console.error('Error loading stats:', error);
+        });
+        // Update achievements display
+        updateAchievementsDisplay().catch(error => {
+            console.error('Error loading achievements:', error);
         });
     }
     
