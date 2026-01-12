@@ -4873,12 +4873,19 @@ socket.on('gameOver', (data) => {
     });
     }
     
-    // Reset rematch button state
+    // Reset rematch button state - hide for private games
     const rematchBtn = document.getElementById('rematchBtn');
     if (rematchBtn) {
-        rematchBtn.disabled = false;
-        rematchBtn.textContent = 'Rematch';
-        rematchBtn.classList.remove('waiting', 'opponent-ready');
+        if (data.isPrivateGame) {
+            // Hide rematch button for private games
+            rematchBtn.style.display = 'none';
+        } else {
+            // Show rematch button for matchmade games
+            rematchBtn.style.display = '';
+            rematchBtn.disabled = false;
+            rematchBtn.textContent = 'Rematch';
+            rematchBtn.classList.remove('waiting', 'opponent-ready');
+        }
     }
 });
 
@@ -8557,10 +8564,22 @@ async function startMatchmaking(isRanked = true) {
     const firebaseUid = currentUser ? currentUser.uid : null;
     const photoURL = window.currentUserPhotoURL || (currentUser ? currentUser.photoURL : null);
     
+    // Get chip points for bot skill matching (ranked games)
+    let chipPoints = null;
     if (isRanked) {
-        socket.emit('findMatch', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL });
+        try {
+            const stats = await getPlayerStats();
+            chipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+        } catch (error) {
+            console.error('Error getting chip points for matchmaking:', error);
+            chipPoints = 0;
+        }
+    }
+    
+    if (isRanked) {
+        socket.emit('findMatch', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL, chipPoints: chipPoints });
     } else {
-        socket.emit('findCasualMatch', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL });
+        socket.emit('findCasualMatch', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL, chipPoints: chipPoints });
     }
 }
 

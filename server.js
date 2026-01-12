@@ -814,29 +814,27 @@ const casualMatchmakingQueue = []; // Casual matchmaking
 const matchmakingTimeouts = new Map(); // socket.id -> timeout
 const casualMatchmakingTimeouts = new Map(); // socket.id -> timeout
 
-// Bot names pool - realistic gaming usernames
+// Bot names pool - realistic gaming usernames (inspired by popular 2024 trends)
 const BOT_NAME_BASES = [
-    'Shadow', 'Night', 'Dark', 'Light', 'Fire', 'Ice', 'Storm', 'Thunder',
+    'Quantum', 'Cyber', 'Neo', 'Pixel', 'Vortex', 'Nova', 'Phantom', 'Specter',
+    'Crimson', 'Blaze', 'Iron', 'Venom', 'Titan', 'Frost', 'Ember', 'Glacier',
+    'Violet', 'Icy', 'Storm', 'Candy', 'Kitty', 'Fluffy', 'Bunny', 'Snuggle',
+    'Shadow', 'Night', 'Dark', 'Light', 'Fire', 'Ice', 'Thunder',
     'Dragon', 'Wolf', 'Eagle', 'Phoenix', 'Tiger', 'Lion', 'Falcon', 'Raven',
     'Blade', 'Sword', 'Arrow', 'Shield', 'Knight', 'Warrior', 'Hunter', 'Ranger',
     'Ghost', 'Demon', 'Angel', 'Spirit', 'Mystic', 'Sage', 'Wizard', 'Mage',
-    'Ninja', 'Samurai', 'Viking', 'Spartan', 'Gladiator', 'Champion', 'Legend', 'Hero',
-    'Pro', 'Elite', 'Master', 'Ace', 'Star', 'King', 'Queen', 'Prince',
-    'Gamer', 'Player', 'Noob', 'Veteran', 'Rookie', 'Expert', 'Novice', 'Pro',
-    'Alpha', 'Beta', 'Omega', 'Delta', 'Gamma', 'Sigma', 'Zeta', 'Nova',
-    'Crimson', 'Azure', 'Emerald', 'Golden', 'Silver', 'Bronze', 'Platinum', 'Diamond',
-    'Swift', 'Fast', 'Quick', 'Rapid', 'Blaze', 'Flash', 'Bolt', 'Speed',
-    'Cool', 'Epic', 'Awesome', 'Sick', 'Dope', 'Rad', 'Lit', 'Fire'
+    'Ninja', 'Samurai', 'Viking', 'Spartan', 'Gladiator', 'Champion', 'Legend', 'Hero'
 ];
 
-// Real first names
+// Real first names (more common gaming usernames)
 const BOT_FIRST_NAMES = [
-    'Nick', 'Alex', 'Jordan', 'Casey', 'Sam', 'Taylor', 'Morgan', 'Riley', 'Jamie',
+    'Alex', 'Jordan', 'Casey', 'Sam', 'Taylor', 'Morgan', 'Riley', 'Jamie',
     'Quinn', 'Avery', 'Blake', 'Cameron', 'Dakota', 'Emery', 'Finley', 'Hayden',
     'Parker', 'River', 'Sage', 'Skylar', 'Chris', 'Mike', 'Tom', 'John', 'Matt',
     'Dan', 'Ben', 'Jake', 'Ryan', 'Kevin', 'Steve', 'Dave', 'Mark', 'Luke',
     'Emma', 'Sarah', 'Jessica', 'Emily', 'Olivia', 'Sophia', 'Mia', 'Isabella',
-    'Ava', 'Charlotte', 'Amelia', 'Harper', 'Evelyn', 'Abigail', 'Ella', 'Lily'
+    'Ava', 'Charlotte', 'Amelia', 'Harper', 'Evelyn', 'Abigail', 'Ella', 'Lily',
+    'Zoe', 'Grace', 'Luna', 'Aria', 'Chloe', 'Layla', 'Nora', 'Hannah'
 ];
 
 // Real last names
@@ -862,12 +860,12 @@ const BOT_SILLY_NAMES = [
 ];
 
 const BOT_NAME_SUFFIXES = [
-    'Pro', 'Master', 'Elite', 'Ace', 'King', 'Queen', 'Lord', 'God',
-    'X', 'XX', '99', '2024', '2023', 'Gamer', 'Player', 'Warrior'
+    'Pro', 'Master', 'Elite', 'Ace', 'King', 'Queen', 'Lord',
+    'X', 'XX', '99', '24', '23', 'Gamer', 'Player', 'Warrior', 'Slayer', 'Killer'
 ];
 
 const BOT_NAME_PREFIXES = [
-    'xX', 'Xx', 'x', 'X', 'The', 'Mr', 'Ms', 'Dr'
+    'xX', 'Xx', 'x', 'X', 'The', 'Mr', 'Ms'
 ];
 
 // Bot games tracking
@@ -1181,21 +1179,21 @@ function getRandomBotName() {
             const num = Math.floor(Math.random() * 99) + 1;
             return truncateTo12(silly + num);
         },
-        // Pattern 10: Gaming base (no numbers, just the word)
+        // Pattern 10: Gaming base (no numbers, just the word) - more common
         () => {
             const base = BOT_NAME_BASES[Math.floor(Math.random() * BOT_NAME_BASES.length)];
             return truncateTo12(base);
         },
-        // Pattern 11: Gaming base + 1-2 digit number
+        // Pattern 11: Gaming base + 1-3 digit number (most common pattern)
         () => {
             const base = BOT_NAME_BASES[Math.floor(Math.random() * BOT_NAME_BASES.length)];
-            const num = Math.floor(Math.random() * 99) + 1;
+            const num = Math.floor(Math.random() * 999) + 1;
             return truncateTo12(base + num);
         },
-        // Pattern 12: Gaming base + underscore + 1-2 digit number
+        // Pattern 12: Gaming base + underscore + 1-3 digit number
         () => {
             const base = BOT_NAME_BASES[Math.floor(Math.random() * BOT_NAME_BASES.length)];
-            const num = Math.floor(Math.random() * 99) + 1;
+            const num = Math.floor(Math.random() * 999) + 1;
             return truncateTo12(base + '_' + num);
         },
         // Pattern 13: Gaming base + suffix (no numbers)
@@ -1203,6 +1201,19 @@ function getRandomBotName() {
             const base = BOT_NAME_BASES[Math.floor(Math.random() * BOT_NAME_BASES.length)];
             const suffix = BOT_NAME_SUFFIXES[Math.floor(Math.random() * BOT_NAME_SUFFIXES.length)];
             return truncateTo12(base + suffix);
+        },
+        // Pattern 18: Two gaming bases combined (e.g., "QuantumNova", "CyberPhantom")
+        () => {
+            const base1 = BOT_NAME_BASES[Math.floor(Math.random() * BOT_NAME_BASES.length)];
+            const base2 = BOT_NAME_BASES[Math.floor(Math.random() * BOT_NAME_BASES.length)];
+            return truncateTo12(base1 + base2);
+        },
+        // Pattern 19: Gaming base + short number + suffix
+        () => {
+            const base = BOT_NAME_BASES[Math.floor(Math.random() * BOT_NAME_BASES.length)];
+            const num = Math.floor(Math.random() * 99) + 1;
+            const suffix = BOT_NAME_SUFFIXES[Math.floor(Math.random() * BOT_NAME_SUFFIXES.length)];
+            return truncateTo12(base + num + suffix);
         },
         // Pattern 14: Short gaming base + short suffix
         () => {
@@ -1251,12 +1262,13 @@ function getRandomBotName() {
 
 // Bot Wordle Solver - filters possible words based on feedback
 class BotWordleSolver {
-    constructor(wordList) {
+    constructor(wordList, skillLevel = 0.5) {
         this.wordList = [...wordList]; // Copy the word list
         this.possibleWords = [...wordList];
         this.knownCorrect = new Array(5).fill(null); // Position -> letter
         this.knownPresent = {}; // Letter -> set of positions it's NOT in
         this.knownAbsent = new Set(); // Letters that aren't in the word
+        this.skillLevel = Math.max(0, Math.min(1, skillLevel)); // 0.0 (bad) to 1.0 (perfect)
     }
     
     updateKnowledge(guess, feedback) {
@@ -1338,13 +1350,13 @@ class BotWordleSolver {
             return this.wordList[Math.floor(Math.random() * this.wordList.length)];
         }
         
-        // Make bot less perfect - add more randomness and mistakes
-        // Sometimes pick a suboptimal word even when we know the answer
+        // Skill-based mistakes: lower skill = more mistakes
+        const mistakeChance = 1 - this.skillLevel; // 0.0 (perfect) to 1.0 (always mistakes)
         const randomFactor = Math.random();
         
-        // If only one possibility, still sometimes pick wrong word (10% chance)
+        // If only one possibility, sometimes pick wrong word (based on skill)
         if (this.possibleWords.length === 1) {
-            if (randomFactor < 0.1) {
+            if (randomFactor < mistakeChance * 0.3) {
                 // Pick a random word that matches some known letters (wrong answer)
                 const partialMatches = this.wordList.filter(word => {
                     let matches = 0;
@@ -1362,8 +1374,8 @@ class BotWordleSolver {
             return this.possibleWords[0];
         }
         
-        // If very few possibilities (2-3), sometimes pick wrong one (20% chance)
-        if (this.possibleWords.length <= 3 && randomFactor < 0.2) {
+        // If very few possibilities (2-3), sometimes pick wrong one (based on skill)
+        if (this.possibleWords.length <= 3 && randomFactor < mistakeChance * 0.4) {
             // Pick randomly from all words that share some letters
             const similarWords = this.wordList.filter(word => {
                 if (this.possibleWords.includes(word)) return false;
@@ -1380,13 +1392,14 @@ class BotWordleSolver {
             }
         }
         
-        // Otherwise, pick randomly from a larger pool of candidates (makes it less optimal)
-        // Instead of top 5, pick from top 10-20% of remaining words
+        // Skill-based candidate pool: higher skill = smaller pool (more optimal)
+        // Low skill (0.0): 30% of words, High skill (1.0): 5% of words
+        const poolPercentage = 0.30 - (this.skillLevel * 0.25);
         const candidatePoolSize = Math.max(
-            3, 
+            1, 
             Math.min(
-                Math.ceil(this.possibleWords.length * 0.15), // 15% of remaining words
-                10
+                Math.ceil(this.possibleWords.length * poolPercentage),
+                Math.max(3, Math.ceil(this.possibleWords.length * 0.15))
             )
         );
         const candidates = this.possibleWords
@@ -1487,13 +1500,28 @@ function botSelectCard(game, botId, botHand) {
 }
 
 // Create a bot game
-function createBotGame(humanSocket, humanName, firebaseUid = null, isTutorial = false, isRanked = false) {
+function createBotGame(humanSocket, humanName, firebaseUid = null, isTutorial = false, isRanked = false, humanChipPoints = null) {
     const botId = 'BOT_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
     const botName = isTutorial ? 'Bot' : getRandomBotName();
     const gameId = generateGameId();
     // Use a simple word for tutorial (common, easy words)
     const tutorialWords = ['APPLE', 'HEART', 'MUSIC', 'WATER', 'LIGHT', 'DREAM', 'HAPPY', 'SMILE'];
     const word = isTutorial ? tutorialWords[Math.floor(Math.random() * tutorialWords.length)] : getRandomWord();
+    
+    // Determine bot skill level based on chips (for ranked games) or random (for casual)
+    let botSkillLevel = 0.5; // Default medium skill
+    if (isRanked && humanChipPoints !== null && humanChipPoints !== undefined) {
+        // Match bot skill to human's chip level
+        // Scale: 0 chips = 0.2 skill, 1000 chips = 0.8 skill, 2000+ chips = 0.95 skill
+        const normalizedChips = Math.min(humanChipPoints, 2000);
+        botSkillLevel = 0.2 + (normalizedChips / 2000) * 0.75;
+        // Add some variation (±10%) so bots aren't identical
+        botSkillLevel += (Math.random() - 0.5) * 0.2;
+        botSkillLevel = Math.max(0.1, Math.min(0.95, botSkillLevel));
+    } else if (!isTutorial) {
+        // Casual games: random skill between 0.3 and 0.7
+        botSkillLevel = 0.3 + Math.random() * 0.4;
+    }
     
     // Create game state
     const game = {
@@ -1532,8 +1560,8 @@ function createBotGame(humanSocket, humanName, firebaseUid = null, isTutorial = 
     players.set(humanSocket.id, { gameId: gameId, playerId: humanSocket.id });
     players.set(botId, { gameId: gameId, playerId: botId, isBot: true });
     
-    // Initialize bot solver
-    const botSolver = new BotWordleSolver(WORDS);
+    // Initialize bot solver with skill level
+    const botSolver = new BotWordleSolver(WORDS, botSkillLevel);
     
     // Join human to game room
     humanSocket.join(gameId);
@@ -1820,8 +1848,14 @@ function processBotTurn(gameId) {
             let extraThinkTime = 0;
             
             if (botPlayer.guesses.length === 0) {
-                // First guess: use a common starter word
-                const starterWords = ['APPLE', 'ARISE', 'AUDIO', 'EARTH', 'STARE', 'CRANE', 'SLATE', 'TRACE'];
+                // First guess: use a variety of common starter words
+                const starterWords = [
+                    'APPLE', 'ARISE', 'AUDIO', 'EARTH', 'STARE', 'CRANE', 'SLATE', 'TRACE',
+                    'ADIEU', 'OUIJA', 'RAISE', 'ROATE', 'SOARE', 'STALE', 'TEARS', 'LATER',
+                    'ALERT', 'ALTER', 'IRATE', 'ORATE', 'STORE', 'STONE', 'ATONE', 'ALONE',
+                    'ALOFT', 'ABOUT', 'ADULT', 'AGENT', 'AGREE', 'AHEAD', 'ALIEN', 'ALIGN',
+                    'ALIKE', 'ALIVE', 'ALLOW', 'ALLOY', 'ALONE', 'ALONG', 'ALOUD', 'ALPHA'
+                ];
                 guess = starterWords[Math.floor(Math.random() * starterWords.length)];
             } else {
                 // Use solver to get best guess (now less optimal)
@@ -1997,7 +2031,8 @@ function submitBotGuess(gameId, botId, guess, card) {
                 winner: botId,
                 word: game.word,
                 gameId: gameId,
-                isRanked: game.isRanked || false
+                isRanked: game.isRanked || false,
+                isPrivateGame: game.isPrivateGame || false
             };
             
             // Calculate chip changes if ranked game (bot wins, human loses)
@@ -2337,7 +2372,8 @@ io.on('connection', (socket) => {
             matchmakingTimeouts.delete(socket.id);
             
             console.log(`No match found for ${data.playerName}, creating bot game...`);
-            createBotGame(socket, data.playerName, queuedPlayer.firebaseUid || null, false, true); // isTutorial=false, isRanked=true
+            const humanChipPoints = data.chipPoints !== undefined ? data.chipPoints : null;
+            createBotGame(socket, data.playerName, queuedPlayer.firebaseUid || null, false, true, humanChipPoints); // isTutorial=false, isRanked=true
         }, 20000); // 20 second timeout
         
         matchmakingTimeouts.set(socket.id, botTimeout);
@@ -2523,7 +2559,8 @@ io.on('connection', (socket) => {
             casualMatchmakingTimeouts.delete(socket.id);
             
             console.log(`No casual match found for ${data.playerName}, creating bot game...`);
-            createBotGame(socket, data.playerName, queuedPlayer.firebaseUid || null, false, false); // isTutorial=false, isRanked=false
+            const humanChipPoints = data.chipPoints !== undefined ? data.chipPoints : null;
+            createBotGame(socket, data.playerName, queuedPlayer.firebaseUid || null, false, false, humanChipPoints); // isTutorial=false, isRanked=false
         }, 20000); // 20 second timeout
         
         casualMatchmakingTimeouts.set(socket.id, botTimeout);
@@ -2745,7 +2782,8 @@ io.on('connection', (socket) => {
                 gameMode: gameMode,
                 startingPlayer: startingPlayer
             },
-            playerWords: new Map() // For duelDeck mode: playerId -> word
+            playerWords: new Map(), // For duelDeck mode: playerId -> word
+            isPrivateGame: true // Mark as private game (created via createGame, not matchmaking)
         };
         
         games.set(gameId, game);
@@ -4626,7 +4664,8 @@ io.on('connection', (socket) => {
                 ...wordData,
                 gameId: data.gameId,
                 isRanked: game.isRanked || false,
-                gameMode: game.settings?.gameMode || 'classic'
+                gameMode: game.settings?.gameMode || 'classic',
+                isPrivateGame: game.isPrivateGame || false
             };
             
             // Send separate gameOver data to each player in duel deck mode
@@ -4646,7 +4685,8 @@ io.on('connection', (socket) => {
                     opponentWord: winnerWord,
                     gameId: data.gameId,
                     isRanked: game.isRanked || false,
-                    gameMode: 'duelDeck'
+                    gameMode: 'duelDeck',
+                    isPrivateGame: game.isPrivateGame || false
                 };
                 
                 // Calculate chip changes for ranked games
@@ -5255,6 +5295,7 @@ io.on('connection', (socket) => {
                             gameId: game.gameId,
                             disconnected: true,
                             chipChange: chipChangeWinner,
+                            isPrivateGame: game.isPrivateGame || false,
                             guesses: remainingPlayerGuesses,
                             gameMode: game.settings?.gameMode || 'classic'
                         });
