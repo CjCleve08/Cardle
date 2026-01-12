@@ -2711,12 +2711,21 @@ io.on('connection', (socket) => {
             }
         }
         
+        // Get game settings from data (defaults if not provided)
+        const settings = data.settings || {};
+        const turnTimeLimit = settings.turnTimeLimit || 60; // Default 60 seconds
+        const gameMode = settings.gameMode || 'classic';
+        const startingPlayer = settings.startingPlayer || 'random';
+        
+        console.log('createGame - Received settings:', settings);
+        console.log('createGame - gameMode:', gameMode);
+        
         const gameId = generateGameId();
         const word = getRandomWord();
         
         const game = {
             gameId: gameId,
-            word: word,
+            word: word, // For classic mode, this is the shared word. For duelDeck mode, this is unused.
             players: [{
                 id: socket.id,
                 name: data.playerName,
@@ -2725,12 +2734,18 @@ io.on('connection', (socket) => {
                 guesses: [],
                 row: 0
             }],
-            currentTurn: socket.id,
+            currentTurn: socket.id, // Will be set properly when second player joins based on startingPlayer setting
             activeEffects: [],
             status: 'waiting',
             totalGuesses: 0,  // Shared counter for board rows
             lastPlayedCards: new Map(),  // Track last card played by each player
-            mirroredCards: new Map()  // Track what card each Card Mirror actually mirrored (playerId -> card)
+            mirroredCards: new Map(),  // Track what card each Card Mirror actually mirrored (playerId -> card)
+            settings: {
+                turnTimeLimit: turnTimeLimit,
+                gameMode: gameMode,
+                startingPlayer: startingPlayer
+            },
+            playerWords: new Map() // For duelDeck mode: playerId -> word
         };
         
         games.set(gameId, game);
@@ -2743,8 +2758,103 @@ io.on('connection', (socket) => {
         }
         
         socket.join(gameId);
-        socket.emit('gameCreated', { gameId: gameId, playerId: socket.id });
+        socket.emit('gameCreated', { gameId: gameId, playerId: socket.id, gameMode: gameMode || 'classic' });
         socket.emit('playerJoined', { players: game.players });
+    });
+    
+    socket.on('submitCustomWord', (data) => {
+        const game = games.get(data.gameId);
+        if (!game) {
+            socket.emit('error', { message: 'Game not found' });
+            return;
+        }
+        
+        const player = game.players.find(p => p.id === socket.id);
+        if (!player) {
+            socket.emit('error', { message: 'Player not found in game' });
+            return;
+        }
+        
+        // Only allow in duelDeck mode
+        console.log('submitCustomWord check - game.settings:', game.settings);
+        console.log('submitCustomWord check - gameMode:', game.settings?.gameMode);
+        if (!game.settings || game.settings.gameMode !== 'duelDeck') {
+            console.error('Duel deck mode check failed. Settings:', game.settings, 'GameMode:', game.settings?.gameMode);
+            socket.emit('error', { message: 'Duel deck mode not enabled. Please make sure you selected Duel Deck mode when creating the game.' });
+            return;
+        }
+        
+        const word = data.word.toUpperCase();
+        
+        // Validate word format (any 5 letters, no dictionary check)
+        if (word.length !== 5 || !/^[A-Z]+$/.test(word)) {
+            socket.emit('error', { message: 'Invalid word. Must be 5 letters.' });
+            return;
+        }
+        
+        // No dictionary validation - allow any 5-letter word
+        
+        // Initialize playerWords map if it doesn't exist
+        if (!game.playerWords) {
+            game.playerWords = new Map();
+        }
+        
+        // Store player's word
+        game.playerWords.set(socket.id, word);
+        console.log(`Player ${socket.id} (${player.name}) submitted custom word: ${word}`);
+        
+        // Check if both players have submitted their words
+        if (game.players.length === 2 && game.playerWords.size === 2) {
+            // Both players have submitted words, start the game
+            // Set starting player based on settings
+            if (game.settings && game.settings.startingPlayer) {
+                if (game.settings.startingPlayer === 'creator') {
+                    game.currentTurn = game.players[0].id;
+                } else if (game.settings.startingPlayer === 'joiner') {
+                    game.currentTurn = game.players[1].id;
+                } else {
+                    game.currentTurn = game.players[Math.random() > 0.5 ? 0 : 1].id;
+                }
+            } else {
+                game.currentTurn = game.players[Math.random() > 0.5 ? 0 : 1].id;
+            }
+            
+            setTimeout(() => {
+                game.status = 'playing';
+                const gameStateForClients = {
+                    gameId: game.gameId,
+                    currentTurn: game.currentTurn,
+                    players: game.players.map(p => ({
+                        id: p.id,
+                        name: p.name,
+                        firebaseUid: p.firebaseUid || null,
+                        photoURL: p.photoURL || null,
+                        guesses: p.guesses || [],
+                        row: p.row || 0,
+                        isBot: p.isBot || false
+                    })),
+                    status: game.status,
+                    activeEffects: game.activeEffects,
+                    totalGuesses: game.totalGuesses,
+                    isRanked: game.isRanked || false,
+                    settings: game.settings || null
+                };
+                
+                game.players.forEach(player => {
+                    if (player.isBot) return;
+                    const playerSocket = io.sockets.sockets.get(player.id);
+                    if (playerSocket) {
+                        playerSocket.emit('gameStarted', {
+                            ...gameStateForClients,
+                            yourPlayerId: player.id
+                        });
+                    }
+                });
+            }, 1000);
+        } else {
+            // Notify player that their word was accepted and they're waiting for opponent
+            socket.emit('customWordAccepted', { gameId: data.gameId });
+        }
     });
     
     socket.on('joinGame', (data) => {
@@ -2799,11 +2909,38 @@ io.on('connection', (socket) => {
         socket.join(data.gameId);
         
         // Send the player their ID when they join
-        socket.emit('playerJoinedGame', { playerId: socket.id, gameId: data.gameId });
+        socket.emit('playerJoinedGame', { playerId: socket.id, gameId: data.gameId, gameMode: game.settings?.gameMode || 'classic' });
+        
+        // If duel deck mode, wait for both players to submit words before starting
+        if (game.settings && game.settings.gameMode === 'duelDeck') {
+            // Don't start game automatically - wait for words
+            return;
+        }
         
         io.to(data.gameId).emit('playerJoined', { players: game.players });
         
+        // If duel deck mode, wait for both players to submit words before starting
+        if (game.settings && game.settings.gameMode === 'duelDeck') {
+            // Don't start game automatically - wait for words
+            return;
+        }
+        
         if (game.players.length === 2) {
+            // Set starting player based on settings
+            if (game.settings && game.settings.startingPlayer) {
+                if (game.settings.startingPlayer === 'creator') {
+                    game.currentTurn = game.players[0].id; // First player (creator)
+                } else if (game.settings.startingPlayer === 'joiner') {
+                    game.currentTurn = game.players[1].id; // Second player (joiner)
+                } else {
+                    // Random (default)
+                    game.currentTurn = game.players[Math.random() > 0.5 ? 0 : 1].id;
+                }
+            } else {
+                // Default to random if no settings
+                game.currentTurn = game.players[Math.random() > 0.5 ? 0 : 1].id;
+            }
+            
             setTimeout(() => {
                 console.log('Game starting. Current turn:', game.currentTurn);
                 console.log('Players with firebaseUid:', game.players.map(p => ({ id: p.id, name: p.name, firebaseUid: p.firebaseUid })));
@@ -2822,7 +2959,8 @@ io.on('connection', (socket) => {
                     status: game.status,
                     activeEffects: game.activeEffects,
                     totalGuesses: game.totalGuesses,
-                    isRanked: game.isRanked || false  // Private games are not ranked
+                    isRanked: game.isRanked || false,  // Private games are not ranked
+                    settings: game.settings || null  // Include game settings
                 };
                 // Send gameStarted to all players, but include each player's own ID
                 game.status = 'playing';
@@ -4267,12 +4405,26 @@ io.on('connection', (socket) => {
             return;
         }
         
-        // Calculate feedback (always store real feedback)
-        const realFeedback = calculateFeedback(guess, game.word);
-        
         // Find opponent
         const opponent = game.players.find(p => p.id !== socket.id);
         if (!opponent) return;
+        
+        // Determine target word based on game mode
+        let targetWord;
+        if (game.settings && game.settings.gameMode === 'duelDeck') {
+            // In duel deck mode, player guesses opponent's word
+            targetWord = game.playerWords?.get(opponent.id);
+            if (!targetWord) {
+                socket.emit('error', { message: 'Opponent has not submitted their word yet' });
+                return;
+            }
+        } else {
+            // Classic mode: both players guess the same word
+            targetWord = game.word;
+        }
+        
+        // Calculate feedback (always store real feedback)
+        const realFeedback = calculateFeedback(guess, targetWord);
         
         // Store guess with real feedback - use shared row counter for board display
         const boardRow = game.totalGuesses;
@@ -4338,15 +4490,16 @@ io.on('connection', (socket) => {
             console.log('Warning: Card not found in CARD_CONFIG:', actualCard.id);
         }
         
-        // Check for Rem-Job instant win (1% chance)
-        if (game.remJobInstantWin === socket.id) {
+        // Check for Rem-Job instant win (1% chance) - only in classic mode
+        if (game.remJobInstantWin === socket.id && (!game.settings || game.settings.gameMode !== 'duelDeck')) {
             // Rem-Job triggered instant win - treat this guess as the winning word
             game.word = guess;
             game.remJobInstantWin = null; // Clear flag
         }
         
         // Check for win
-        if (guess === game.word) {
+        const isWin = guess === targetWord;
+        if (isWin) {
             game.status = 'finished';
             
             // Clean up bot game if it's a bot game
@@ -4405,10 +4558,37 @@ io.on('connection', (socket) => {
                     e.type === 'falseFeedback' && e.target === socket.id && !e.used
                 );
                 
-                let opponentFeedback = shouldHideFeedback ? 
-                    ['absent', 'absent', 'absent', 'absent', 'absent'] : realFeedback;
-                if (falseFeedbackActive) {
-                    opponentFeedback = applyCardEffect(realFeedback, { id: 'falseFeedback' }, true);
+                // In duel deck mode, opponent should see feedback comparing the guess to THEIR target word (the guesser's word)
+                const isDuelDeckMode = game.settings && game.settings.gameMode === 'duelDeck';
+                let opponentFeedback;
+                
+                if (isDuelDeckMode) {
+                    // In duel deck mode, opponent's target word is the guesser's word (what opponent is trying to guess)
+                    const opponentTargetWord = game.playerWords?.get(socket.id);
+                    if (opponentTargetWord) {
+                        // Calculate feedback comparing the winning guess to opponent's target word (the guesser's word)
+                        const opponentTargetFeedback = calculateFeedback(guess, opponentTargetWord);
+                        console.log(`Duel deck mode (win): Opponent (${opponent.id}) sees feedback for guesser's (${socket.id}) guess "${guess}" vs opponent's target "${opponentTargetWord}":`, opponentTargetFeedback);
+                        
+                        if (shouldHideFeedback) {
+                            opponentFeedback = ['absent', 'absent', 'absent', 'absent', 'absent'];
+                        } else if (falseFeedbackActive) {
+                            opponentFeedback = applyCardEffect(opponentTargetFeedback, { id: 'falseFeedback' }, true);
+                        } else {
+                            opponentFeedback = opponentTargetFeedback;
+                        }
+                    } else {
+                        opponentFeedback = ['absent', 'absent', 'absent', 'absent', 'absent'];
+                    }
+                } else {
+                    // Classic mode: both players guess the same word
+                    if (shouldHideFeedback) {
+                        opponentFeedback = ['absent', 'absent', 'absent', 'absent', 'absent'];
+                    } else if (falseFeedbackActive) {
+                        opponentFeedback = applyCardEffect(realFeedback, { id: 'falseFeedback' }, true);
+                    } else {
+                        opponentFeedback = realFeedback;
+                    }
                 }
                 
                 opponentSocket.emit('guessSubmitted', {
@@ -4429,12 +4609,84 @@ io.on('connection', (socket) => {
             const loserGuesses = opponent.guesses ? opponent.guesses.length : 0;
             
             // Prepare gameOver data with chip calculations
+            // In duel deck mode, send each player their opponent's word (the word they were trying to guess)
+            let wordData = { word: game.word };
+            if (game.settings && game.settings.gameMode === 'duelDeck') {
+                const winnerWord = game.playerWords?.get(socket.id);
+                const loserWord = game.playerWords?.get(opponent.id);
+                // For winner: show opponent's word (what they were trying to guess)
+                // For loser: show opponent's word (what they were trying to guess)
+                wordData = {
+                    opponentWord: loserWord // The word the winner was trying to guess (loser's word)
+                };
+            }
+            
             const gameOverData = {
                 winner: socket.id,
-                word: game.word,
+                ...wordData,
                 gameId: data.gameId,
-                isRanked: game.isRanked || false
+                isRanked: game.isRanked || false,
+                gameMode: game.settings?.gameMode || 'classic'
             };
+            
+            // Send separate gameOver data to each player in duel deck mode
+            if (game.settings && game.settings.gameMode === 'duelDeck') {
+                const winnerWord = game.playerWords?.get(socket.id);
+                const loserWord = game.playerWords?.get(opponent.id);
+                
+                // Winner sees loser's word (what they were trying to guess)
+                const winnerGameOverData = {
+                    ...gameOverData,
+                    opponentWord: loserWord
+                };
+                
+                // Loser sees winner's word (what they were trying to guess)
+                const loserGameOverData = {
+                    winner: socket.id,
+                    opponentWord: winnerWord,
+                    gameId: data.gameId,
+                    isRanked: game.isRanked || false,
+                    gameMode: 'duelDeck'
+                };
+                
+                // Calculate chip changes for ranked games
+                if (game.isRanked) {
+                    const winnerGuesses = player.guesses ? player.guesses.length : 0;
+                    const loserGuesses = opponent.guesses ? opponent.guesses.length : 0;
+                    
+                    let winnerChipGain = 20;
+                    if (winnerGuesses > 0 && winnerGuesses <= 6) {
+                        winnerChipGain += (7 - winnerGuesses) * 5;
+                    }
+                    const loserChipLoss = -15;
+                    
+                    winnerGameOverData.winnerChipChange = winnerChipGain;
+                    winnerGameOverData.loserChipChange = loserChipLoss;
+                    winnerGameOverData.winnerGuesses = winnerGuesses;
+                    winnerGameOverData.loserGuesses = loserGuesses;
+                    
+                    loserGameOverData.winnerChipChange = winnerChipGain;
+                    loserGameOverData.loserChipChange = loserChipLoss;
+                    loserGameOverData.winnerGuesses = winnerGuesses;
+                    loserGameOverData.loserGuesses = loserGuesses;
+                }
+                
+                // Send to each player separately
+                socket.emit('gameOver', winnerGameOverData);
+                if (opponentSocket) {
+                    opponentSocket.emit('gameOver', loserGameOverData);
+                }
+                
+                // Clean up user-to-game tracking
+                game.players.forEach(player => {
+                    if (player.firebaseUid) {
+                        userToGame.delete(player.firebaseUid);
+                    }
+                    players.delete(player.id);
+                });
+                
+                return; // Exit early, don't send to all players
+            }
             
             // Calculate chip changes if ranked game
             if (game.isRanked) {
@@ -4576,16 +4828,45 @@ io.on('connection', (socket) => {
         const opponentSocket = io.sockets.sockets.get(opponent.id);
         if (opponentSocket) {
             let opponentFeedback = null;
-            if (shouldHideFeedback) {
-                // Hidden feedback: show all grey (absent) for opponent, but guess is visible
-                opponentFeedback = ['absent', 'absent', 'absent', 'absent', 'absent'];
-            } else if (falseFeedbackActive && falseFeedback) {
-                // False feedback: show modified feedback to opponent
-                opponentFeedback = falseFeedback;
-                console.log('Sending false feedback to opponent. Real was:', realFeedback, 'Sending:', opponentFeedback);
+            
+            // In duel deck mode, opponent should see feedback comparing the guess to THEIR target word (the guesser's word)
+            const isCustomWordMode = game.settings && game.settings.gameMode === 'duelDeck';
+            let opponentTargetWord = null;
+            
+            if (isCustomWordMode) {
+                // In duel deck mode, opponent's target word is the guesser's word (what opponent is trying to guess)
+                // The opponent is trying to guess the guesser's word, so we compare the guess to the opponent's target word (which is the guesser's word)
+                opponentTargetWord = game.playerWords?.get(socket.id); // Guesser's word is what opponent is trying to guess
+                if (opponentTargetWord) {
+                    // Calculate feedback comparing the guess to opponent's target word (the guesser's word)
+                    const opponentTargetFeedback = calculateFeedback(guess, opponentTargetWord);
+                    console.log(`Duel deck mode: Opponent (${opponent.id}) sees feedback for guesser's (${socket.id}) guess "${guess}" vs opponent's target "${opponentTargetWord}":`, opponentTargetFeedback);
+                    
+                    if (shouldHideFeedback) {
+                        opponentFeedback = ['absent', 'absent', 'absent', 'absent', 'absent'];
+                    } else if (falseFeedbackActive && falseFeedback) {
+                        // Apply false feedback to the opponent's target feedback
+                        opponentFeedback = applyCardEffect(opponentTargetFeedback, { id: 'falseFeedback' }, true);
+                    } else {
+                        opponentFeedback = opponentTargetFeedback;
+                    }
+                } else {
+                    // Fallback if word not found
+                    opponentFeedback = ['absent', 'absent', 'absent', 'absent', 'absent'];
+                }
             } else {
-                // Normal feedback
-                opponentFeedback = realFeedback;
+                // Classic mode: both players guess the same word, so feedback is the same
+                if (shouldHideFeedback) {
+                    // Hidden feedback: show all grey (absent) for opponent, but guess is visible
+                    opponentFeedback = ['absent', 'absent', 'absent', 'absent', 'absent'];
+                } else if (falseFeedbackActive && falseFeedback) {
+                    // False feedback: show modified feedback to opponent
+                    opponentFeedback = falseFeedback;
+                    console.log('Sending false feedback to opponent. Real was:', realFeedback, 'Sending:', opponentFeedback);
+                } else {
+                    // Normal feedback
+                    opponentFeedback = realFeedback;
+                }
             }
             
             // Only mark as hidden if the guess itself is hidden, not if just feedback is hidden
@@ -4959,13 +5240,23 @@ io.on('connection', (socket) => {
                         }
                         
                         console.log(`Disconnect handler: game.isRanked=${game.isRanked}, sending chipChange=${chipChangeWinner} to player ${remainingPlayer.id}`);
+                        // Handle duel deck mode for disconnect
+                        let disconnectWordData = { word: game.word };
+                        if (game.settings && game.settings.gameMode === 'duelDeck') {
+                            const disconnectedWord = game.playerWords?.get(socket.id);
+                            disconnectWordData = {
+                                opponentWord: disconnectedWord // The word the remaining player was trying to guess
+                            };
+                        }
+                        
                         remainingSocket.emit('gameOver', {
                             winner: remainingPlayer.id,
-                            word: game.word,
+                            ...disconnectWordData,
                             gameId: game.gameId,
                             disconnected: true,
                             chipChange: chipChangeWinner,
-                            guesses: remainingPlayerGuesses
+                            guesses: remainingPlayerGuesses,
+                            gameMode: game.settings?.gameMode || 'classic'
                         });
                     } else {
                         console.error(`Could not find socket for remaining player ${remainingPlayer.id}`);

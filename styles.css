@@ -4212,6 +4212,7 @@ header h1 {
     align-items: center;
     gap: 10px;
     margin-bottom: 8px;
+    position: relative;
 }
 
 .comment-author-avatar {
@@ -4246,6 +4247,124 @@ header h1 {
     line-height: 1.6;
     white-space: pre-wrap;
     word-wrap: break-word;
+    margin-bottom: 8px;
+}
+
+.comment-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.comment-reply-btn {
+    background: transparent;
+    border: none;
+    color: #6aaa64;
+    font-size: 0.85rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+.comment-reply-btn:hover {
+    background: rgba(106, 170, 100, 0.1);
+    color: #7aba74;
+}
+
+.comment-view-replies-btn {
+    background: transparent;
+    border: none;
+    color: #818384;
+    font-size: 0.85rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.comment-view-replies-btn:hover {
+    background: rgba(58, 58, 60, 0.3);
+    color: #d7dadc;
+}
+
+.view-replies-icon {
+    font-size: 0.75rem;
+    transition: transform 0.2s ease;
+}
+
+.comment-delete-btn {
+    background: transparent;
+    border: none;
+    color: #818384;
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    margin-left: auto;
+}
+
+.comment-delete-btn:hover {
+    background: rgba(255, 59, 48, 0.1);
+    color: #ff3b30;
+}
+
+.comment-replies {
+    margin-top: 12px;
+    margin-left: 20px;
+    padding-left: 20px;
+    border-left: 2px solid rgba(58, 58, 60, 0.5);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.comment-reply {
+    margin-left: 0;
+}
+
+.reply-input-container {
+    margin-top: 12px;
+    padding: 12px;
+    background: rgba(26, 26, 27, 0.5);
+    border-radius: 8px;
+    border: 1px solid rgba(58, 58, 60, 0.4);
+}
+
+.reply-input-field {
+    width: 100%;
+    padding: 10px 12px;
+    background: #1a1a1b;
+    border: 1.5px solid #3a3a3c;
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 0.9rem;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 60px;
+    margin-bottom: 10px;
+    transition: all 0.2s ease;
+}
+
+.reply-input-field:focus {
+    outline: none;
+    border-color: #6aaa64;
+    background: #1f1f20;
+    box-shadow: 0 0 0 3px rgba(106, 170, 100, 0.1);
+}
+
+.reply-input-field::placeholder {
+    color: #565758;
+}
+
+.reply-input-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
 }
 
 .comment-input-section {
@@ -7711,5 +7830,308 @@ header h1 {
     
     .friend-stat-value {
         font-size: 1.5rem;
+    }
+}
+
+/* Game Settings Screen */
+#gameSettings.screen {
+    display: none;
+    background: #121213;
+    padding: 0;
+    overflow-y: auto;
+    position: relative;
+    z-index: 1;
+}
+
+#gameSettings.screen.active {
+    display: flex;
+    flex-direction: column;
+}
+
+.game-settings-container {
+    background: linear-gradient(145deg, #1a1a1b, #2a2a2b);
+    border: none;
+    border-radius: 0;
+    width: 100%;
+    height: 100%;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: none;
+    animation: modalSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    overflow: hidden;
+}
+
+.game-settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 30px 40px;
+    border-bottom: 2px solid #3a3a3c;
+    background: linear-gradient(135deg, #2a2a2b, #1a1a1b);
+    flex-shrink: 0;
+}
+
+.game-settings-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0;
+    letter-spacing: 0.05em;
+}
+
+.game-settings-content {
+    padding: 40px;
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.settings-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.settings-label-text {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.settings-label-hint {
+    font-size: 0.85rem;
+    color: #818384;
+    font-style: italic;
+}
+
+.settings-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.settings-option-btn {
+    padding: 12px 20px;
+    background: rgba(58, 58, 60, 0.5);
+    border: 2px solid #3a3a3c;
+    border-radius: 10px;
+    color: #d7dadc;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex: 1;
+    min-width: 100px;
+}
+
+.settings-option-btn:hover {
+    background: rgba(106, 170, 100, 0.15);
+    border-color: rgba(106, 170, 100, 0.5);
+    color: #6aaa64;
+    transform: translateY(-2px);
+}
+
+.settings-option-btn.active {
+    background: linear-gradient(135deg, rgba(106, 170, 100, 0.25), rgba(106, 170, 100, 0.15));
+    border-color: #6aaa64;
+    color: #6aaa64;
+    box-shadow: 0 4px 12px rgba(106, 170, 100, 0.3);
+}
+
+.settings-option-btn:active {
+    transform: translateY(0) scale(0.98);
+}
+
+.game-settings-actions {
+    padding: 30px 40px;
+    border-top: 2px solid #3a3a3c;
+    background: linear-gradient(135deg, #1a1a1b, #121213);
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.game-settings-actions .btn {
+    flex: 1;
+    max-width: 200px;
+}
+
+.close-btn {
+    background: transparent;
+    border: none;
+    color: #818384;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 5px 10px;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    line-height: 1;
+}
+
+.close-btn:hover {
+    background: rgba(58, 58, 60, 0.5);
+    color: #d7dadc;
+}
+
+/* Custom Word Input Screen */
+#customWordInput.screen {
+    display: none;
+    background: #121213;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+    overflow-y: auto;
+}
+
+#customWordInput.screen.active {
+    display: flex;
+}
+
+.custom-word-container {
+    background: linear-gradient(145deg, #1a1a1b, #2a2a2b);
+    border: 2px solid #3a3a3c;
+    border-radius: 20px;
+    max-width: 600px;
+    width: 100%;
+    padding: 40px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    animation: modalSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.custom-word-header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.custom-word-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0 0 10px 0;
+    letter-spacing: 0.05em;
+}
+
+.custom-word-subtitle {
+    font-size: 1rem;
+    color: #818384;
+    margin: 0;
+}
+
+.custom-word-content {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+}
+
+.custom-word-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.custom-word-label {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.custom-word-input {
+    padding: 15px 20px;
+    background: #1a1a1b;
+    border: 2px solid #3a3a3c;
+    border-radius: 10px;
+    color: #ffffff;
+    font-size: 1.5rem;
+    font-weight: 600;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+
+.custom-word-input:focus {
+    outline: none;
+    border-color: #6aaa64;
+    background: #1f1f20;
+    box-shadow: 0 0 0 3px rgba(106, 170, 100, 0.1);
+}
+
+.custom-word-input::placeholder {
+    color: #565758;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.custom-word-hint {
+    font-size: 0.85rem;
+    color: #818384;
+    font-style: italic;
+    text-align: center;
+}
+
+.custom-word-actions {
+    display: flex;
+    justify-content: center;
+    gap: 15px;
+}
+
+.custom-word-actions .btn {
+    min-width: 200px;
+}
+
+@media (max-width: 768px) {
+    .custom-word-container {
+        max-width: 95%;
+        padding: 30px 20px;
+    }
+    
+    .custom-word-title {
+        font-size: 1.5rem;
+    }
+    
+    .custom-word-input {
+        font-size: 1.2rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .game-settings-container {
+        max-width: 95%;
+        max-height: 95vh;
+    }
+    
+    .game-settings-content {
+        padding: 20px;
+        gap: 20px;
+    }
+    
+    .settings-options {
+        flex-direction: column;
+    }
+    
+    .settings-option-btn {
+        width: 100%;
+    }
+    
+    .game-settings-actions {
+        flex-direction: column;
+    }
+    
+    .game-settings-actions .btn {
+        max-width: 100%;
     }
 }

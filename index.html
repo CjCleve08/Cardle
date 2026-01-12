@@ -841,6 +841,95 @@
             </div>
         </div>
 
+        <!-- Game Settings Screen -->
+        <div id="gameSettings" class="screen">
+            <div class="game-settings-container">
+                <div class="game-settings-header">
+                    <h2 class="game-settings-title">Game Settings</h2>
+                    <button id="closeGameSettingsBtn" class="close-btn">✕</button>
+                </div>
+                
+                <div class="game-settings-content">
+                    <!-- Turn Time Limit -->
+                    <div class="settings-section">
+                        <label class="settings-label">
+                            <span class="settings-label-text">Turn Time Limit</span>
+                            <span class="settings-label-hint">Time per turn in seconds</span>
+                        </label>
+                        <div class="settings-options">
+                            <button class="settings-option-btn" data-value="30" data-setting="turnTimeLimit">30s</button>
+                            <button class="settings-option-btn active" data-value="60" data-setting="turnTimeLimit">60s</button>
+                            <button class="settings-option-btn" data-value="90" data-setting="turnTimeLimit">90s</button>
+                            <button class="settings-option-btn" data-value="120" data-setting="turnTimeLimit">120s</button>
+                            <button class="settings-option-btn" data-value="180" data-setting="turnTimeLimit">180s</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Game Mode -->
+                    <div class="settings-section">
+                        <label class="settings-label">
+                            <span class="settings-label-text">Game Mode</span>
+                            <span class="settings-label-hint">Choose your game mode</span>
+                        </label>
+                        <div class="settings-options">
+                            <button class="settings-option-btn active" data-value="classic" data-setting="gameMode">Classic</button>
+                            <button class="settings-option-btn" data-value="duelDeck" data-setting="gameMode">Duel Deck</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Starting Player -->
+                    <div class="settings-section">
+                        <label class="settings-label">
+                            <span class="settings-label-text">Starting Player</span>
+                            <span class="settings-label-hint">Who goes first?</span>
+                        </label>
+                        <div class="settings-options">
+                            <button class="settings-option-btn active" data-value="random" data-setting="startingPlayer">Random</button>
+                            <button class="settings-option-btn" data-value="creator" data-setting="startingPlayer">Creator</button>
+                            <button class="settings-option-btn" data-value="joiner" data-setting="startingPlayer">Joiner</button>
+                        </div>
+                    </div>
+                    
+                </div>
+                
+                <div class="game-settings-actions">
+                    <button id="startGameWithSettingsBtn" class="btn btn-primary btn-large">
+                        <span class="btn-icon">🚀</span>
+                        <span>Start Game</span>
+                    </button>
+                    <button id="cancelGameSettingsBtn" class="btn btn-secondary btn-large">
+                        <span class="btn-icon">✕</span>
+                        <span>Cancel</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Custom Word Input Screen -->
+        <div id="customWordInput" class="screen">
+            <div class="custom-word-container">
+                <div class="custom-word-header">
+                    <h2 class="custom-word-title">Enter Your Word</h2>
+                    <p class="custom-word-subtitle">Choose a 5-letter word for your opponent to guess</p>
+                </div>
+                
+                <div class="custom-word-content">
+                    <div class="custom-word-input-group">
+                        <label for="customWordInputField" class="custom-word-label">Your Word (5 letters)</label>
+                        <input type="text" id="customWordInputField" class="custom-word-input" maxlength="5" placeholder="Enter word">
+                        <div class="custom-word-hint">Make it challenging but fair!</div>
+                    </div>
+                    
+                    <div class="custom-word-actions">
+                        <button id="submitCustomWordBtn" class="btn btn-primary btn-large" disabled>
+                            <span class="btn-icon">✓</span>
+                            <span>Submit Word</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Waiting Screen -->
         <div id="waiting" class="screen">
             <div class="waiting-content">

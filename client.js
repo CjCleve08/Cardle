@@ -58,8 +58,8 @@ let guestName = null;
 
 // Turn Timer
 let turnTimer = null;
-let turnTimeRemaining = 60; // 60 seconds per turn
-const TURN_TIME_LIMIT = 60;
+let turnTimeRemaining = 60; // 60 seconds per turn (will be updated from game settings)
+let TURN_TIME_LIMIT = 60; // Will be updated from game settings
 
 // State tracking to prevent duplicate event processing and freezing
 let lastProcessedTurnChange = null; // Track last processed turnChange event
@@ -362,10 +362,16 @@ function showLobby() {
     if (typeof soundManager !== 'undefined') {
         soundManager.stopBackgroundMusic();
     }
-    
+
     // Register user as online when showing lobby
     registerUserAsOnline();
     
+    // Hide game ID displays when returning to lobby
+    const gameIdDisplay = document.getElementById('gameIdDisplay');
+    const gameIdDisplayWaiting = document.getElementById('gameIdDisplayWaiting');
+    if (gameIdDisplay) gameIdDisplay.style.display = 'none';
+    if (gameIdDisplayWaiting) gameIdDisplayWaiting.style.display = 'none';
+
     if (ScreenManager.show('lobby')) {
         // Use setTimeout to ensure DOM is ready and screen is fully shown
         setTimeout(() => {
@@ -2153,7 +2159,7 @@ const ScreenManager = {
     
     // Initialize all screens
     init() {
-        const screenIds = ['splash', 'credits', 'newCardAnnouncement', 'login', 'signup', 'guestName', 'lobby', 'waiting', 'vs', 'game', 'gameOver', 'spectatorGameOver'];
+        const screenIds = ['splash', 'credits', 'newCardAnnouncement', 'login', 'signup', 'guestName', 'lobby', 'gameSettings', 'customWordInput', 'waiting', 'vs', 'game', 'gameOver', 'spectatorGameOver'];
         screenIds.forEach(id => {
             const element = document.getElementById(id);
             if (!element) {
@@ -2366,6 +2372,7 @@ socket.on('reconnect_failed', () => {
 });
 
 socket.on('gameCreated', (data) => {
+    console.log('gameCreated event received:', data);
     currentPlayer = data.playerId;
     // Show game ID in both lobby and waiting screens
     const gameIdEl = document.getElementById('gameId');
@@ -2378,14 +2385,90 @@ socket.on('gameCreated', (data) => {
     if (gameIdWaiting) gameIdWaiting.textContent = data.gameId;
     if (gameIdDisplayWaiting) gameIdDisplayWaiting.style.display = 'block';
     
-    ScreenManager.show('waiting');
+    // Store gameId for custom word input
+    window.pendingGameId = data.gameId;
+    
+    // If duel deck mode, show word input screen
+    console.log('Checking gameMode:', data.gameMode);
+    if (data.gameMode === 'duelDeck') {
+        console.log('Showing duel deck word input screen');
+        // Ensure screen is visible
+        const customWordScreen = document.getElementById('customWordInput');
+        if (customWordScreen) {
+            console.log('Duel deck word screen element found');
+            // Reset input state before showing screen
+            const wordInput = document.getElementById('customWordInputField');
+            const submitBtn = document.getElementById('submitCustomWordBtn');
+            if (wordInput) {
+                wordInput.disabled = false;
+                wordInput.readOnly = false;
+                wordInput.value = '';
+            }
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="btn-icon">✓</span><span>Submit Word</span>';
+            }
+            ScreenManager.show('customWordInput');
+            // Double-check it's visible
+            setTimeout(() => {
+                if (!customWordScreen.classList.contains('active')) {
+                    console.error('Duel deck word screen not active after show!');
+                    customWordScreen.classList.add('active');
+                }
+                initializeCustomWordInput(data.gameId);
+            }, 100);
+        } else {
+            console.error('Duel deck word screen element not found in DOM!');
+        }
+    } else {
+        console.log('Showing waiting screen (classic mode)');
+        ScreenManager.show('waiting');
+    }
 });
 
 socket.on('playerJoinedGame', (data) => {
+    console.log('playerJoinedGame event received:', data);
     // Set currentPlayer when joining a game (for player 2)
     if (!currentPlayer) {
         currentPlayer = data.playerId;
         console.log('Set currentPlayer from joinGame:', currentPlayer);
+    }
+    
+    // Store gameId for custom word input
+    window.pendingGameId = data.gameId;
+    
+    // If duel deck mode, show word input screen
+    console.log('Checking gameMode:', data.gameMode);
+    if (data.gameMode === 'duelDeck') {
+        console.log('Showing duel deck word input screen (joiner)');
+        // Ensure screen is visible
+        const customWordScreen = document.getElementById('customWordInput');
+        if (customWordScreen) {
+            console.log('Duel deck word screen element found (joiner)');
+            // Reset input state before showing screen
+            const wordInput = document.getElementById('customWordInputField');
+            const submitBtn = document.getElementById('submitCustomWordBtn');
+            if (wordInput) {
+                wordInput.disabled = false;
+                wordInput.readOnly = false;
+                wordInput.value = '';
+            }
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="btn-icon">✓</span><span>Submit Word</span>';
+            }
+            ScreenManager.show('customWordInput');
+            // Double-check it's visible
+            setTimeout(() => {
+                if (!customWordScreen.classList.contains('active')) {
+                    console.error('Duel deck word screen not active after show (joiner)!');
+                    customWordScreen.classList.add('active');
+                }
+                initializeCustomWordInput(data.gameId);
+            }, 100);
+        } else {
+            console.error('Duel deck word screen element not found in DOM (joiner)!');
+        }
     }
 });
 
@@ -2455,6 +2538,13 @@ socket.on('gameStarted', (data) => {
     console.log('Game started event received:', data);
     console.log('Players array:', data.players);
     console.log('Is tutorial?', data.isTutorial);
+    console.log('Game mode:', data.settings?.gameMode);
+    
+    // For duel deck mode, ensure both players have submitted words before starting
+    // This should already be handled server-side, but add a safety check
+    if (data.settings && data.settings.gameMode === 'duelDeck') {
+        console.log('Duel deck mode detected in gameStarted - this should only happen after both words are submitted');
+    }
     
     // Set currentPlayer from the event if not already set
     if (data.yourPlayerId) {
@@ -2493,6 +2583,17 @@ socket.on('gameStarted', (data) => {
     if (data.isRanked !== undefined) {
         gameState.isRanked = data.isRanked;
         console.log('Ranked mode set in gameState:', gameState.isRanked);
+    }
+    
+    // Update turn time limit from game settings
+    if (data.settings && data.settings.turnTimeLimit) {
+        TURN_TIME_LIMIT = data.settings.turnTimeLimit;
+        turnTimeRemaining = TURN_TIME_LIMIT;
+        console.log('Turn time limit set from game settings:', TURN_TIME_LIMIT, 'seconds');
+    } else {
+        // Default to 60 if no settings
+        TURN_TIME_LIMIT = 60;
+        turnTimeRemaining = 60;
     }
     
     // Ensure gameId is set in gameState (it might be in the data)
@@ -4012,7 +4113,19 @@ socket.on('gameOver', (data) => {
             titleEl.classList.remove('lose');
             messageEl.textContent = 'Your opponent disconnected. You win!';
             iconEl.textContent = '🏆';
-            wordEl.textContent = data.word;
+            
+            // Handle duel deck mode - show opponent's word (the word you were trying to guess)
+            if (data.gameMode === 'duelDeck') {
+                wordEl.textContent = data.opponentWord || 'N/A';
+                if (data.opponentWord) {
+                    fetchWordDefinition(data.opponentWord);
+                }
+            } else {
+                wordEl.textContent = data.word || '';
+                if (data.word) {
+                    fetchWordDefinition(data.word);
+                }
+            }
             
             // Play win sound
             if (typeof soundManager !== 'undefined') {
@@ -4024,7 +4137,19 @@ socket.on('gameOver', (data) => {
             titleEl.classList.remove('win');
             messageEl.textContent = 'You disconnected. The word was:';
             iconEl.textContent = '😔';
-            wordEl.textContent = data.word;
+            
+            // Handle duel deck mode - show opponent's word (the word you were trying to guess)
+            if (data.gameMode === 'duelDeck') {
+                wordEl.textContent = data.opponentWord || 'N/A';
+                if (data.opponentWord) {
+                    fetchWordDefinition(data.opponentWord);
+                }
+            } else {
+                wordEl.textContent = data.word || '';
+                if (data.word) {
+                    fetchWordDefinition(data.word);
+                }
+            }
             
             // Play lose sound
             if (typeof soundManager !== 'undefined') {
@@ -4033,35 +4158,56 @@ socket.on('gameOver', (data) => {
         }
     } else {
         // Normal game end
-    if (won) {
-        titleEl.textContent = 'You Win!';
-        titleEl.classList.add('win');
-        titleEl.classList.remove('lose');
-        messageEl.textContent = 'Congratulations! You guessed the word!';
-        iconEl.textContent = '🎉';
-        wordEl.textContent = data.word;
-        
-        // Play win sound
-        if (typeof soundManager !== 'undefined') {
-            soundManager.playGameWin();
-        }
-    } else {
-        titleEl.textContent = 'You Lost!';
-        titleEl.classList.add('lose');
-        titleEl.classList.remove('win');
-        messageEl.textContent = 'Better luck next time! The word was:';
-        iconEl.textContent = '😔';
-        wordEl.textContent = data.word;
-        
-        // Play lose sound
-        if (typeof soundManager !== 'undefined') {
-            soundManager.playGameLose();
+        if (won) {
+            titleEl.textContent = 'You Win!';
+            titleEl.classList.add('win');
+            titleEl.classList.remove('lose');
+            messageEl.textContent = 'Congratulations! You guessed the word!';
+            iconEl.textContent = '🎉';
+            
+            // Handle duel deck mode - show opponent's word (the word you were trying to guess)
+            if (data.gameMode === 'duelDeck') {
+                wordEl.textContent = data.opponentWord || 'N/A';
+                if (data.opponentWord) {
+                    fetchWordDefinition(data.opponentWord);
+                }
+            } else {
+                wordEl.textContent = data.word || '';
+                if (data.word) {
+                    fetchWordDefinition(data.word);
+                }
+            }
+            
+            // Play win sound
+            if (typeof soundManager !== 'undefined') {
+                soundManager.playGameWin();
+            }
+        } else {
+            titleEl.textContent = 'You Lost!';
+            titleEl.classList.add('lose');
+            titleEl.classList.remove('win');
+            messageEl.textContent = 'Better luck next time! The word was:';
+            iconEl.textContent = '😔';
+            
+            // Handle duel deck mode - show opponent's word (the word you were trying to guess)
+            if (data.gameMode === 'duelDeck') {
+                wordEl.textContent = data.opponentWord || 'N/A';
+                if (data.opponentWord) {
+                    fetchWordDefinition(data.opponentWord);
+                }
+            } else {
+                wordEl.textContent = data.word || '';
+                if (data.word) {
+                    fetchWordDefinition(data.word);
+                }
+            }
+            
+            // Play lose sound
+            if (typeof soundManager !== 'undefined') {
+                soundManager.playGameLose();
             }
         }
     }
-    
-    // Fetch and display word definition
-    fetchWordDefinition(data.word);
     
     // Show tutorial message if in tutorial mode (only once, when game ends)
     if (window.tutorialMode && !window.tutorialMessagesShown?.has('gameOver')) {
@@ -4230,6 +4376,18 @@ socket.on('rematchCancelled', () => {
 });
 
 socket.on('error', (data) => {
+    // Re-enable custom word input if it was disabled (for custom word errors)
+    const wordInput = document.getElementById('customWordInputField');
+    const submitBtn = document.getElementById('submitCustomWordBtn');
+    if (wordInput) {
+        wordInput.disabled = false;
+        wordInput.readOnly = false;
+    }
+    if (submitBtn && submitBtn.disabled) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span class="btn-icon">✓</span><span>Submit Word</span>';
+    }
+    
     // Play error sound
     if (typeof soundManager !== 'undefined') {
         soundManager.playError();
@@ -7597,6 +7755,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize card info overlay
     initializeCardInfoOverlay();
     
+    // Initialize game settings
+    initializeGameSettings();
+    
+    // Initialize custom word input (will be re-initialized when needed)
+    initializeCustomWordInput();
+    
     // Wait a bit for CARD_CONFIG to be injected by server
     setTimeout(async () => {
         // Ensure valid decks exist for all slots
@@ -7855,6 +8019,110 @@ async function startMatchmaking(isRanked = true) {
 }
 
 // Play tab button event listeners
+// Game Settings Management
+let gameSettings = {
+    turnTimeLimit: 60,
+    gameMode: 'classic',
+    startingPlayer: 'random'
+};
+
+// Update game mode name in settings initialization if needed
+
+function initializeGameSettings() {
+    // Initialize settings option buttons
+    const optionButtons = document.querySelectorAll('.settings-option-btn');
+    optionButtons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const setting = btn.dataset.setting;
+            const value = btn.dataset.value;
+            
+            // Remove active class from all buttons in the same setting group
+            const settingGroup = btn.closest('.settings-section');
+            const groupButtons = settingGroup.querySelectorAll('.settings-option-btn');
+            groupButtons.forEach(b => b.classList.remove('active'));
+            
+            // Add active class to clicked button
+            btn.classList.add('active');
+            
+            // Update settings object
+            if (setting === 'turnTimeLimit') {
+                gameSettings.turnTimeLimit = parseInt(value) || 0; // 0 = unlimited
+            } else if (setting === 'gameMode') {
+                gameSettings.gameMode = value;
+            } else if (setting === 'startingPlayer') {
+                gameSettings.startingPlayer = value;
+            }
+        });
+    });
+    
+    // Close/Cancel buttons
+    const closeBtn = document.getElementById('closeGameSettingsBtn');
+    const cancelBtn = document.getElementById('cancelGameSettingsBtn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            ScreenManager.show('lobby');
+        });
+    }
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => {
+            ScreenManager.show('lobby');
+        });
+    }
+    
+    // Start Game button
+    const startGameBtn = document.getElementById('startGameWithSettingsBtn');
+    if (startGameBtn) {
+        startGameBtn.addEventListener('click', async () => {
+            const name = getPlayerName();
+            if (!name) {
+                showGameMessage('⚠️', 'Sign In Required', 'Please sign in to create a game');
+                ScreenManager.show('lobby');
+                return;
+            }
+            
+            // Ensure decks are loaded
+            cachedDecks = null;
+            await getAllDecks();
+            
+            const testDeck = await getPlayerDeck();
+            if (!testDeck || testDeck.length === 0) {
+                console.error('Deck is empty after loading!');
+                showGameMessage('⚠️', 'Deck Error', 'Your deck could not be loaded. Please check your deck in the lobby.');
+                ScreenManager.show('lobby');
+                setTimeout(() => {
+                    switchTab('deck');
+                }, 100);
+                return;
+            }
+            
+            // Validate deck
+            const validation = validateDeckForGame();
+            if (!validation.valid) {
+                showGameMessage('⚠️', 'Incomplete Deck', validation.message);
+                ScreenManager.show('lobby');
+                setTimeout(() => {
+                    switchTab('deck');
+                }, 100);
+                return;
+            }
+            
+            // Create game with settings
+            const firebaseUid = currentUser ? currentUser.uid : null;
+            const photoURL = window.currentUserPhotoURL || (currentUser ? currentUser.photoURL : null);
+            console.log('Creating game with settings:', gameSettings);
+            socket.emit('createGame', { 
+                playerName: name, 
+                firebaseUid: firebaseUid, 
+                photoURL: photoURL,
+                settings: gameSettings
+            });
+            
+            // Store gameId for custom word input (will be set when gameCreated event fires)
+            window.pendingGameSettings = gameSettings;
+        });
+    }
+}
+
 function attachPlayTabListeners() {
     const findMatchBtn = document.getElementById('findMatchBtn');
     if (findMatchBtn) {
@@ -7888,7 +8156,7 @@ function attachPlayTabListeners() {
                 // Cancel matchmaking if active
                 socket.emit('cancelMatchmaking');
                 
-                // Ensure decks are loaded before creating game
+                // Ensure decks are loaded before showing settings
                 // Clear cache to ensure fresh data
                 cachedDecks = null;
                 await getAllDecks();
@@ -7904,7 +8172,7 @@ function attachPlayTabListeners() {
                     return;
                 }
                 
-                // Validate deck before creating game
+                // Validate deck before showing settings
                 const validation = validateDeckForGame();
                 if (!validation.valid) {
                     showGameMessage('⚠️', 'Incomplete Deck', validation.message);
@@ -7915,9 +8183,8 @@ function attachPlayTabListeners() {
                     return;
                 }
                 
-                const firebaseUid = currentUser ? currentUser.uid : null;
-                const photoURL = window.currentUserPhotoURL || (currentUser ? currentUser.photoURL : null);
-                socket.emit('createGame', { playerName: name, firebaseUid: firebaseUid, photoURL: photoURL });
+                // Show game settings screen instead of creating game directly
+                ScreenManager.show('gameSettings');
             } else {
                 showGameMessage('⚠️', 'Sign In Required', 'Please sign in to create a game');
             }
@@ -9943,7 +10210,7 @@ function showSpectatorGameOver(data, wasSpectating, spectatedGameId) {
     
     // Show the word
     if (data.word) {
-        wordEl.textContent = `The word was: ${data.word.toUpperCase()}`;
+        wordEl.textContent = data.word ? data.word.toUpperCase() : '';
         wordEl.style.display = 'block';
     } else {
         wordEl.style.display = 'none';
@@ -9980,6 +10247,11 @@ function showSpectatorGameOver(data, wasSpectating, spectatedGameId) {
         backToLobbyBtn.parentNode.replaceChild(newBtn, backToLobbyBtn);
         
         newBtn.addEventListener('click', () => {
+            // Hide game ID displays when returning to lobby
+            const gameIdDisplay = document.getElementById('gameIdDisplay');
+            const gameIdDisplayWaiting = document.getElementById('gameIdDisplayWaiting');
+            if (gameIdDisplay) gameIdDisplay.style.display = 'none';
+            if (gameIdDisplayWaiting) gameIdDisplayWaiting.style.display = 'none';
             ScreenManager.show('lobby');
         });
     }
@@ -10400,6 +10672,11 @@ function initializeGameOverButtons() {
             if (gameState && gameState.gameId) {
                 socket.emit('cancelRematch', { gameId: gameState.gameId });
             }
+            // Hide game ID displays when returning to lobby
+            const gameIdDisplay = document.getElementById('gameIdDisplay');
+            const gameIdDisplayWaiting = document.getElementById('gameIdDisplayWaiting');
+            if (gameIdDisplay) gameIdDisplay.style.display = 'none';
+            if (gameIdDisplayWaiting) gameIdDisplayWaiting.style.display = 'none';
             ScreenManager.show('lobby');
         });
     }
@@ -11290,6 +11567,28 @@ async function loadCommunityPosts() {
             const data = doc.data();
             const authorInfo = await getUserInfo(data.authorId);
             
+            // Recalculate comment count to ensure it includes replies
+            // This fixes existing posts that were created before replies were counted
+            try {
+                const commentsSnapshot = await window.firebaseDb.collection('communityPosts')
+                    .doc(doc.id)
+                    .collection('comments')
+                    .get();
+                
+                const actualCount = commentsSnapshot.size;
+                // If the count doesn't match, recalculate it
+                if (data.commentCount !== actualCount) {
+                    console.log(`Fixing comment count for post ${doc.id}: ${data.commentCount || 0} -> ${actualCount}`);
+                    await window.firebaseDb.collection('communityPosts').doc(doc.id).update({
+                        commentCount: actualCount
+                    });
+                    data.commentCount = actualCount;
+                }
+            } catch (recalcError) {
+                // If recalculation fails, just use the existing count
+                console.warn(`Could not recalculate comment count for post ${doc.id}:`, recalcError);
+            }
+            
             const postData = {
                 id: doc.id,
                 ...data,
@@ -11696,21 +11995,91 @@ async function loadComments(postId) {
             return;
         }
         
-        commentsListEl.innerHTML = comments.map(comment => {
+        // Separate top-level comments from replies
+        const topLevelComments = comments.filter(c => !c.parentCommentId);
+        const repliesMap = new Map();
+        comments.filter(c => c.parentCommentId).forEach(reply => {
+            if (!repliesMap.has(reply.parentCommentId)) {
+                repliesMap.set(reply.parentCommentId, []);
+            }
+            repliesMap.get(reply.parentCommentId).push(reply);
+        });
+        
+        // Sort replies by createdAt
+        repliesMap.forEach((replies, parentId) => {
+            replies.sort((a, b) => {
+                const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+                const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+                return aTime.getTime() - bTime.getTime();
+            });
+        });
+        
+        // Check if user is admin (async)
+        const userIsAdmin = await isAdminAsync();
+        
+        commentsListEl.innerHTML = topLevelComments.map(comment => {
             const timeAgo = formatTimeAgo(comment.createdAt?.toDate?.() || new Date(comment.createdAt));
             const authorInitial = comment.authorName ? comment.authorName.charAt(0).toUpperCase() : '?';
             const avatarStyle = comment.authorPhotoURL 
                 ? `background-image: url(${comment.authorPhotoURL}); background-size: cover; background-position: center;` 
                 : '';
             
+            const isCommentAuthor = comment.authorId === currentUser?.uid;
+            const canDelete = isCommentAuthor || userIsAdmin;
+            
+            // Get replies for this comment
+            const replies = repliesMap.get(comment.id) || [];
+            
+            // Render replies (no reply button, just display)
+            const repliesHtml = replies.map(reply => {
+                const replyTimeAgo = formatTimeAgo(reply.createdAt?.toDate?.() || new Date(reply.createdAt));
+                const replyAuthorInitial = reply.authorName ? reply.authorName.charAt(0).toUpperCase() : '?';
+                const replyAvatarStyle = reply.authorPhotoURL 
+                    ? `background-image: url(${reply.authorPhotoURL}); background-size: cover; background-position: center;` 
+                    : '';
+                const isReplyAuthor = reply.authorId === currentUser?.uid;
+                const canDeleteReply = isReplyAuthor || userIsAdmin;
+                
+                return `
+                    <div class="comment-item comment-reply">
+                        <div class="comment-header">
+                            <div class="comment-author-avatar" style="${replyAvatarStyle}">${reply.authorPhotoURL ? '' : replyAuthorInitial}</div>
+                            <div class="comment-author-name">${escapeHtml(reply.authorName || 'Unknown')}</div>
+                            <div class="comment-time">${replyTimeAgo}</div>
+                            ${canDeleteReply ? `<button class="comment-delete-btn" onclick="deleteComment('${postId}', '${reply.id}', event)" title="${userIsAdmin && !isReplyAuthor ? 'Delete Reply (Admin)' : 'Delete Reply'}">🗑️</button>` : ''}
+                        </div>
+                        <div class="comment-content">${escapeHtml(reply.content || '').replace(/\n/g, '<br>')}</div>
+                    </div>
+                `;
+            }).join('');
+            
+            const hasReplies = replies.length > 0;
+            const repliesCount = replies.length;
+            
             return `
-                <div class="comment-item">
+                <div class="comment-item" data-comment-id="${comment.id}">
                     <div class="comment-header">
                         <div class="comment-author-avatar" style="${avatarStyle}">${comment.authorPhotoURL ? '' : authorInitial}</div>
                         <div class="comment-author-name">${escapeHtml(comment.authorName || 'Unknown')}</div>
                         <div class="comment-time">${timeAgo}</div>
+                        ${canDelete ? `<button class="comment-delete-btn" onclick="deleteComment('${postId}', '${comment.id}', event)" title="${userIsAdmin && !isCommentAuthor ? 'Delete Comment (Admin)' : 'Delete Comment'}">🗑️</button>` : ''}
                     </div>
                     <div class="comment-content">${escapeHtml(comment.content || '').replace(/\n/g, '<br>')}</div>
+                    <div class="comment-actions">
+                        <button class="comment-reply-btn" onclick="showReplyInput('${postId}', '${comment.id}', '${escapeHtml(comment.authorName || 'Unknown')}')">Reply</button>
+                        ${hasReplies ? `<button class="comment-view-replies-btn" onclick="toggleReplies('${comment.id}')" id="viewRepliesBtn_${comment.id}">
+                            <span class="view-replies-text">View ${repliesCount} ${repliesCount === 1 ? 'reply' : 'replies'}</span>
+                            <span class="view-replies-icon">▼</span>
+                        </button>` : ''}
+                    </div>
+                    ${repliesHtml ? `<div class="comment-replies" id="replies_${comment.id}" style="display: none;">${repliesHtml}</div>` : ''}
+                    <div class="reply-input-container" id="replyInput_${comment.id}" style="display: none;">
+                        <textarea class="reply-input-field" id="replyInputField_${comment.id}" placeholder="Write a reply..." maxlength="500" rows="2"></textarea>
+                        <div class="reply-input-actions">
+                            <button class="btn btn-primary btn-small" onclick="submitReply('${postId}', '${comment.id}')">Reply</button>
+                            <button class="btn btn-secondary btn-small" onclick="hideReplyInput('${comment.id}')">Cancel</button>
+                        </div>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -11722,7 +12091,7 @@ async function loadComments(postId) {
 }
 
 // Add comment to post
-async function addComment(postId, content) {
+async function addComment(postId, content, parentCommentId = null) {
     if (!window.firebaseDb || !currentUser) {
         console.error('User not authenticated or Firebase not available');
         return;
@@ -11736,7 +12105,8 @@ async function addComment(postId, content) {
         const commentData = {
             authorId: currentUser.uid,
             content: content.trim(),
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            parentCommentId: parentCommentId || null
         };
         
         // Add comment to subcollection
@@ -11745,21 +12115,393 @@ async function addComment(postId, content) {
             .collection('comments')
             .add(commentData);
         
-        // Update comment count
-        await window.firebaseDb.collection('communityPosts').doc(postId).update({
-            commentCount: firebase.firestore.FieldValue.increment(1)
-        });
+        // Update comment count (all comments count, including replies)
+        try {
+            await window.firebaseDb.collection('communityPosts').doc(postId).update({
+                commentCount: firebase.firestore.FieldValue.increment(1)
+            });
+            console.log('Comment count incremented for post:', postId, 'isReply:', !!parentCommentId);
+        } catch (updateError) {
+            console.error('Error updating comment count:', updateError);
+            // If the field doesn't exist, set it to 1 (shouldn't happen, but handle it)
+            try {
+                const postDoc = await window.firebaseDb.collection('communityPosts').doc(postId).get();
+                const currentCount = postDoc.data()?.commentCount || 0;
+                await window.firebaseDb.collection('communityPosts').doc(postId).update({
+                    commentCount: currentCount + 1
+                });
+            } catch (fallbackError) {
+                console.error('Fallback comment count update also failed:', fallbackError);
+            }
+        }
         
         // Clear input and reload comments
-        const commentInput = document.getElementById('newCommentInput');
-        if (commentInput) commentInput.value = '';
+        if (parentCommentId) {
+            const replyInput = document.getElementById(`replyInputField_${parentCommentId}`);
+            if (replyInput) replyInput.value = '';
+            hideReplyInput(parentCommentId);
+        } else {
+            const commentInput = document.getElementById('newCommentInput');
+            if (commentInput) commentInput.value = '';
+        }
         
         await loadComments(postId);
-        loadCommunityPosts(); // Refresh post list to update comment counts
+        // Always refresh post list to update comment counts (for both comments and replies)
+        loadCommunityPosts();
         
     } catch (error) {
         console.error('Error adding comment:', error);
         alert('Failed to add comment. Please try again.');
+    }
+}
+
+// Delete comment
+async function deleteComment(postId, commentId, event) {
+    if (event) {
+        event.stopPropagation();
+    }
+    
+    if (!window.firebaseDb || !currentUser) {
+        console.error('User not authenticated or Firebase not available');
+        return;
+    }
+    
+    try {
+        // Get comment to check author and if it has replies
+        const commentDoc = await window.firebaseDb.collection('communityPosts')
+            .doc(postId)
+            .collection('comments')
+            .doc(commentId)
+            .get();
+        
+        if (!commentDoc.exists) {
+            alert('Comment not found');
+            return;
+        }
+        
+        const commentData = commentDoc.data();
+        const isCommentAuthor = commentData.authorId === currentUser.uid;
+        const userIsAdmin = await isAdminAsync();
+        
+        if (!isCommentAuthor && !userIsAdmin) {
+            alert('You do not have permission to delete this comment');
+            return;
+        }
+        
+        // Check if comment has replies
+        const repliesSnapshot = await window.firebaseDb.collection('communityPosts')
+            .doc(postId)
+            .collection('comments')
+            .where('parentCommentId', '==', commentId)
+            .get();
+        
+        const hasReplies = !repliesSnapshot.empty;
+        
+        // Confirm deletion
+        const confirmTitle = userIsAdmin && !isCommentAuthor ? 'Delete Comment (Admin)' : 'Delete Comment';
+        const confirmMessage = hasReplies
+            ? 'This comment has replies. Are you sure you want to delete it? This will also delete all replies. This action cannot be undone.'
+            : 'Are you sure you want to delete this comment? This action cannot be undone.';
+        
+        const confirmed = await showConfirmDialog('🗑️', confirmTitle, confirmMessage);
+        if (!confirmed) return;
+        
+        // Delete all replies first
+        if (hasReplies) {
+            const batch = window.firebaseDb.batch();
+            repliesSnapshot.docs.forEach(doc => {
+                batch.delete(doc.ref);
+            });
+            await batch.commit();
+        }
+        
+        // Delete the comment
+        await window.firebaseDb.collection('communityPosts')
+            .doc(postId)
+            .collection('comments')
+            .doc(commentId)
+            .delete();
+        
+        // Update comment count (all comments count, including replies)
+        const decrement = 1 + repliesSnapshot.size; // Comment + its replies
+        await window.firebaseDb.collection('communityPosts').doc(postId).update({
+            commentCount: firebase.firestore.FieldValue.increment(-decrement)
+        });
+        
+        // Reload comments
+        await loadComments(postId);
+        loadCommunityPosts(); // Refresh post list to update comment counts
+        
+    } catch (error) {
+        console.error('Error deleting comment:', error);
+        alert('Failed to delete comment. Please try again.');
+    }
+}
+
+// Show reply input
+function showReplyInput(postId, parentCommentId, parentAuthorName) {
+    const replyInputContainer = document.getElementById(`replyInput_${parentCommentId}`);
+    const replyInputField = document.getElementById(`replyInputField_${parentCommentId}`);
+    
+    if (replyInputContainer && replyInputField) {
+        replyInputContainer.style.display = 'block';
+        replyInputField.focus();
+        
+        // Allow Enter to submit (Shift+Enter for new line)
+        const handleKeydown = (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitReply(postId, parentCommentId);
+            }
+        };
+        
+        replyInputField.addEventListener('keydown', handleKeydown, { once: true });
+    }
+}
+
+// Hide reply input
+function hideReplyInput(commentId) {
+    const replyInputContainer = document.getElementById(`replyInput_${commentId}`);
+    const replyInputField = document.getElementById(`replyInputField_${commentId}`);
+    
+    if (replyInputContainer) {
+        replyInputContainer.style.display = 'none';
+    }
+    if (replyInputField) {
+        replyInputField.value = '';
+    }
+}
+
+// Submit reply
+async function submitReply(postId, parentCommentId) {
+    const replyInputField = document.getElementById(`replyInputField_${parentCommentId}`);
+    if (!replyInputField) return;
+    
+    const content = replyInputField.value.trim();
+    if (!content) return;
+    
+    await addComment(postId, content, parentCommentId);
+}
+
+// Custom Word Input Management
+let currentCustomWordGameId = null;
+
+function initializeCustomWordInput(gameId = null) {
+    console.log('initializeCustomWordInput called with gameId:', gameId);
+    
+    // Wait a bit to ensure DOM is ready
+    setTimeout(() => {
+        const wordInput = document.getElementById('customWordInputField');
+        const submitBtn = document.getElementById('submitCustomWordBtn');
+        
+        console.log('Word input element:', wordInput);
+        console.log('Submit button element:', submitBtn);
+        
+        if (!wordInput || !submitBtn) {
+            console.error('Custom word input elements not found!');
+            // Try again after a short delay
+            setTimeout(() => {
+                const retryWordInput = document.getElementById('customWordInputField');
+                const retrySubmitBtn = document.getElementById('submitCustomWordBtn');
+                if (retryWordInput && retrySubmitBtn) {
+                    console.log('Found elements on retry, initializing...');
+                    initializeCustomWordInputElements(gameId, retryWordInput, retrySubmitBtn);
+                } else {
+                    console.error('Custom word input elements still not found after retry!');
+                }
+            }, 200);
+            return;
+        }
+        
+        initializeCustomWordInputElements(gameId, wordInput, submitBtn);
+    }, 50);
+}
+
+function initializeCustomWordInputElements(gameId, wordInput, submitBtn) {
+    // Store gameId
+    if (gameId) {
+        currentCustomWordGameId = gameId;
+    }
+    
+    // Remove existing event listeners by cloning
+    const newWordInput = wordInput.cloneNode(true);
+    const newSubmitBtn = submitBtn.cloneNode(true);
+    
+    // Replace old elements with new ones
+    wordInput.parentNode.replaceChild(newWordInput, wordInput);
+    submitBtn.parentNode.replaceChild(newSubmitBtn, submitBtn);
+    
+    // Clear previous input and reset state
+    newWordInput.value = '';
+    newWordInput.disabled = false; // Ensure input is enabled
+    newWordInput.readOnly = false; // Ensure input is not read-only
+    newSubmitBtn.disabled = true;
+    
+    // Auto-uppercase and filter input
+    newWordInput.addEventListener('input', (e) => {
+        e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
+        // Enable submit button only if word is 5 letters
+        const currentSubmitBtn = document.getElementById('submitCustomWordBtn');
+        if (currentSubmitBtn) {
+            currentSubmitBtn.disabled = e.target.value.length !== 5;
+        }
+    });
+    
+    // Submit on Enter
+    newWordInput.addEventListener('keypress', (e) => {
+        const currentSubmitBtn = document.getElementById('submitCustomWordBtn');
+        if (e.key === 'Enter' && currentSubmitBtn && !currentSubmitBtn.disabled) {
+            submitCustomWord();
+        }
+    });
+    
+    // Focus input
+    setTimeout(() => {
+        newWordInput.focus();
+        // Double-check that input is enabled and focusable
+        if (newWordInput.disabled) {
+            console.warn('Input was disabled after focus attempt, re-enabling...');
+            newWordInput.disabled = false;
+            newWordInput.focus();
+        }
+    }, 150);
+    
+    // Submit button handler
+    newSubmitBtn.addEventListener('click', () => {
+        submitCustomWord();
+    });
+    
+    console.log('Custom word input initialized successfully. Input enabled:', !newWordInput.disabled, 'Read-only:', newWordInput.readOnly);
+}
+
+function submitCustomWord() {
+    const wordInput = document.getElementById('customWordInputField');
+    const submitBtn = document.getElementById('submitCustomWordBtn');
+    
+    if (!wordInput || !wordInput.value || wordInput.value.length !== 5) {
+        showGameMessage('⚠️', 'Invalid Word', 'Please enter a 5-letter word');
+        return;
+    }
+    
+    const word = wordInput.value.toUpperCase();
+    const gameId = currentCustomWordGameId || window.pendingGameId;
+    
+    if (!gameId) {
+        showGameMessage('⚠️', 'Error', 'Game ID not found');
+        return;
+    }
+    
+    // Disable input and button while submitting
+    wordInput.disabled = true;
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="btn-icon">✓</span><span>Submitting...</span>';
+    }
+    
+    socket.emit('submitCustomWord', {
+        gameId: gameId,
+        word: word
+    });
+}
+
+socket.on('customWordAccepted', (data) => {
+    // Word was accepted, show waiting message
+    const waitingMessage = document.getElementById('waitingMessage');
+    if (waitingMessage) {
+        waitingMessage.textContent = 'Word submitted! Waiting for opponent to submit their word...';
+    }
+    ScreenManager.show('waiting');
+});
+
+// Toggle replies visibility
+function toggleReplies(commentId) {
+    const repliesContainer = document.getElementById(`replies_${commentId}`);
+    const viewBtn = document.getElementById(`viewRepliesBtn_${commentId}`);
+    
+    if (!repliesContainer || !viewBtn) return;
+    
+    const isVisible = repliesContainer.style.display !== 'none';
+    
+    if (isVisible) {
+        repliesContainer.style.display = 'none';
+        const icon = viewBtn.querySelector('.view-replies-icon');
+        if (icon) icon.textContent = '▼';
+    } else {
+        repliesContainer.style.display = 'block';
+        const icon = viewBtn.querySelector('.view-replies-icon');
+        if (icon) icon.textContent = '▲';
+    }
+}
+
+// Recalculate comment count for a post (counts all comments including replies)
+async function recalculateCommentCount(postId) {
+    if (!window.firebaseDb) {
+        console.error('Firebase not available');
+        return;
+    }
+    
+    try {
+        // Count all comments (both top-level and replies)
+        const commentsSnapshot = await window.firebaseDb.collection('communityPosts')
+            .doc(postId)
+            .collection('comments')
+            .get();
+        
+        const totalCount = commentsSnapshot.size;
+        
+        // Update the comment count
+        await window.firebaseDb.collection('communityPosts').doc(postId).update({
+            commentCount: totalCount
+        });
+        
+        console.log(`Recalculated comment count for post ${postId}: ${totalCount}`);
+        return totalCount;
+    } catch (error) {
+        console.error('Error recalculating comment count:', error);
+        throw error;
+    }
+}
+
+// Recalculate comment counts for all posts (can be called manually by admin)
+async function recalculateAllCommentCounts() {
+    if (!window.firebaseDb || !currentUser) {
+        console.error('Not authenticated or Firebase not available');
+        return;
+    }
+    
+    // Check if user is admin
+    const userIsAdmin = await isAdminAsync();
+    if (!userIsAdmin) {
+        console.error('Only admins can recalculate comment counts');
+        alert('Only admins can recalculate comment counts');
+        return;
+    }
+    
+    try {
+        console.log('Starting comment count recalculation for all posts...');
+        const postsSnapshot = await window.firebaseDb.collection('communityPosts').get();
+        
+        let processed = 0;
+        let errors = 0;
+        
+        for (const doc of postsSnapshot.docs) {
+            try {
+                await recalculateCommentCount(doc.id);
+                processed++;
+            } catch (error) {
+                console.error(`Error recalculating count for post ${doc.id}:`, error);
+                errors++;
+            }
+        }
+        
+        console.log(`Comment count recalculation complete. Processed: ${processed}, Errors: ${errors}`);
+        alert(`Comment count recalculation complete!\nProcessed: ${processed}\nErrors: ${errors}`);
+        
+        // Reload posts to show updated counts
+        loadCommunityPosts();
+    } catch (error) {
+        console.error('Error recalculating all comment counts:', error);
+        alert('Error recalculating comment counts. Check console for details.');
     }
 }
 
@@ -12145,6 +12887,13 @@ document.addEventListener('DOMContentLoaded', () => {
     window.likePost = likePost;
     window.openPostDetail = openPostDetail;
     window.deletePost = deletePost;
+    window.deleteComment = deleteComment;
+    window.showReplyInput = showReplyInput;
+    window.hideReplyInput = hideReplyInput;
+    window.submitReply = submitReply;
+    window.toggleReplies = toggleReplies;
+    window.recalculateCommentCount = recalculateCommentCount;
+    window.recalculateAllCommentCounts = recalculateAllCommentCounts;
     
     // Messages tab event listeners
     const messagesSendBtn = document.getElementById('messagesSendBtn');
