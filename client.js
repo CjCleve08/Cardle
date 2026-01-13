@@ -160,6 +160,12 @@ function showCreditsThenLobby() {
 function showNewCardAnnouncement() {
     ScreenManager.show('newCardAnnouncement');
     
+    // Don't apply camo to new card announcement - show default card appearance
+    const newCardFaces = document.querySelectorAll('.new-card-face');
+    newCardFaces.forEach(face => {
+        face.style.backgroundImage = '';
+    });
+    
     // Scale the announcement screen to fit after a small delay to ensure layout is complete
     setTimeout(() => {
         scaleNewCardAnnouncement();
@@ -374,7 +380,7 @@ function showLobby() {
 
     if (ScreenManager.show('lobby')) {
         // Use setTimeout to ensure DOM is ready and screen is fully shown
-        setTimeout(() => {
+        setTimeout(async () => {
             updateLobbyUserInfo();
             // Load and display stats
             updateStatsDisplay().catch(error => {
@@ -384,6 +390,8 @@ function showLobby() {
             updateRankDisplay().catch(error => {
                 console.error('Error loading rank:', error);
             });
+            // Load owned camos to cache
+            await getOwnedCamos();
         }, 100);
         
         // Generate rank ladder (doesn't need DOM elements)
@@ -402,6 +410,7 @@ function continueToAuth() {
         // Clear stats cache for guest mode
         clearStatsCache();
         clearDecksCache();
+        cachedOwnedCamos = null; // Clear owned camos cache
         // Show splash/credits then lobby
         showSplashThenLobby();
         return;
@@ -431,6 +440,7 @@ function continueToAuth() {
                 // Clear stats cache when user changes
                 clearStatsCache();
         clearDecksCache();
+                cachedOwnedCamos = null; // Clear owned camos cache
                 // Register user as online
                 registerUserAsOnline();
                 // User is signed in - show splash/credits then lobby
@@ -944,6 +954,35 @@ const SPECIAL_CARD_SLOTS = 2; // First 2 slots are special card slots
 const SPECIAL_CARD_SLOT_START = 0;
 const REGULAR_SLOT_START = 2; // Regular cards start at index 2
 let currentDeckSlot = 1; // Current deck slot (1, 2, or 3)
+
+// Camo Management
+const CAMO_STORAGE_KEY = 'cardle_card_camos';
+const OWNED_CAMOS_KEY = 'cardle_owned_camos';
+const ALPHA_PACK_COST = 100; // Cost in chips
+
+// Camo rarities: common, rare, epic
+const AVAILABLE_CAMOS = [
+    { id: 'None', name: 'None', filename: 'BlackBase.png', rarity: 'common', owned: true }, // Always owned, default
+    { id: 'CamoBase', name: 'Camo', filename: 'CamoBase.png', rarity: 'common' },
+    { id: 'PinkCamoBase', name: 'Pink Camo', filename: 'PinkCamoBase.png', rarity: 'common' },
+    { id: 'USABase', name: 'USA', filename: 'USABase.png', rarity: 'common' },
+    { id: 'LeafyBase', name: 'Leafy', filename: 'LeafyBase.png', rarity: 'common' },
+    { id: 'ChillBase', name: 'Chill', filename: 'ChillBase.png', rarity: 'common' },
+    { id: 'OilSpillBase', name: 'Oil Spill', filename: 'OilSpillBase.png', rarity: 'common' },
+    { id: 'AruaBase', name: 'Aura', filename: 'AruaBase.png', rarity: 'common' },
+    { id: 'JohnPorkBase', name: 'John Pork', filename: 'JohnPorkBase.png', rarity: 'common' },
+    { id: 'CarbonCoatBase', name: 'Carbon Coat', filename: 'CarbonCoatBase.png', rarity: 'rare' },
+    { id: 'MatrixBase', name: 'Matrix', filename: 'MatrixBase.png', rarity: 'rare' },
+    { id: 'PlamsaBase', name: 'Plasma', filename: 'PlamsaBase.png', rarity: 'rare' },
+    { id: 'InfernoBase', name: 'Inferno', filename: 'InfernoBase.png', rarity: 'rare' },
+    { id: 'ReaperBase', name: 'Reaper', filename: 'ReaperBase.png', rarity: 'rare' },
+    { id: 'VoidBase', name: 'Void', filename: 'VoidBase.png', rarity: 'common' },
+    { id: 'WereWolfBase', name: 'Werewolf', filename: 'WereWolfBase.png', rarity: 'common' },
+    { id: 'BlackIceBase', name: 'Black Ice', filename: 'BlackIceBase.png', rarity: 'epic' },
+    { id: 'AmethystBase', name: 'Amethyst', filename: 'AmethystBase_.png', rarity: 'epic' },
+    { id: 'DivineBase', name: 'Divine', filename: 'DivineBase.png', rarity: 'epic' },
+    { id: 'DarkTideBase', name: 'Dark Tide', filename: 'DarkTideBase.png', rarity: 'epic' }
+];
 
 // Check if a card is special (chainable cards)
 // Special cards are: modifier cards and cards that allow additional selections/turns
@@ -1476,6 +1515,7 @@ async function updateStats(gameResult) {
     
     // Check for new achievements (before updating consecutive losses for comeback_king)
     // For comeback_king, we need to check before resetting consecutiveLosses
+    // Only check achievements for ranked games
     const statsBeforeUpdate = {
         ...stats,
         gamesPlayed: stats.gamesPlayed + 1,
@@ -1485,20 +1525,23 @@ async function updateStats(gameResult) {
         consecutiveLosses: gameResult.won ? stats.consecutiveLosses : stats.consecutiveLosses + 1
     };
     
-    const newAchievements = checkAchievements(gameResult, statsBeforeUpdate, gameResult.gameData || {});
-    if (newAchievements.length > 0) {
-        // Add new achievements to stats
-        newAchievements.forEach(achievementId => {
-            if (!stats.achievements.includes(achievementId)) {
-                stats.achievements.push(achievementId);
-                const achievement = ACHIEVEMENTS.find(a => a.id === achievementId);
-                if (achievement) {
-                    console.log(`🎉 New achievement unlocked: ${achievement.name} - ${achievement.description}`);
-                    // Show notification to user
-                    showGameMessage('🎉', 'Achievement Unlocked!', `${achievement.name}: ${achievement.description}`);
+    // Only check achievements if this is a ranked game
+    if (isRanked) {
+        const newAchievements = checkAchievements(gameResult, statsBeforeUpdate, gameResult.gameData || {});
+        if (newAchievements.length > 0) {
+            // Add new achievements to stats
+            newAchievements.forEach(achievementId => {
+                if (!stats.achievements.includes(achievementId)) {
+                    stats.achievements.push(achievementId);
+                    const achievement = ACHIEVEMENTS.find(a => a.id === achievementId);
+                    if (achievement) {
+                        console.log(`🎉 New achievement unlocked: ${achievement.name} - ${achievement.description}`);
+                        // Show notification to user
+                        showGameMessage('🎉', 'Achievement Unlocked!', `${achievement.name}: ${achievement.description}`);
+                    }
                 }
-            }
-        });
+            });
+        }
     }
     
     await savePlayerStats(stats);
@@ -2608,6 +2651,19 @@ function createFallingElement(container) {
         const allCards = getAllCards();
         if (allCards.length > 0) {
             const randomCard = allCards[Math.floor(Math.random() * allCards.length)];
+            
+            // Apply camo to falling card
+            const camoId = getCardCamo(randomCard.id);
+            const camo = AVAILABLE_CAMOS.find(c => c.id === camoId);
+            if (camo && camo.filename) {
+                element.style.backgroundImage = `url('images/Card Camo/${camo.filename}')`;
+                element.style.backgroundSize = 'cover';
+                element.style.backgroundPosition = 'center';
+                element.style.backgroundRepeat = 'no-repeat';
+            } else {
+                element.style.backgroundImage = '';
+            }
+            
             const cardImage = document.createElement('img');
             cardImage.src = getCardImagePath(randomCard.id);
             cardImage.alt = randomCard.title || 'Card';
@@ -4493,10 +4549,14 @@ function displayOpponentHandForSteal(cards, opponentName, gameId) {
                 // Don't show splash here - server will emit 'cardPlayed' event which will queue the splash
                 // This prevents double splashes (client-side + server-side)
                 
+                // Get camo for this card (using current player's camo since they're playing it)
+                const camoId = getCardCamo(card.id);
+                
                 // Send the selected card to server
                 socket.emit('selectOpponentCard', {
                     gameId: gameId,
-                    card: card
+                    card: card,
+                    camoId: camoId // Include camo so both players see the same camo
                 });
             });
             
@@ -5037,7 +5097,7 @@ socket.on('cardPlayed', (data) => {
             }
         }
         
-        queueCardSplash(data.card, data.playerName);
+        queueCardSplash(data.card, data.playerName, data.camoId);
 
         // Show tutorial message if opponent played a card (only once, first time)
         if (window.tutorialMode && data.playerId !== currentPlayer && !window.tutorialMessagesShown?.has('opponentCard')) {
@@ -5991,9 +6051,32 @@ function updateHandPanel() {
             const flipContainer = document.createElement('div');
             flipContainer.className = 'hand-card-flip-container';
             
+            // Apply camo background
+            const camoId = getCardCamo(card.id);
+            const camo = AVAILABLE_CAMOS.find(c => c.id === camoId) || AVAILABLE_CAMOS[0]; // Default to None (BlackBase)
+            const camoPath = camo && camo.filename ? `url('images/Card Camo/${camo.filename}')` : 'none';
+            
+            if (camoPath !== 'none') {
+                cardElement.style.backgroundImage = camoPath;
+                cardElement.style.backgroundSize = 'cover';
+                cardElement.style.backgroundPosition = 'center';
+                cardElement.style.backgroundRepeat = 'no-repeat';
+            } else {
+                cardElement.style.backgroundImage = '';
+            }
+            cardElement.dataset.cardId = card.id;
+            
             // Create front face (normal card)
             const frontFace = document.createElement('div');
             frontFace.className = 'hand-card-face hand-card-front';
+            if (camoPath !== 'none') {
+                frontFace.style.backgroundImage = camoPath;
+                frontFace.style.backgroundSize = 'cover';
+                frontFace.style.backgroundPosition = 'center';
+                frontFace.style.backgroundRepeat = 'no-repeat';
+            } else {
+                frontFace.style.backgroundImage = '';
+            }
             const frontImage = document.createElement('img');
             frontImage.src = getCardImagePath(card.id);
             frontImage.alt = card.title || 'Unknown Card';
@@ -6003,6 +6086,14 @@ function updateHandPanel() {
             // Create back face (flipped card)
             const backFace = document.createElement('div');
             backFace.className = 'hand-card-face hand-card-back';
+            if (camoPath !== 'none') {
+                backFace.style.backgroundImage = camoPath;
+                backFace.style.backgroundSize = 'cover';
+                backFace.style.backgroundPosition = 'center';
+                backFace.style.backgroundRepeat = 'no-repeat';
+            } else {
+                backFace.style.backgroundImage = '';
+            }
             const backImage = document.createElement('img');
             backImage.src = 'images/Card Images/FlipedCard.png';
             backImage.alt = 'Flipped Card';
@@ -6030,6 +6121,19 @@ function updateHandPanel() {
         const nextCard = window.deckPool[0];
         const nextCardElement = document.createElement('div');
         nextCardElement.className = 'next-card-item';
+        
+        // Apply camo background
+        const camoId = getCardCamo(nextCard.id);
+        const camo = AVAILABLE_CAMOS.find(c => c.id === camoId) || AVAILABLE_CAMOS[0]; // Default to None (BlackBase)
+        if (camo && camo.filename) {
+            nextCardElement.style.backgroundImage = `url('images/Card Camo/${camo.filename}')`;
+            nextCardElement.style.backgroundSize = 'cover';
+            nextCardElement.style.backgroundPosition = 'center';
+            nextCardElement.style.backgroundRepeat = 'no-repeat';
+        } else {
+            nextCardElement.style.backgroundImage = '';
+        }
+        nextCardElement.dataset.cardId = nextCard.id;
         
         // Create image element for the card
         const cardImage = document.createElement('img');
@@ -6279,6 +6383,19 @@ function generateCards(forceGrayOut = false) {
                 // Animation will still run (for transform), but opacity stays at 0.4 via CSS
             }
             
+            // Apply camo background
+            const camoId = getCardCamo(card.id);
+            const camo = AVAILABLE_CAMOS.find(c => c.id === camoId) || AVAILABLE_CAMOS[0]; // Default to None (BlackBase)
+            if (camo && camo.filename) {
+                cardElement.style.backgroundImage = `url('images/Card Camo/${camo.filename}')`;
+                cardElement.style.backgroundSize = 'cover';
+                cardElement.style.backgroundPosition = 'center';
+                cardElement.style.backgroundRepeat = 'no-repeat';
+            } else {
+                cardElement.style.backgroundImage = '';
+            }
+            cardElement.dataset.cardId = card.id;
+            
             // Create image element for the card
             const cardImage = document.createElement('img');
             cardImage.src = getCardImagePath(card.id);
@@ -6366,6 +6483,19 @@ function generateCards(forceGrayOut = false) {
             cardElement.style.pointerEvents = 'none';
             // Animation will still run (for transform), but opacity stays at 0.4 via CSS
         }
+        
+            // Apply camo background
+            const camoId = getCardCamo(card.id);
+            const camo = AVAILABLE_CAMOS.find(c => c.id === camoId) || AVAILABLE_CAMOS[0]; // Default to None (BlackBase)
+            if (camo && camo.filename) {
+                cardElement.style.backgroundImage = `url('images/Card Camo/${camo.filename}')`;
+                cardElement.style.backgroundSize = 'cover';
+                cardElement.style.backgroundPosition = 'center';
+                cardElement.style.backgroundRepeat = 'no-repeat';
+            } else {
+                cardElement.style.backgroundImage = '';
+            }
+            cardElement.dataset.cardId = card.id;
         
         // Create image element for the card
         const cardImage = document.createElement('img');
@@ -6492,10 +6622,14 @@ function selectCard(card, cardElement) {
     
     // Check if we're in Finesse mode - if so, send selectOpponentCard instead
     if (window.finesseMode && window.opponentCardsForFinesse) {
+        // Get camo for this card (using current player's camo since they're playing it)
+        const camoId = getCardCamo(card.id);
+        
         // Send the selected opponent card to server
         socket.emit('selectOpponentCard', {
             gameId: window.finesseGameId || gameState.gameId,
-            card: card
+            card: card,
+            camoId: camoId // Include camo so both players see the same camo
         });
         
         // Don't clear Finesse mode or hide selection here - wait for cardSelected event
@@ -6520,11 +6654,15 @@ function selectCard(card, cardElement) {
         return;
     }
     
+    // Get camo for this card
+    const camoId = getCardCamo(card.id);
+    
     socket.emit('selectCard', {
         gameId: gameState.gameId,
         playerId: currentPlayer,
         card: card,
-        hidden: isInChain // Mark as hidden if we're in a chain
+        hidden: isInChain, // Mark as hidden if we're in a chain
+        camoId: camoId // Include camo so both players see the same camo
     });
     
     // Handle snack time mode differently
@@ -7325,8 +7463,8 @@ let isShowingSplash = false;
 let splashTimeouts = { hideTimeout: null, removeTimeout: null };
 let currentSplashComplete = null;
 
-function queueCardSplash(card, playerName) {
-    splashQueue.push({ card, playerName });
+function queueCardSplash(card, playerName, camoId) {
+    splashQueue.push({ card, playerName, camoId });
     processSplashQueue();
 }
 
@@ -7338,10 +7476,10 @@ function processSplashQueue() {
     
     // Mark as showing and get the next splash
     isShowingSplash = true;
-    const { card, playerName } = splashQueue.shift();
+    const { card, playerName, camoId } = splashQueue.shift();
     
     // Show the splash
-    showCardSplash(card, playerName, () => {
+    showCardSplash(card, playerName, camoId, () => {
         // Callback when splash completes
         isShowingSplash = false;
         // Process next splash in queue after a short delay
@@ -7351,7 +7489,7 @@ function processSplashQueue() {
     });
 }
 
-function showCardSplash(card, playerName, onComplete) {
+function showCardSplash(card, playerName, camoId, onComplete) {
     const splash = document.getElementById('cardSplash');
     const splashImage = document.getElementById('splashCardImage');
     const splashPlayer = document.getElementById('splashPlayer');
@@ -7389,6 +7527,22 @@ function showCardSplash(card, playerName, onComplete) {
     splashImage.src = getCardImagePath(card.id);
     splashImage.alt = card.title || 'Card';
     splashPlayer.textContent = `${playerName || 'Player'} played:`;
+    
+    // Apply camo to splash card container - use camo from event data (player who played the card)
+    const splashCard = document.getElementById('splashCard');
+    if (splashCard) {
+        // Use camoId from event data, or fallback to local player's camo if not provided
+        const camoToUse = camoId || getCardCamo(card.id);
+        const camo = AVAILABLE_CAMOS.find(c => c.id === camoToUse) || AVAILABLE_CAMOS[0]; // Default to None (BlackBase)
+        if (camo && camo.filename) {
+            splashCard.style.backgroundImage = `url('images/Card Camo/${camo.filename}')`;
+            splashCard.style.backgroundSize = 'cover';
+            splashCard.style.backgroundPosition = 'center';
+            splashCard.style.backgroundRepeat = 'no-repeat';
+        } else {
+            splashCard.style.backgroundImage = '';
+        }
+    }
     
     // Reset animation by forcing reflow
     void splash.offsetWidth;
@@ -7568,6 +7722,19 @@ function createDeckSlotCard(card, slotIndex) {
     cardElement.dataset.cardId = card.id;
     cardElement.dataset.slotIndex = slotIndex;
     
+    // Apply camo background
+    const camoId = getCardCamo(card.id);
+    const camo = AVAILABLE_CAMOS.find(c => c.id === camoId) || AVAILABLE_CAMOS[0];
+    if (camo && camo.filename) {
+        cardElement.style.backgroundImage = `url('images/Card Camo/${camo.filename}')`;
+        cardElement.style.backgroundSize = 'cover';
+        cardElement.style.backgroundPosition = 'center';
+        cardElement.style.backgroundRepeat = 'no-repeat';
+    } else {
+        cardElement.style.backgroundImage = '';
+    }
+    cardElement.dataset.cardId = card.id;
+    
     // Create image element for the card
     const cardImage = document.createElement('img');
     cardImage.src = getCardImagePath(card.id);
@@ -7737,6 +7904,18 @@ function renderAvailableCards() {
             cardElement.classList.add('special-card');
         }
         cardElement.dataset.cardId = card.id;
+        
+        // Apply camo background
+        const camoId = getCardCamo(card.id);
+        const camo = AVAILABLE_CAMOS.find(c => c.id === camoId) || AVAILABLE_CAMOS[0];
+        if (camo && camo.filename) {
+            cardElement.style.backgroundImage = `url('images/Card Camo/${camo.filename}')`;
+            cardElement.style.backgroundSize = 'cover';
+            cardElement.style.backgroundPosition = 'center';
+            cardElement.style.backgroundRepeat = 'no-repeat';
+        } else {
+            cardElement.style.backgroundImage = '';
+        }
         
         // Create image element for the card
         const cardImage = document.createElement('img');
@@ -8092,6 +8271,16 @@ function showCardDropdown(card, cardElement, isInDeck, slotIndex = null) {
         };
     }
     
+    // Add click handler for camos button
+    const camosBtn = document.getElementById('dropdownCamos');
+    if (camosBtn) {
+        camosBtn.onclick = async (e) => {
+            e.stopPropagation();
+            await showCamoSelection(card);
+            hideCardDropdown();
+        };
+    }
+    
     // Close dropdown when clicking outside
     setTimeout(() => {
         const clickHandler = (e) => {
@@ -8131,6 +8320,631 @@ function hideCardDropdown() {
     currentDropdownCard = null;
     currentDropdownSlotIndex = null;
     currentDropdownCardElement = null;
+}
+
+// Camo Management Functions
+let currentCamoCard = null;
+let isApplyingToAll = false;
+
+// Cache for owned camos
+let cachedOwnedCamos = null;
+
+async function getOwnedCamos() {
+    // For guests, use localStorage
+    if (isGuestMode || !currentUser) {
+        const stored = localStorage.getItem(OWNED_CAMOS_KEY);
+        if (stored) {
+            try {
+                return JSON.parse(stored);
+            } catch (e) {
+                console.error('Error loading owned camos from localStorage:', e);
+            }
+        }
+        // Default: only "None" is owned
+        return { 'None': true };
+    }
+    
+    // For authenticated users, try Firestore first
+    if (window.firebaseDb && currentUser && currentUser.uid) {
+        // Return cached if available
+        if (cachedOwnedCamos !== null) {
+            return cachedOwnedCamos;
+        }
+        
+        try {
+            const ownedDoc = await window.firebaseDb.collection('ownedCamos').doc(currentUser.uid).get();
+            if (ownedDoc.exists) {
+                cachedOwnedCamos = ownedDoc.data();
+                // Also sync to localStorage
+                localStorage.setItem(OWNED_CAMOS_KEY, JSON.stringify(cachedOwnedCamos));
+                return cachedOwnedCamos;
+            }
+        } catch (error) {
+            console.error('Error loading owned camos from Firestore:', error);
+        }
+    }
+    
+    // Fallback to localStorage
+    const stored = localStorage.getItem(OWNED_CAMOS_KEY);
+    if (stored) {
+        try {
+            const parsed = JSON.parse(stored);
+            cachedOwnedCamos = parsed;
+            return parsed;
+        } catch (e) {
+            console.error('Error loading owned camos from localStorage:', e);
+        }
+    }
+    
+    // Default: only "None" is owned
+    const defaultOwned = { 'None': true };
+    cachedOwnedCamos = defaultOwned;
+    return defaultOwned;
+}
+
+// Save owned camos
+async function saveOwnedCamos(ownedCamos) {
+    localStorage.setItem(OWNED_CAMOS_KEY, JSON.stringify(ownedCamos));
+    cachedOwnedCamos = ownedCamos;
+    
+    if (currentUser && window.firebaseDb && currentUser.uid) {
+        try {
+            await window.firebaseDb.collection('ownedCamos').doc(currentUser.uid).set(ownedCamos, { merge: true });
+        } catch (error) {
+            console.error('Error saving owned camos to Firestore:', error);
+        }
+    }
+}
+
+// Add a camo to owned camos
+async function addOwnedCamo(camoId) {
+    const owned = await getOwnedCamos();
+    owned[camoId] = true;
+    await saveOwnedCamos(owned);
+    // Clear cache so next time it refreshes
+    cachedOwnedCamos = owned;
+}
+
+// Check if camo is owned (synchronous version using cache)
+function isCamoOwned(camoId) {
+    // Use cached value if available, otherwise check localStorage
+    if (cachedOwnedCamos !== null) {
+        return cachedOwnedCamos[camoId] === true || camoId === 'None';
+    }
+    
+    // Fallback to localStorage check
+    const stored = localStorage.getItem(OWNED_CAMOS_KEY);
+    if (stored) {
+        try {
+            const owned = JSON.parse(stored);
+            return owned[camoId] === true || camoId === 'None';
+        } catch (e) {
+            // Error parsing, default to None only
+            return camoId === 'None';
+        }
+    }
+    
+    // Default: only None is owned
+    return camoId === 'None';
+}
+
+// Get camo for a specific card
+function getCardCamo(cardId) {
+    const camos = getCardCamos();
+    const camoId = camos[cardId] || 'None'; // Default to None (BlackBase)
+    // If the selected camo is not owned, default to None
+    return isCamoOwned(camoId) ? camoId : 'None';
+}
+
+// Get all card camos
+function getCardCamos() {
+    if (isGuestMode || !currentUser) {
+        const stored = localStorage.getItem(CAMO_STORAGE_KEY);
+        if (stored) {
+            try {
+                return JSON.parse(stored);
+            } catch (e) {
+                console.error('Error loading camos from localStorage:', e);
+            }
+        }
+        return {};
+    }
+    
+    // For authenticated users, could use Firestore, but for now use localStorage
+    const stored = localStorage.getItem(CAMO_STORAGE_KEY);
+    if (stored) {
+        try {
+            return JSON.parse(stored);
+        } catch (e) {
+            console.error('Error loading camos from localStorage:', e);
+        }
+    }
+    return {};
+}
+
+// Save card camos
+async function saveCardCamos(camos) {
+    localStorage.setItem(CAMO_STORAGE_KEY, JSON.stringify(camos));
+    
+    // For authenticated users, could save to Firestore
+    if (currentUser && window.firebaseDb && currentUser.uid) {
+        try {
+            await window.firebaseDb.collection('cardCamos').doc(currentUser.uid).set(camos, { merge: true });
+        } catch (error) {
+            console.error('Error saving camos to Firestore:', error);
+        }
+    }
+}
+
+// Set camo for a card
+async function setCardCamo(cardId, camoId) {
+    const camos = getCardCamos();
+    camos[cardId] = camoId;
+    await saveCardCamos(camos);
+    updateCardCamoDisplay(cardId, camoId);
+    // Re-render deck builder to show updated camo
+    renderDeckBuilder();
+}
+
+// Set camo for all cards
+async function setCamoForAllCards(camoId) {
+    const allCards = getAllCards();
+    const camos = getCardCamos();
+    
+    allCards.forEach(card => {
+        camos[card.id] = camoId;
+    });
+    
+    await saveCardCamos(camos);
+    
+    // Update all card displays
+    updateAllCardCamoDisplays();
+    
+    // Re-render deck builder to show updated camos
+    renderDeckBuilder();
+}
+
+// Update camo display for a specific card
+function updateCardCamoDisplay(cardId, camoId) {
+    const camo = AVAILABLE_CAMOS.find(c => c.id === camoId) || AVAILABLE_CAMOS[0]; // Default to None (BlackBase)
+    const camoPath = camo && camo.filename ? `url('images/Card Camo/${camo.filename}')` : 'none';
+    
+    // Update all instances of this card by data attribute
+    const cardElements = document.querySelectorAll(`[data-card-id="${cardId}"]`);
+    cardElements.forEach(element => {
+        if (camoPath === 'none') {
+            element.style.backgroundImage = '';
+        } else {
+            element.style.backgroundImage = camoPath;
+            element.style.backgroundSize = 'cover';
+            element.style.backgroundPosition = 'center';
+            element.style.backgroundRepeat = 'no-repeat';
+        }
+    });
+    
+    // Also update cards by checking their image src
+    const allCardElements = document.querySelectorAll('.card, .hand-card-item, .deck-slot-card, .deck-card-item');
+    allCardElements.forEach(element => {
+        const img = element.querySelector('img');
+        if (img) {
+            const imgPath = getCardImagePath(cardId);
+            if (img.src.includes(imgPath.split('/').pop()) || element.dataset.cardId === cardId) {
+                if (camoPath === 'none') {
+                    element.style.backgroundImage = '';
+                } else {
+                    element.style.backgroundImage = camoPath;
+                    element.style.backgroundSize = 'cover';
+                    element.style.backgroundPosition = 'center';
+                    element.style.backgroundRepeat = 'no-repeat';
+                }
+            }
+        }
+    });
+    
+    // Update hand card faces
+    const handCardFaces = document.querySelectorAll('.hand-card-face');
+    handCardFaces.forEach(face => {
+        const img = face.querySelector('img');
+        if (img) {
+            const imgPath = getCardImagePath(cardId);
+            if (img.src.includes(imgPath.split('/').pop())) {
+                if (camoPath === 'none') {
+                    face.style.backgroundImage = '';
+                } else {
+                    face.style.backgroundImage = camoPath;
+                    face.style.backgroundSize = 'cover';
+                    face.style.backgroundPosition = 'center';
+                    face.style.backgroundRepeat = 'no-repeat';
+                }
+            }
+        }
+    });
+}
+
+// Update all card camo displays
+function updateAllCardCamoDisplays() {
+    const camos = getCardCamos();
+    const allCards = getAllCards();
+    
+    allCards.forEach(card => {
+        const camoId = camos[card.id] || 'None';
+        updateCardCamoDisplay(card.id, camoId);
+    });
+    
+    // Re-render deck builder to update camos
+    renderDeckBuilder();
+}
+
+// Show camo selection modal
+let selectedCamoId = null;
+
+async function showCamoSelection(card) {
+    currentCamoCard = card;
+    isApplyingToAll = false;
+    selectedCamoId = getCardCamo(card.id); // Initialize with current camo
+    
+    const modal = document.getElementById('camoSelectionModal');
+    const grid = document.getElementById('camoSelectionGrid');
+    
+    if (!modal || !grid) {
+        console.error('Camo selection modal elements not found');
+        return;
+    }
+    
+    // Clear grid
+    grid.innerHTML = '';
+    
+    // Refresh owned camos cache to get latest unlocks
+    cachedOwnedCamos = null;
+    const ownedCamos = await getOwnedCamos();
+    
+    // Get current camo for this card
+    const currentCamo = getCardCamo(card.id);
+    
+    // Create camo options - only show owned camos
+    AVAILABLE_CAMOS.forEach(camo => {
+        // Only show owned camos - check the fresh owned camos data
+        if (!ownedCamos[camo.id] && camo.id !== 'None') {
+            return;
+        }
+        
+        const camoItem = document.createElement('div');
+        camoItem.className = 'camo-item';
+        if (camo.id === currentCamo) {
+            camoItem.classList.add('selected');
+        }
+        
+        const camoPreview = document.createElement('div');
+        camoPreview.className = 'camo-preview';
+        if (camo.filename) {
+            camoPreview.style.backgroundImage = `url('images/Card Camo/${camo.filename}')`;
+            camoPreview.style.backgroundSize = 'cover';
+            camoPreview.style.backgroundPosition = 'center';
+        }
+        
+        const camoName = document.createElement('div');
+        camoName.className = 'camo-name';
+        camoName.textContent = camo.name;
+        
+        // Add rarity indicator for all camos (shown on hover)
+        const rarityBadge = document.createElement('div');
+        rarityBadge.className = `camo-rarity-badge rarity-${camo.rarity || 'common'}`;
+        rarityBadge.textContent = (camo.rarity || 'common').toUpperCase();
+        camoItem.appendChild(rarityBadge);
+        
+        camoItem.appendChild(camoPreview);
+        camoItem.appendChild(camoName);
+        
+        camoItem.addEventListener('click', () => {
+            // Remove selected from all items
+            grid.querySelectorAll('.camo-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            // Add selected to clicked item
+            camoItem.classList.add('selected');
+            selectedCamoId = camo.id;
+        });
+        
+        grid.appendChild(camoItem);
+    });
+    
+    // Setup apply button
+    const applyBtn = document.getElementById('camoApply');
+    if (applyBtn) {
+        applyBtn.onclick = async (e) => {
+            e.stopPropagation();
+            if (selectedCamoId !== null) {
+                await setCardCamo(card.id, selectedCamoId);
+                showGameMessage('🎨', 'Camo Applied', `Camo applied to ${card.title || 'card'}!`);
+                hideCamoSelection();
+            }
+        };
+    }
+    
+    // Setup apply to all button
+    const applyToAllBtn = document.getElementById('camoApplyToAll');
+    if (applyToAllBtn) {
+        applyToAllBtn.onclick = async (e) => {
+            e.stopPropagation();
+            if (selectedCamoId !== null) {
+                await setCamoForAllCards(selectedCamoId);
+                showGameMessage('🎨', 'Camo Applied', 'Camo applied to all cards!');
+                hideCamoSelection();
+            }
+        };
+    }
+    
+    // Setup close button
+    const closeBtn = document.getElementById('camoModalClose');
+    if (closeBtn) {
+        closeBtn.onclick = (e) => {
+            e.stopPropagation();
+            hideCamoSelection();
+        };
+    }
+    
+    // Close on outside click
+    modal.onclick = (e) => {
+        if (e.target === modal) {
+            hideCamoSelection();
+        }
+    };
+    
+    modal.style.display = 'flex';
+}
+
+// Select a camo (deprecated - now using buttons)
+async function selectCamo(camoId) {
+    if (isApplyingToAll) {
+        await setCamoForAllCards(camoId);
+        showGameMessage('🎨', 'Camo Applied', 'Camo applied to all cards!');
+    } else if (currentCamoCard) {
+        await setCardCamo(currentCamoCard.id, camoId);
+        showGameMessage('🎨', 'Camo Applied', `Camo applied to ${currentCamoCard.title || 'card'}!`);
+    }
+    
+    hideCamoSelection();
+}
+
+// Hide camo selection modal
+function hideCamoSelection() {
+    const modal = document.getElementById('camoSelectionModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    currentCamoCard = null;
+    isApplyingToAll = false;
+    selectedCamoId = null;
+}
+
+// Shop and Alpha Pack Functions
+async function initializeShop() {
+    await updateShopChipsDisplay();
+    
+    // Setup buy alpha pack button
+    const buyBtn = document.getElementById('buyAlphaPackBtn');
+    if (buyBtn) {
+        buyBtn.onclick = () => {
+            buyAlphaPack();
+        };
+    }
+}
+
+async function updateShopChipsDisplay() {
+    const chipsValue = document.getElementById('shopChipsValue');
+    if (chipsValue) {
+        // Get chips from player stats (same source as rank system)
+        const stats = await getPlayerStats();
+        const chipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+        chipsValue.textContent = Math.round(chipPoints);
+    }
+}
+
+async function updateCollectionDisplay() {
+    const collectionGrid = document.getElementById('collectionGrid');
+    if (!collectionGrid) return;
+    
+    collectionGrid.innerHTML = '';
+    const owned = await getOwnedCamos();
+    
+    AVAILABLE_CAMOS.forEach(camo => {
+        if (camo.id === 'None') return; // Skip None from collection
+        
+        const ownedItem = document.createElement('div');
+        ownedItem.className = 'collection-item';
+        if (!owned[camo.id]) {
+            ownedItem.classList.add('locked');
+        }
+        
+        const preview = document.createElement('div');
+        preview.className = 'collection-preview';
+        if (camo.filename) {
+            preview.style.backgroundImage = `url('images/Card Camo/${camo.filename}')`;
+            preview.style.backgroundSize = 'cover';
+            preview.style.backgroundPosition = 'center';
+        }
+        if (!owned[camo.id]) {
+            preview.style.filter = 'grayscale(100%) brightness(0.3)';
+        }
+        
+        const name = document.createElement('div');
+        name.className = 'collection-name';
+        name.textContent = camo.name;
+        
+        const rarity = document.createElement('div');
+        rarity.className = `collection-rarity rarity-${camo.rarity}`;
+        rarity.textContent = camo.rarity ? camo.rarity.toUpperCase() : 'COMMON';
+        
+        ownedItem.appendChild(preview);
+        ownedItem.appendChild(name);
+        ownedItem.appendChild(rarity);
+        
+        if (!owned[camo.id]) {
+            const lockIcon = document.createElement('div');
+            lockIcon.className = 'collection-lock';
+            lockIcon.textContent = '🔒';
+            ownedItem.appendChild(lockIcon);
+        }
+        
+        collectionGrid.appendChild(ownedItem);
+    });
+}
+
+async function buyAlphaPack() {
+    if (!currentUser) {
+        showGameMessage('⚠️', 'Sign In Required', 'Please sign in to purchase alpha packs');
+        return;
+    }
+    
+    // Get current chips from stats (same source as rank system)
+    const stats = await getPlayerStats();
+    const currentChips = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+    
+    if (currentChips < ALPHA_PACK_COST) {
+        showGameMessage('💰', 'Not Enough Chips', `You need ${ALPHA_PACK_COST} chips to buy an alpha pack. You have ${Math.round(currentChips)} chips.`);
+        return;
+    }
+    
+    // Deduct chips from stats
+    stats.chipPoints = (stats.chipPoints || 0) - ALPHA_PACK_COST;
+    await savePlayerStats(stats);
+    
+    // Update displays
+    await updateShopChipsDisplay();
+    await updateRankDisplay(); // Update rank display to reflect new chip count
+    await updateStatsDisplay(); // Update profile stats if visible
+    
+    // Open the alpha pack
+    openAlphaPack();
+}
+
+function openAlphaPack() {
+    const modal = document.getElementById('alphaPackModal');
+    const pack = document.getElementById('alphaPackPack');
+    const result = document.getElementById('alphaPackResult');
+    const closeBtn = document.getElementById('alphaPackCloseBtn');
+    
+    if (!modal || !pack || !result) return;
+    
+    // Reset state
+    modal.style.display = 'flex';
+    pack.style.display = 'block';
+    result.style.display = 'none';
+    closeBtn.style.display = 'none';
+    
+    // Get available camos (excluding None, duplicates are allowed)
+    const availableCamos = AVAILABLE_CAMOS.filter(c => c.id !== 'None');
+    
+    // Calculate drop rates (like R6S)
+    // Common: 70%, Rare: 25%, Epic: 5%
+    const roll = Math.random();
+    let selectedCamo;
+    
+    if (roll < 0.70) {
+        // Common (70%)
+        const commonCamos = availableCamos.filter(c => c.rarity === 'common');
+        if (commonCamos.length > 0) {
+            selectedCamo = commonCamos[Math.floor(Math.random() * commonCamos.length)];
+        } else {
+            // Fallback to rare if no common available
+            const rareCamos = availableCamos.filter(c => c.rarity === 'rare');
+            selectedCamo = rareCamos.length > 0 
+                ? rareCamos[Math.floor(Math.random() * rareCamos.length)]
+                : availableCamos[Math.floor(Math.random() * availableCamos.length)];
+        }
+    } else if (roll < 0.95) {
+        // Rare (25%)
+        const rareCamos = availableCamos.filter(c => c.rarity === 'rare');
+        if (rareCamos.length > 0) {
+            selectedCamo = rareCamos[Math.floor(Math.random() * rareCamos.length)];
+        } else {
+            // Fallback to epic if no rare available
+            const epicCamos = availableCamos.filter(c => c.rarity === 'epic');
+            selectedCamo = epicCamos.length > 0
+                ? epicCamos[Math.floor(Math.random() * epicCamos.length)]
+                : availableCamos[Math.floor(Math.random() * availableCamos.length)];
+        }
+    } else {
+        // Epic (5%)
+        const epicCamos = availableCamos.filter(c => c.rarity === 'epic');
+        if (epicCamos.length > 0) {
+            selectedCamo = epicCamos[Math.floor(Math.random() * epicCamos.length)];
+        } else {
+            // Fallback to rare if no epic available
+            const rareCamos = availableCamos.filter(c => c.rarity === 'rare');
+            selectedCamo = rareCamos.length > 0
+                ? rareCamos[Math.floor(Math.random() * rareCamos.length)]
+                : availableCamos[Math.floor(Math.random() * availableCamos.length)];
+        }
+    }
+    
+    // Animate pack opening
+    setTimeout(async () => {
+        // Check if this is a duplicate
+        const owned = await getOwnedCamos();
+        const isDuplicate = owned[selectedCamo.id] === true;
+        pack.style.display = 'none';
+        result.style.display = 'block';
+        
+        const preview = document.getElementById('alphaPackResultPreview');
+        const name = document.getElementById('alphaPackResultName');
+        const rarity = document.getElementById('alphaPackResultRarity');
+        
+        if (preview && selectedCamo.filename) {
+            preview.style.backgroundImage = `url('images/Card Camo/${selectedCamo.filename}')`;
+            preview.style.backgroundSize = 'cover';
+            preview.style.backgroundPosition = 'center';
+        }
+        
+        if (name) {
+            if (isDuplicate) {
+                name.textContent = `${selectedCamo.name} (Duplicate!)`;
+            } else {
+                name.textContent = selectedCamo.name;
+            }
+        }
+        if (rarity) {
+            if (isDuplicate) {
+                rarity.textContent = 'DUPLICATE - +50 CHIPS';
+                rarity.className = 'alpha-pack-result-rarity rarity-duplicate';
+            } else {
+                rarity.textContent = selectedCamo.rarity ? selectedCamo.rarity.toUpperCase() : 'COMMON';
+                rarity.className = `alpha-pack-result-rarity rarity-${selectedCamo.rarity}`;
+            }
+        }
+        
+        // Handle duplicate or new camo
+        if (isDuplicate) {
+            // Give 50 chips back for duplicate
+            const stats = await getPlayerStats();
+            stats.chipPoints = (stats.chipPoints || 0) + 50;
+            await savePlayerStats(stats);
+            await updateShopChipsDisplay();
+            await updateRankDisplay();
+            await updateStatsDisplay();
+        } else {
+            // Add to owned camos
+            await addOwnedCamo(selectedCamo.id);
+        }
+        
+        closeBtn.style.display = 'block';
+        
+        // Play sound if available
+        if (typeof soundManager !== 'undefined') {
+            if (selectedCamo.rarity === 'epic') {
+                soundManager.playCardSelect(); // Use special sound for epic
+            } else {
+                soundManager.playCardSelect();
+            }
+        }
+    }, 2000); // 2 second animation
+    
+    // Close button handler
+    if (closeBtn) {
+        closeBtn.onclick = () => {
+            modal.style.display = 'none';
+        };
+    }
 }
 
 function addCardToDeck(card) {
@@ -8180,6 +8994,13 @@ function showCardInfo(card) {
     
     cardImage.src = getCardImagePath(cardId);
     cardImage.alt = cardTitle;
+    
+    // Don't apply camo to card info overlay - show default card appearance
+    const cardInfoContent = overlay.querySelector('.card-info-content');
+    if (cardInfoContent) {
+        cardInfoContent.style.backgroundImage = '';
+    }
+    
     overlay.style.display = 'flex';
     
     // Close on click
@@ -8322,6 +9143,22 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('No cards available yet, decks will be initialized when cards load');
             return;
         }
+        
+        // Initialize camos for all cards (set default if not set)
+        const camos = getCardCamos();
+        let camosUpdated = false;
+        allCards.forEach(card => {
+            if (!camos[card.id]) {
+                camos[card.id] = 'None'; // Default to None (no camo)
+                camosUpdated = true;
+            }
+        });
+        if (camosUpdated) {
+            await saveCardCamos(camos);
+        }
+        
+        // Apply camos to all cards
+        updateAllCardCamoDisplays();
         
         const decks = await getAllDecks();
         const premadeDeck = createPremadeDeck().filter(id => id !== null);
@@ -8858,6 +9695,11 @@ function switchTab(tabName) {
         loadLeaderboard().catch(error => {
             console.error('Error loading leaderboard:', error);
         });
+    }
+    
+    // If switching to shop tab, initialize shop
+    if (tabName === 'shop') {
+        initializeShop();
     }
     
     // If switching to settings tab, initialize settings
@@ -10649,6 +11491,19 @@ function updateSpectatorHandPanel() {
             cardElement.style.pointerEvents = 'none'; // Disable interaction
             cardElement.style.opacity = '0.8'; // Slightly dimmed to show it's not interactive
             
+            // Apply camo background
+            const camoId = getCardCamo(card.id);
+            const camo = AVAILABLE_CAMOS.find(c => c.id === camoId) || AVAILABLE_CAMOS[0]; // Default to None (BlackBase)
+            if (camo && camo.filename) {
+                cardElement.style.backgroundImage = `url('images/Card Camo/${camo.filename}')`;
+                cardElement.style.backgroundSize = 'cover';
+                cardElement.style.backgroundPosition = 'center';
+                cardElement.style.backgroundRepeat = 'no-repeat';
+            } else {
+                cardElement.style.backgroundImage = '';
+            }
+            cardElement.dataset.cardId = card.id;
+            
             // Create image element for the card
             const cardImage = document.createElement('img');
             cardImage.src = getCardImagePath(card.id);
@@ -10694,6 +11549,8 @@ socket.on('cardPlayed', (data) => {
     if (window.isSpectator && window.spectatorGameId) {
         // Show card splash for spectators too
         queueCardSplash(data.card, data.playerName);
+        // Queue splash for spectator mode
+        queueCardSplash(data.card, data.playerName, data.camoId);
         
         // If the spectated player played a card, remove it from their hand and request updated hand
         if (data.playerId === window.spectatedPlayerId && window.spectatedPlayerHand) {

@@ -1821,7 +1821,8 @@ function processBotTurn(gameId) {
                         humanSocket.emit('cardPlayed', {
                             card: cardToShow,
                             playerName: botPlayerForCard.name,
-                            playerId: botId
+                            playerId: botId,
+                            camoId: 'None' // Bots don't have camo preferences, default to None
                         });
                         
                         // Send system notification to chat with card data
@@ -3563,7 +3564,8 @@ io.on('connection', (socket) => {
                 io.to(data.gameId).emit('cardPlayed', {
                     card: data.card,
                     playerName: player ? player.name : 'Player',
-                    playerId: socket.id
+                    playerId: socket.id,
+                    camoId: data.camoId || 'None' // Include camo from player's selection
                 });
                 
                 // Send system notification to chat with card data
@@ -3595,7 +3597,8 @@ io.on('connection', (socket) => {
                 io.to(data.gameId).emit('cardPlayed', {
                     card: data.card,
                     playerName: player ? player.name : 'Player',
-                    playerId: socket.id
+                    playerId: socket.id,
+                    camoId: data.camoId || 'None' // Include camo from player's selection
                 });
                 
                 // Send system notification to chat with card data
@@ -3709,7 +3712,8 @@ io.on('connection', (socket) => {
             socket.emit('cardPlayed', {
                 card: cardForSplash,
                 playerName: player ? player.name : 'Player',
-                playerId: socket.id
+                playerId: socket.id,
+                camoId: data.camoId || 'None' // Include camo from player's selection
             });
         }
         
@@ -3878,9 +3882,10 @@ io.on('connection', (socket) => {
             if (opponentSocket) {
                 opponentSocket.emit('cardPlayed', {
                     card: cardToShowOpponentForSplash,
-            playerName: player ? player.name : 'Player',
-            playerId: socket.id
-        });
+                    playerName: player ? player.name : 'Player',
+                    playerId: socket.id,
+                    camoId: data.camoId || 'None' // Include camo from player's selection
+                });
             }
         }
         
@@ -4049,7 +4054,8 @@ io.on('connection', (socket) => {
                 io.to(data.gameId).emit('cardPlayed', {
                     card: stolenCard,
                     playerName: player ? player.name : 'Player',
-                    playerId: socket.id
+                    playerId: socket.id,
+                    camoId: data.camoId || 'None' // Include camo from player's selection
                 });
                 
                 // Send system notification to chat with card data
@@ -4329,7 +4335,8 @@ io.on('connection', (socket) => {
                 opponentSocket.emit('cardPlayed', {
                     card: cardToShowOpponentForSplash,
                     playerName: player ? player.name : 'Player',
-                    playerId: socket.id
+                    playerId: socket.id,
+                    camoId: data.camoId || 'None' // Include camo from player's selection
                 });
             }
             
@@ -4342,7 +4349,8 @@ io.on('connection', (socket) => {
                         spectatorSocket.emit('cardPlayed', {
                             card: cardToShowOpponentForSplash,
                             playerName: player ? player.name : 'Player',
-                            playerId: socket.id
+                            playerId: socket.id,
+                            camoId: data.camoId || 'None' // Include camo from player's selection
                         });
                     }
                 });

@@ -657,6 +657,45 @@
                         </div>
                     </div>
                     
+                    <!-- Shop Tab -->
+                    <div id="shopTab" class="tab-panel">
+                        <div class="tab-panel-inner">
+                            <h2 class="tab-panel-title">Shop</h2>
+                            <div class="shop-content">
+                                <div class="shop-header">
+                                    <div class="shop-chips-display">
+                                        <span class="shop-chips-label">Your Chips:</span>
+                                        <span class="shop-chips-value" id="shopChipsValue">0</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="shop-section">
+                                    <h3 class="shop-section-title">Alpha Packs</h3>
+                                    <div class="alpha-pack-container">
+                                        <div class="alpha-pack-item">
+                                            <div class="alpha-pack-image">
+                                                <div class="alpha-pack-glow"></div>
+                                            </div>
+                                            <div class="alpha-pack-info">
+                                                <div class="alpha-pack-name">Alpha Pack</div>
+                                                <div class="alpha-pack-description">Open to receive a random camo!</div>
+                                                <div class="alpha-pack-rarities">
+                                                    <span class="rarity-indicator rarity-common">Common</span>
+                                                    <span class="rarity-indicator rarity-rare">Rare</span>
+                                                    <span class="rarity-indicator rarity-epic">Epic</span>
+                                                </div>
+                                                <button id="buyAlphaPackBtn" class="btn btn-primary btn-large alpha-pack-buy-btn">
+                                                    <span class="btn-icon">💰</span>
+                                                    <span>Buy for <span id="alphaPackPrice">100</span> Chips</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <!-- Settings Tab -->
                     <div id="settingsTab" class="tab-panel">
                         <div class="tab-panel-inner">
@@ -703,6 +742,12 @@
                             <span class="tab-icon">👥</span>
                         </div>
                         <span class="tab-label">Friends</span>
+                    </button>
+                    <button class="lobby-tab" data-tab="shop">
+                        <div class="tab-icon-wrapper">
+                            <span class="tab-icon">🛒</span>
+                        </div>
+                        <span class="tab-label">Shop</span>
                     </button>
                     <button class="lobby-tab" data-tab="community">
                         <div class="tab-icon-wrapper">
@@ -1302,6 +1347,27 @@
             <span class="dropdown-item-icon">ℹ️</span>
             <span class="dropdown-item-text">Info</span>
         </button>
+        <button class="dropdown-item" id="dropdownCamos">
+            <span class="dropdown-item-icon">🎨</span>
+            <span class="dropdown-item-text">Camos</span>
+        </button>
+    </div>
+    
+    <!-- Camo Selection Modal -->
+    <div id="camoSelectionModal" class="camo-selection-modal" style="display: none;">
+        <div class="camo-selection-content">
+            <div class="camo-selection-header">
+                <h2>Select Camo</h2>
+                <button class="camo-modal-close" id="camoModalClose">×</button>
+            </div>
+            <div class="camo-selection-grid" id="camoSelectionGrid">
+                <!-- Camos will be inserted here -->
+            </div>
+            <div class="camo-selection-actions">
+                <button class="btn btn-primary" id="camoApply">Apply</button>
+                <button class="btn btn-secondary" id="camoApplyToAll">Apply to All</button>
+            </div>
+        </div>
     </div>
     
     <!-- Card Info Overlay -->
@@ -1309,6 +1375,25 @@
         <div class="card-info-content">
             <button class="card-info-close" id="cardInfoClose">×</button>
             <img id="cardInfoImage" class="card-info-image" src="" alt="Card">
+        </div>
+    </div>
+    
+    <!-- Alpha Pack Opening Modal -->
+    <div id="alphaPackModal" class="alpha-pack-modal" style="display: none;">
+        <div class="alpha-pack-modal-content">
+            <div class="alpha-pack-opening-container">
+                <div class="alpha-pack-pack" id="alphaPackPack">
+                    <div class="alpha-pack-pack-glow"></div>
+                </div>
+                <div class="alpha-pack-result" id="alphaPackResult" style="display: none;">
+                    <div class="alpha-pack-result-card">
+                        <div class="alpha-pack-result-preview" id="alphaPackResultPreview"></div>
+                        <div class="alpha-pack-result-name" id="alphaPackResultName"></div>
+                        <div class="alpha-pack-result-rarity" id="alphaPackResultRarity"></div>
+                    </div>
+                </div>
+            </div>
+            <button class="alpha-pack-close-btn" id="alphaPackCloseBtn" style="display: none;">Close</button>
         </div>
     </div>
     
