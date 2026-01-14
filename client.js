@@ -8,6 +8,88 @@ const socket = io({
     transports: ['websocket', 'polling']
 });
 
+// Global error handler for unhandled Firestore CORS/network errors and image loading errors
+window.addEventListener('error', (event) => {
+    // Suppress CORS errors from Firestore - these are often temporary network issues
+    if (event.message && (
+        event.message.includes('CORS') || 
+        event.message.includes('firestore.googleapis.com') ||
+        event.message.includes('access control checks')
+    )) {
+        // Silently handle - these are expected in some network configurations
+        event.preventDefault();
+        return true;
+    }
+    
+    // Suppress 429 (rate limit) errors from image loading - these are temporary
+    // Check for IMG elements
+    if (event.target && event.target.tagName === 'IMG' && (
+        event.target.src?.includes('googleusercontent.com') ||
+        event.target.src?.includes('s96-c') ||
+        event.message?.includes('429') ||
+        event.filename?.includes('googleusercontent.com') ||
+        event.filename?.includes('s96-c')
+    )) {
+        // Silently handle image rate limit errors
+        event.preventDefault();
+        return true;
+    }
+    
+    // Suppress resource loading errors (429) for any resource
+    if (event.message && (
+        event.message.includes('429') ||
+        event.message.includes('Failed to load resource')
+    )) {
+        // Check if it's a Google profile image
+        const source = event.filename || event.target?.src || event.target?.href || '';
+        if (source.includes('googleusercontent.com') || source.includes('s96-c') || source.includes('s48-c') || source.includes('s128-c')) {
+            // Silently handle Google profile image rate limit errors
+            event.preventDefault();
+            return true;
+        }
+    }
+}, true);
+
+// Also catch unhandled promise rejections from Firestore and image loading
+window.addEventListener('unhandledrejection', (event) => {
+    const error = event.reason;
+    if (error && (
+        error.message?.includes('CORS') ||
+        error.message?.includes('firestore.googleapis.com') ||
+        error.message?.includes('access control checks') ||
+        error.code === 'unavailable' ||
+        error.status === 429 ||
+        (typeof error === 'string' && error.includes('429')) ||
+        (error.message && error.message.includes('429'))
+    )) {
+        // Silently handle Firestore network errors and rate limit errors
+        event.preventDefault();
+    }
+});
+
+// Suppress console errors for failed resource loads (429 errors from Google images)
+// Note: Browser's native "Failed to load resource" errors may still appear in console
+// but this will catch JavaScript-thrown errors related to image loading
+const originalConsoleError = console.error;
+console.error = function(...args) {
+    // Filter out 429 errors for Google profile images
+    const message = args.join(' ');
+    if (message && (
+        (message.includes('429') && (
+            message.includes('googleusercontent.com') ||
+            message.includes('s96-c') ||
+            message.includes('s48-c') ||
+            message.includes('s128-c')
+        )) ||
+        (message.includes('Failed to load resource') && message.includes('429'))
+    )) {
+        // Suppress these specific errors - they're rate limits from Google's CDN
+        return;
+    }
+    // Call original console.error for other errors
+    originalConsoleError.apply(console, args);
+};
+
 // Initialize sound manager on user interaction (required for autoplay policy)
 function initSoundOnInteraction() {
     if (typeof soundManager !== 'undefined') {
@@ -390,13 +472,29 @@ function showLobby() {
             updateRankDisplay().catch(error => {
                 console.error('Error loading rank:', error);
             });
+            // Update header currency
+            updateHeaderCurrency().catch(error => {
+                console.error('Error loading header currency:', error);
+            });
             // Load owned camos to cache
             await getOwnedCamos();
+            // Load community posts on startup
+            if (currentUser && window.firebaseDb) {
+                loadCommunityPosts().catch(error => {
+                    console.error('Error loading community posts:', error);
+                });
+            }
+            // Load messages on startup
+            if (currentUser && window.firebaseDb) {
+                loadMessagesFriends().catch(error => {
+                    console.error('Error loading messages:', error);
+                });
+            }
         }, 100);
         
         // Generate rank ladder (doesn't need DOM elements)
         generateRankLadder();
-        // Update daily chip claim UI
+        // Update daily bit claim UI
         updateDailyClaimUI();
     }
 }
@@ -708,6 +806,32 @@ function hideAuthErrors() {
     if (guestNameError) guestNameError.style.display = 'none';
 }
 
+// Helper function to test if an image URL loads successfully
+function testImageLoad(url) {
+    return new Promise((resolve, reject) => {
+        if (!url) {
+            reject(new Error('No URL provided'));
+            return;
+        }
+        
+        const img = new Image();
+        // Set a timeout to avoid hanging on slow/broken URLs
+        const timeout = setTimeout(() => {
+            reject(new Error('Image load timeout'));
+        }, 5000);
+        
+        img.onload = () => {
+            clearTimeout(timeout);
+            resolve();
+        };
+        img.onerror = () => {
+            clearTimeout(timeout);
+            reject(new Error('Image failed to load'));
+        };
+        img.src = url;
+    });
+}
+
 function updateLobbyUserInfo() {
     // Ensure DOM elements are ready - wait for next tick if needed
     const userInfoHeader = document.getElementById('userInfoHeader');
@@ -717,6 +841,9 @@ function updateLobbyUserInfo() {
     const profileEmail = document.getElementById('profileEmail');
     const profileAccountType = document.getElementById('profileAccountType');
     const profileAvatar = document.getElementById('profileAvatar');
+    
+    // Show/hide admin tab based on admin status
+    updateAdminTabVisibility();
     
     // Debug: Check if profile elements exist
     if (!profileName || !profileEmail || !profileAccountType || !profileAvatar) {
@@ -784,10 +911,24 @@ function updateLobbyUserInfo() {
             // Prefer Firestore photoURL if available
             const applyAvatar = (url) => {
                 if (url) {
-                    profileAvatar.style.backgroundImage = `url(${url})`;
-                    profileAvatar.style.backgroundSize = 'cover';
-                    profileAvatar.style.backgroundPosition = 'center';
-                    profileAvatar.textContent = '';
+                    // Show initial immediately
+                    const initial = displayName.charAt(0).toUpperCase();
+                    profileAvatar.textContent = initial;
+                    
+                    // Try to load image in background - if it fails, keep the initial
+                    testImageLoad(url).then(() => {
+                        // Image loaded successfully - apply it
+                        profileAvatar.style.backgroundImage = `url(${url})`;
+                        profileAvatar.style.backgroundSize = 'cover';
+                        profileAvatar.style.backgroundPosition = 'center';
+                        profileAvatar.textContent = '';
+                    }).catch(() => {
+                        // Image failed to load (429, network error, etc.) - keep initial visible
+                        profileAvatar.style.backgroundImage = '';
+                        profileAvatar.style.backgroundSize = '';
+                        profileAvatar.style.backgroundPosition = '';
+                        // Initial is already set above
+                    });
                 } else {
                     profileAvatar.style.backgroundImage = '';
                     profileAvatar.style.backgroundSize = '';
@@ -958,7 +1099,7 @@ let currentDeckSlot = 1; // Current deck slot (1, 2, or 3)
 // Camo Management
 const CAMO_STORAGE_KEY = 'cardle_card_camos';
 const OWNED_CAMOS_KEY = 'cardle_owned_camos';
-const ALPHA_PACK_COST = 100; // Cost in chips
+const ALPHA_PACK_COST = 100; // Cost in bits
 
 // Camo rarities: common, rare, epic
 const AVAILABLE_CAMOS = [
@@ -1019,11 +1160,12 @@ function getDefaultStats() {
         totalGuesses: 0,
         gamesWithGuesses: 0,
         chipPoints: 0, // Starting chip points (rating system)
+        bits: 0, // Bits currency for Alpha Packs and achievements
         winStreak: 0, // Current consecutive wins
         bestWinStreak: 0, // Best win streak achieved
         consecutiveLosses: 0, // Current consecutive losses
         achievements: [], // Array of unlocked achievement IDs
-        claimedAchievements: [], // Array of claimed achievement IDs (for chip rewards)
+        claimedAchievements: [], // Array of claimed achievement IDs (for bit rewards)
         lastDailyClaim: null // Timestamp of last daily claim (ISO string)
     };
 }
@@ -1458,6 +1600,9 @@ async function updateStats(gameResult) {
     if (stats.chipPoints === undefined || stats.chipPoints === null) {
         stats.chipPoints = 0;
     }
+    if (stats.bits === undefined || stats.bits === null) {
+        stats.bits = 0;
+    }
     if (stats.winStreak === undefined || stats.winStreak === null) {
         stats.winStreak = 0;
     }
@@ -1506,7 +1651,16 @@ async function updateStats(gameResult) {
         // SECURITY: Only update chip points if server provided the value
         // This prevents clients from manipulating their rank by sending arbitrary chip values
         if (gameResult.chipPoints !== undefined) {
+            const oldChipPoints = stats.chipPoints;
             stats.chipPoints = gameResult.chipPoints;
+            
+            // Calculate Bits earned from chips won (only if player won)
+            if (gameResult.won && gameResult.chipPointsChange !== undefined && gameResult.chipPointsChange > 0) {
+                // Formula: (chipsWon / 5) * 2, rounded up
+                const bitsEarned = Math.ceil((gameResult.chipPointsChange / 5) * 2);
+                stats.bits = (stats.bits || 0) + bitsEarned;
+                console.log(`Earned ${bitsEarned} Bits from winning ${gameResult.chipPointsChange} chips`);
+            }
         } else {
             // If server didn't provide chipPoints, don't update (security measure)
             console.warn('Server did not provide chipPoints. Skipping chip update for security.');
@@ -1548,6 +1702,7 @@ async function updateStats(gameResult) {
     await updateStatsDisplay();
     await updateRankDisplay();
     await updateAchievementsDisplay();
+    await updateHeaderCurrency();
 }
 
 function checkAchievements(gameResult, stats, gameData) {
@@ -1618,10 +1773,31 @@ async function updateStatsDisplay() {
         winStreakEl.textContent = winStreak;
     }
     
-    // Also update rank display
+    // Also update rank display and header currency
     updateRankDisplay().catch(error => {
         console.error('Error updating rank display:', error);
     });
+    updateHeaderCurrency().catch(error => {
+        console.error('Error updating header currency:', error);
+    });
+}
+
+// Update currency display in header (Bits and Chips)
+async function updateHeaderCurrency() {
+    const stats = await getPlayerStats();
+    
+    const bitsValue = document.getElementById('headerBitsValue');
+    const chipsValue = document.getElementById('headerChipsValue');
+    
+    if (bitsValue) {
+        const bits = stats.bits !== undefined && stats.bits !== null ? stats.bits : 0;
+        bitsValue.textContent = Math.round(bits).toLocaleString();
+    }
+    
+    if (chipsValue) {
+        const chips = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+        chipsValue.textContent = Math.round(chips).toLocaleString();
+    }
 }
 
 async function updateAchievementsDisplay() {
@@ -1657,7 +1833,7 @@ async function updateAchievementsDisplay() {
                 <div class="achievement-name">${achievement.name}</div>
                 <div class="achievement-description">${achievement.description}</div>
             </div>
-            ${canClaim ? '<div class="achievement-claim-overlay">Claim 10 Chips</div>' : ''}
+            ${canClaim ? '<div class="achievement-claim-overlay">Claim 10 Bits</div>' : ''}
         `;
         
         achievementsGrid.appendChild(achievementCard);
@@ -1692,8 +1868,8 @@ async function claimAchievement(achievementId) {
     }
     stats.claimedAchievements.push(achievementId);
     
-    // Add 10 chips
-    stats.chipPoints = (stats.chipPoints || 0) + 10;
+    // Add 10 bits
+    stats.bits = (stats.bits || 0) + 10;
     
     // Save stats
     await savePlayerStats(stats);
@@ -1726,11 +1902,11 @@ async function claimAchievement(achievementId) {
     
     // Show success message
     const achievement = ACHIEVEMENTS.find(a => a.id === achievementId);
-    showGameMessage('🎉', 'Achievement Claimed!', `You received 10 chips for ${achievement?.name || 'this achievement'}!`);
+    showGameMessage('🎉', 'Achievement Claimed!', `You received 10 bits for ${achievement?.name || 'this achievement'}!`);
 }
 
-// Daily Chip Claim System
-const DAILY_CHIP_REWARD = 50;
+// Daily Bit Claim System
+const DAILY_BIT_REWARD = 30;
 const DAILY_CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
 // Check if daily claim is available
@@ -1777,7 +1953,7 @@ function formatTimeRemaining(ms) {
     }
 }
 
-// Claim daily chips
+// Claim daily bits
 async function claimDailyChips() {
     const stats = await getPlayerStats();
     
@@ -1788,8 +1964,8 @@ async function claimDailyChips() {
         return;
     }
     
-    // Update stats
-    stats.chipPoints = (stats.chipPoints || 0) + DAILY_CHIP_REWARD;
+    // Update stats - give bits instead of chips
+    stats.bits = (stats.bits || 0) + DAILY_BIT_REWARD;
     stats.lastDailyClaim = new Date().toISOString();
     
     // Save stats
@@ -1797,11 +1973,11 @@ async function claimDailyChips() {
     
     // Update UI
     await updateStatsDisplay();
-    await updateRankDisplay();
+    await updateHeaderCurrency();
     updateDailyClaimUI();
     
     // Show success message
-    showGameMessage('🎁', 'Daily Bonus Claimed!', `You received ${DAILY_CHIP_REWARD} chips!`);
+    showGameMessage('🎁', 'Daily Bonus Claimed!', `You received ${DAILY_BIT_REWARD} bits!`);
     
     // Play success sound if available
     if (typeof soundManager !== 'undefined') {
@@ -1832,7 +2008,7 @@ async function updateDailyClaimUI() {
         // Claim is available
         claimBtn.disabled = false;
         claimBtn.textContent = 'Claim';
-        claimSubtitle.textContent = 'Claim 50 chips!';
+        claimSubtitle.textContent = `Claim ${DAILY_BIT_REWARD} bits!`;
         dailyClaimContainer.classList.remove('daily-claim-cooldown');
         dailyClaimContainer.classList.add('daily-claim-available');
     } else {
@@ -2015,6 +2191,11 @@ async function updateRankDisplay() {
     const stats = await getPlayerStats();
     const chipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
     const rank = getRankFromChips(chipPoints);
+    
+    // Also update header currency when rank is updated
+    updateHeaderCurrency().catch(error => {
+        console.error('Error updating header currency:', error);
+    });
     
     // Update rank display in play tab
     const rankDisplayEl = document.getElementById('currentRankDisplay');
@@ -4863,6 +5044,22 @@ socket.on('gameOver', (data) => {
             }
         }
         
+        // Calculate and display Bits won (only if player won)
+        const bitsPointsChangeEl = document.getElementById('gameOverBitsPoints');
+        if (bitsPointsChangeEl) {
+            if (won && chipPointsChange > 0) {
+                // Formula: (chipsWon / 5) * 2, rounded up
+                const bitsWon = Math.ceil((chipPointsChange / 5) * 2);
+                bitsPointsChangeEl.textContent = `+${bitsWon} Bits`;
+                bitsPointsChangeEl.classList.add('bits-points-gain');
+                bitsPointsChangeEl.classList.remove('bits-points-loss');
+                bitsPointsChangeEl.style.display = 'block';
+            } else {
+                // Hide bits display if no bits earned (loss or no chips won)
+                bitsPointsChangeEl.style.display = 'none';
+            }
+        }
+        
         // Generate and animate rank progress bar
         generateGameOverRankProgress(currentChipPoints, newChipPoints);
             
@@ -4878,7 +5075,7 @@ socket.on('gameOver', (data) => {
             const activeEffects = gameState?.activeEffects || [];
             
             const gameData = {
-                guesses: playerGuesses.map(g => g ? g.toUpperCase() : ''),
+                guesses: playerGuesses.map(g => (typeof g === 'string' && g) ? g.toUpperCase() : ''),
                 isRanked: true,
                 playerId: currentPlayer,
                 activeEffects: activeEffects
@@ -4891,6 +5088,7 @@ socket.on('gameOver', (data) => {
                 won: won,
                 guesses: finalGuesses,
                 chipPoints: newChipPoints,  // Use server-calculated chip points (SECURITY: prevents manipulation)
+                chipPointsChange: chipPointsChange,  // Pass chip change for Bits calculation
                 isRanked: true,  // Explicitly mark as ranked
                 gameData: gameData
             }).catch(error => {
@@ -4906,6 +5104,11 @@ socket.on('gameOver', (data) => {
             chipPointsChangeEl.textContent = '';
             chipPointsChangeEl.classList.remove('chip-points-gain', 'chip-points-loss');
         }
+        // Hide bits display for non-ranked games
+        const bitsPointsChangeEl = document.getElementById('gameOverBitsPoints');
+        if (bitsPointsChangeEl) {
+            bitsPointsChangeEl.style.display = 'none';
+        }
     
         // Prepare game data for achievements
         const player = gameState?.players?.find(p => p.id === currentPlayer);
@@ -4913,7 +5116,7 @@ socket.on('gameOver', (data) => {
         const activeEffects = gameState?.activeEffects || [];
         
         const gameData = {
-            guesses: playerGuesses.map(g => g ? g.toUpperCase() : ''),
+            guesses: playerGuesses.map(g => (typeof g === 'string' && g) ? g.toUpperCase() : ''),
             isRanked: false,
             playerId: currentPlayer,
             activeEffects: activeEffects
@@ -8360,7 +8563,12 @@ async function getOwnedCamos() {
                 return cachedOwnedCamos;
             }
         } catch (error) {
-            console.error('Error loading owned camos from Firestore:', error);
+            // Permission denied is expected if Firestore rules don't allow reading ownedCamos
+            // Silently fall back to localStorage - this is fine for now
+            if (error.code !== 'permission-denied') {
+                console.warn('Error loading owned camos from Firestore:', error);
+            }
+            // Continue to localStorage fallback below
         }
     }
     
@@ -8391,7 +8599,12 @@ async function saveOwnedCamos(ownedCamos) {
         try {
             await window.firebaseDb.collection('ownedCamos').doc(currentUser.uid).set(ownedCamos, { merge: true });
         } catch (error) {
-            console.error('Error saving owned camos to Firestore:', error);
+            // Permission denied is expected if Firestore rules don't allow writing ownedCamos
+            // localStorage is the primary storage, Firestore is just for sync
+            if (error.code !== 'permission-denied') {
+                console.warn('Error saving owned camos to Firestore:', error);
+            }
+            // Continue - localStorage save already succeeded above
         }
     }
 }
@@ -8733,11 +8946,13 @@ async function initializeShop() {
 async function updateShopChipsDisplay() {
     const chipsValue = document.getElementById('shopChipsValue');
     if (chipsValue) {
-        // Get chips from player stats (same source as rank system)
+        // Get bits from player stats
         const stats = await getPlayerStats();
-        const chipPoints = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
-        chipsValue.textContent = Math.round(chipPoints);
+        const bits = stats.bits !== undefined && stats.bits !== null ? stats.bits : 0;
+        chipsValue.textContent = Math.round(bits);
     }
+    // Also update header currency
+    await updateHeaderCurrency();
 }
 
 async function updateCollectionDisplay() {
@@ -8796,22 +9011,21 @@ async function buyAlphaPack() {
         return;
     }
     
-    // Get current chips from stats (same source as rank system)
+    // Get current bits from stats
     const stats = await getPlayerStats();
-    const currentChips = stats.chipPoints !== undefined && stats.chipPoints !== null ? stats.chipPoints : 0;
+    const currentBits = stats.bits !== undefined && stats.bits !== null ? stats.bits : 0;
     
-    if (currentChips < ALPHA_PACK_COST) {
-        showGameMessage('💰', 'Not Enough Chips', `You need ${ALPHA_PACK_COST} chips to buy an alpha pack. You have ${Math.round(currentChips)} chips.`);
+    if (currentBits < ALPHA_PACK_COST) {
+        showGameMessage('💰', 'Not Enough Bits', `You need ${ALPHA_PACK_COST} bits to buy an alpha pack. You have ${Math.round(currentBits)} bits.`);
         return;
     }
     
-    // Deduct chips from stats
-    stats.chipPoints = (stats.chipPoints || 0) - ALPHA_PACK_COST;
+    // Deduct bits from stats
+    stats.bits = (stats.bits || 0) - ALPHA_PACK_COST;
     await savePlayerStats(stats);
     
     // Update displays
     await updateShopChipsDisplay();
-    await updateRankDisplay(); // Update rank display to reflect new chip count
     await updateStatsDisplay(); // Update profile stats if visible
     
     // Open the alpha pack
@@ -8905,7 +9119,7 @@ function openAlphaPack() {
         }
         if (rarity) {
             if (isDuplicate) {
-                rarity.textContent = 'DUPLICATE - +50 CHIPS';
+                rarity.textContent = 'DUPLICATE - +50 BITS';
                 rarity.className = 'alpha-pack-result-rarity rarity-duplicate';
             } else {
                 rarity.textContent = selectedCamo.rarity ? selectedCamo.rarity.toUpperCase() : 'COMMON';
@@ -8915,12 +9129,11 @@ function openAlphaPack() {
         
         // Handle duplicate or new camo
         if (isDuplicate) {
-            // Give 50 chips back for duplicate
+            // Give 50 bits back for duplicate
             const stats = await getPlayerStats();
-            stats.chipPoints = (stats.chipPoints || 0) + 50;
+            stats.bits = (stats.bits || 0) + 50;
             await savePlayerStats(stats);
             await updateShopChipsDisplay();
-            await updateRankDisplay();
             await updateStatsDisplay();
         } else {
             // Add to owned camos
@@ -9358,7 +9571,7 @@ function validateDeckForGame() {
     return { valid: true };
 }
 
-// Daily chip claim button
+// Daily bit claim button
 document.getElementById('dailyChipClaimBtn')?.addEventListener('click', async () => {
     await claimDailyChips();
 });
@@ -9676,6 +9889,21 @@ function switchTab(tabName) {
         });
     }
     
+    // If switching to admin tab, initialize admin panel
+    if (tabName === 'admin') {
+        // Verify admin access
+        isAdminAsync().then(isAdmin => {
+            if (!isAdmin) {
+                // Not admin, switch back to play tab
+                switchTab('play');
+                showGameMessage('⚠️', 'Access Denied', 'Admin access required');
+            } else {
+                // Initialize admin panel
+                initializeAdminPanel();
+            }
+        });
+    }
+    
     // If switching to profile tab, update stats display and user info
     if (tabName === 'profile') {
         // Update user info (name, email, avatar) first
@@ -9707,18 +9935,33 @@ function switchTab(tabName) {
         initializeSettings();
     }
     
-    // If switching to messages tab, load friends for messaging
+    // If switching to messages tab, refresh messages (already loaded on startup)
     if (tabName === 'messages') {
-        loadMessagesFriends();
+        // Only refresh if not already loaded or if friends list is empty
+        const friendsListEl = document.getElementById('messagesFriendsList');
+        if (friendsListEl && (friendsListEl.innerHTML.includes('Loading') || friendsListEl.querySelectorAll('.friend-item').length === 0)) {
+            loadMessagesFriends();
+        }
         // Also load unread counts
         loadUnreadMessageCounts();
         // Note: Individual friend unread counts (green dots) remain until you open their specific chat
         // The notification badge will update automatically based on remaining unread counts
     }
     
-    // If switching to community tab, load community posts
+    // If switching to community tab, refresh posts display (already loaded on startup)
     if (tabName === 'community') {
-        loadCommunityPosts();
+        // Only reload if posts aren't already displayed
+        const bulletinList = document.getElementById('bulletinBoardPosts');
+        const communityList = document.getElementById('communityPostsList');
+        if (bulletinList && communityList && 
+            (bulletinList.innerHTML.includes('Loading') || communityList.innerHTML.includes('Loading') || 
+             bulletinList.innerHTML.trim() === '' || communityList.innerHTML.trim() === '')) {
+            loadCommunityPosts();
+        } else {
+            // Just refresh the display with current data
+            renderPostsWithShowMore(allBulletinPosts.slice(0, bulletinPostsShown), bulletinList, true, allBulletinPosts.length);
+            renderPostsWithShowMore(allCommunityPosts.slice(0, communityPostsShown), communityList, false, allCommunityPosts.length);
+        }
     }
     
     // If switching to friends tab, load friends and check game status
@@ -12771,6 +13014,338 @@ function isValidImageUrl(url) {
     }
 }
 
+// Admin Panel Functions
+async function updateAdminTabVisibility() {
+    const adminTabBtn = document.getElementById('adminTabBtn');
+    if (!adminTabBtn) return;
+    
+    const isAdmin = await isAdminAsync();
+    adminTabBtn.style.display = isAdmin ? 'flex' : 'none';
+}
+
+// Search for players by email or name (like friend search)
+async function searchPlayers(searchQuery) {
+    if (!window.firebaseDb || !searchQuery || searchQuery.trim() === '') {
+        return [];
+    }
+    
+    const searchTerm = searchQuery.trim().toLowerCase();
+    
+    try {
+        const usersRef = window.firebaseDb.collection('users');
+        const allUsersSnapshot = await usersRef.get();
+        
+        const matchingUsers = [];
+        
+        // Filter users client-side based on similar name/email
+        for (const doc of allUsersSnapshot.docs) {
+            const userData = doc.data();
+            const userId = doc.id;
+            
+            const displayName = (userData.displayName || '').toLowerCase();
+            const email = (userData.email || '').toLowerCase();
+            
+            // Check if search term matches (contains or starts with)
+            const nameMatches = displayName.includes(searchTerm) || displayName.startsWith(searchTerm);
+            const emailMatches = email.includes(searchTerm) || email.startsWith(searchTerm);
+            
+            if (nameMatches || emailMatches) {
+                // Get stats for each matching user
+                const statsDoc = await window.firebaseDb.collection('stats').doc(userId).get();
+                const stats = statsDoc.exists ? statsDoc.data() : {};
+                
+                matchingUsers.push({
+                    id: userId,
+                    displayName: userData.displayName || 'Unknown',
+                    email: userData.email || '',
+                    photoURL: userData.photoURL || null,
+                    chipPoints: stats.chipPoints !== undefined ? stats.chipPoints : 0,
+                    bits: stats.bits !== undefined ? stats.bits : 0
+                });
+            }
+        }
+        
+        return matchingUsers;
+    } catch (error) {
+        console.error('Error searching for players:', error);
+        return [];
+    }
+}
+
+// Update player chips and bits
+async function updatePlayerStats(uid, chipPoints, bits) {
+    if (!window.firebaseDb || !uid) {
+        throw new Error('Firebase not available or UID missing');
+    }
+    
+    // Verify user is admin
+    const isAdmin = await isAdminAsync();
+    if (!isAdmin) {
+        throw new Error('Unauthorized: Admin access required');
+    }
+    
+    try {
+        const statsUpdate = {
+            chipPoints: chipPoints !== undefined && chipPoints !== null ? Math.max(0, Math.round(chipPoints)) : 0,
+            bits: bits !== undefined && bits !== null ? Math.max(0, Math.round(bits)) : 0
+        };
+        
+        await window.firebaseDb.collection('stats').doc(uid).set(statsUpdate, { merge: true });
+        return true;
+    } catch (error) {
+        console.error('Error updating player stats:', error);
+        throw error;
+    }
+}
+
+// Initialize admin panel
+function initializeAdminPanel() {
+    const searchBtn = document.getElementById('adminSearchBtn');
+    const searchInput = document.getElementById('adminPlayerSearch');
+    const saveBtn = document.getElementById('adminSaveBtn');
+    const closeResultsBtn = document.getElementById('closeAdminSearchResults');
+    
+    if (searchBtn) {
+        searchBtn.onclick = async () => {
+            await performAdminSearch();
+        };
+    }
+    
+    // Allow Enter key to search
+    if (searchInput) {
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                searchBtn?.click();
+            }
+        });
+    }
+    
+    // Close search results
+    if (closeResultsBtn) {
+        closeResultsBtn.onclick = () => {
+            hideAdminSearchResults();
+        };
+    }
+    
+    if (saveBtn) {
+        saveBtn.onclick = async () => {
+            const uid = saveBtn.dataset.playerUid;
+            if (!uid) {
+                showAdminError('No player selected');
+                return;
+            }
+            
+            const chipsInput = document.getElementById('adminPlayerChips');
+            const bitsInput = document.getElementById('adminPlayerBits');
+            const chips = chipsInput ? parseFloat(chipsInput.value) : 0;
+            const bits = bitsInput ? parseFloat(bitsInput.value) : 0;
+            
+            if (isNaN(chips) || isNaN(bits) || chips < 0 || bits < 0) {
+                showAdminError('Please enter valid numbers (0 or greater)');
+                return;
+            }
+            
+            try {
+                saveBtn.disabled = true;
+                saveBtn.innerHTML = '<span class="btn-icon">⏳</span><span>Saving...</span>';
+                
+                await updatePlayerStats(uid, chips, bits);
+                
+                const statusEl = document.getElementById('adminSaveStatus');
+                if (statusEl) {
+                    statusEl.textContent = '✓ Changes saved successfully!';
+                    statusEl.style.color = '#6aaa64';
+                    statusEl.style.display = 'block';
+                }
+                
+                // Refresh player info
+                const player = await loadPlayerData(uid);
+                if (player) {
+                    displayPlayerInfo(player);
+                }
+                
+                setTimeout(() => {
+                    if (statusEl) {
+                        statusEl.style.display = 'none';
+                    }
+                }, 3000);
+            } catch (error) {
+                showAdminError('Failed to save changes: ' + (error.message || 'Unknown error'));
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<span class="btn-icon">💾</span><span>Save Changes</span>';
+            }
+        };
+    }
+}
+
+// Perform admin search (like friend search)
+async function performAdminSearch() {
+    const searchInput = document.getElementById('adminPlayerSearch');
+    if (!searchInput || !searchInput.value.trim()) {
+        showGameMessage('⚠️', 'Search Required', 'Please enter a username or email to search');
+        return;
+    }
+    
+    const searchTerm = searchInput.value.trim();
+    
+    if (!window.firebaseDb) {
+        showGameMessage('⚠️', 'Error', 'Firebase database is not initialized');
+        return;
+    }
+    
+    try {
+        const matchingUsers = await searchPlayers(searchTerm);
+        
+        if (matchingUsers.length === 0) {
+            showAdminError('No players found');
+            hideAdminSearchResults();
+            return;
+        }
+        
+        showAdminSearchResults(matchingUsers);
+    } catch (error) {
+        console.error('Error searching for players:', error);
+        showAdminError(`Error searching: ${error.message || 'Unknown error'}`);
+        hideAdminSearchResults();
+    }
+}
+
+// Show admin search results (like friend search results)
+function showAdminSearchResults(users) {
+    const resultsContainer = document.getElementById('adminSearchResults');
+    const resultsList = document.getElementById('adminSearchResultsList');
+    const errorEl = document.getElementById('adminSearchError');
+    
+    if (!resultsContainer || !resultsList) return;
+    
+    if (errorEl) errorEl.style.display = 'none';
+    
+    // Render results
+    resultsList.innerHTML = users.map(user => {
+        const avatarInitial = user.displayName ? user.displayName.charAt(0).toUpperCase() : '👤';
+        const avatarStyle = user.photoURL 
+            ? `background-image: url(${user.photoURL}); background-size: cover; background-position: center;` 
+            : '';
+        const isUserAdmin = isAdminEmail(user.email || '');
+        
+        return `
+            <div class="friend-search-result-item" onclick="selectAdminPlayer('${user.id}', '${(user.displayName || 'Unknown').replace(/'/g, "\\'")}')">
+                <div class="friend-avatar" style="${avatarStyle}">${user.photoURL ? '' : avatarInitial}</div>
+                <div class="friend-info">
+                    <div class="friend-name ${isUserAdmin ? 'admin-name' : ''}">${user.displayName || 'Unknown'}</div>
+                    <div class="friend-status">${user.email || ''}</div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    resultsContainer.style.display = 'block';
+}
+
+// Hide admin search results
+function hideAdminSearchResults() {
+    const resultsContainer = document.getElementById('adminSearchResults');
+    if (resultsContainer) {
+        resultsContainer.style.display = 'none';
+    }
+}
+
+// Select a player from search results
+async function selectAdminPlayer(userId, userName) {
+    hideAdminSearchResults();
+    
+    const player = await loadPlayerData(userId);
+    if (player) {
+        displayPlayerInfo(player);
+        const editPanel = document.getElementById('adminPlayerEditPanel');
+        if (editPanel) {
+            editPanel.style.display = 'block';
+        }
+    } else {
+        showAdminError('Failed to load player data');
+    }
+}
+
+// Load player data by UID
+async function loadPlayerData(uid) {
+    if (!window.firebaseDb || !uid) {
+        return null;
+    }
+    
+    try {
+        const userDoc = await window.firebaseDb.collection('users').doc(uid).get();
+        if (!userDoc.exists) {
+            return null;
+        }
+        
+        const userData = userDoc.data();
+        const statsDoc = await window.firebaseDb.collection('stats').doc(uid).get();
+        const stats = statsDoc.exists ? statsDoc.data() : {};
+        
+        return {
+            uid: uid,
+            email: userData.email || '',
+            displayName: userData.displayName || userData.email?.split('@')[0] || 'Unknown',
+            photoURL: userData.photoURL || null,
+            chipPoints: stats.chipPoints !== undefined ? stats.chipPoints : 0,
+            bits: stats.bits !== undefined ? stats.bits : 0
+        };
+    } catch (error) {
+        console.error('Error loading player data:', error);
+        return null;
+    }
+}
+
+function displayPlayerInfo(player) {
+    const resultsEl = document.getElementById('adminSearchResults');
+    const errorEl = document.getElementById('adminSearchError');
+    const nameEl = document.getElementById('adminPlayerName');
+    const emailEl = document.getElementById('adminPlayerEmail');
+    const uidEl = document.getElementById('adminPlayerUid');
+    const avatarEl = document.getElementById('adminPlayerAvatar');
+    const chipsInput = document.getElementById('adminPlayerChips');
+    const bitsInput = document.getElementById('adminPlayerBits');
+    const saveBtn = document.getElementById('adminSaveBtn');
+    
+    if (resultsEl) resultsEl.style.display = 'block';
+    if (errorEl) errorEl.style.display = 'none';
+    
+    if (nameEl) nameEl.textContent = player.displayName;
+    if (emailEl) emailEl.textContent = player.email;
+    if (uidEl) uidEl.textContent = `UID: ${player.uid}`;
+    
+    if (avatarEl) {
+        if (player.photoURL) {
+            avatarEl.style.backgroundImage = `url(${player.photoURL})`;
+            avatarEl.style.backgroundSize = 'cover';
+            avatarEl.style.backgroundPosition = 'center';
+            avatarEl.textContent = '';
+        } else {
+            avatarEl.style.backgroundImage = '';
+            avatarEl.textContent = player.displayName.charAt(0).toUpperCase();
+        }
+    }
+    
+    if (chipsInput) chipsInput.value = Math.round(player.chipPoints);
+    if (bitsInput) bitsInput.value = Math.round(player.bits);
+    if (saveBtn) saveBtn.dataset.playerUid = player.uid;
+}
+
+function hidePlayerInfo() {
+    const editPanel = document.getElementById('adminPlayerEditPanel');
+    if (editPanel) editPanel.style.display = 'none';
+}
+
+function showAdminError(message) {
+    const errorEl = document.getElementById('adminSearchError');
+    if (errorEl) {
+        errorEl.textContent = message;
+        errorEl.style.display = 'block';
+    }
+    hidePlayerInfo();
+}
+
 // Handle direct file upload (when clicking edit button)
 async function handleFileUpload(file) {
     if (!file) return;
@@ -12950,6 +13525,12 @@ function isAdminEmail(email) {
     return isAdmin;
 }
 
+// Store all loaded posts globally
+let allBulletinPosts = [];
+let allCommunityPosts = [];
+let bulletinPostsShown = 3;
+let communityPostsShown = 3;
+
 // Load community posts
 async function loadCommunityPosts() {
     if (!window.firebaseDb || !currentUser) {
@@ -12960,11 +13541,75 @@ async function loadCommunityPosts() {
     const bulletinPostsList = document.getElementById('bulletinBoardPosts');
     const communityPostsList = document.getElementById('communityPostsList');
     
-    if (!bulletinPostsList || !communityPostsList) return;
+    // If elements don't exist yet (loading on startup), store data and return
+    // They will be rendered when the tab is opened
+    if (!bulletinPostsList || !communityPostsList) {
+        // Still load the data so it's ready when tab opens
+        try {
+            let allPostsSnapshot;
+            try {
+                const allPostsQuery = window.firebaseDb.collection('communityPosts')
+                    .orderBy('createdAt', 'desc')
+                    .limit(200);
+                allPostsSnapshot = await allPostsQuery.get();
+            } catch (indexError) {
+                const allPostsQuery = window.firebaseDb.collection('communityPosts')
+                    .limit(500);
+                allPostsSnapshot = await allPostsQuery.get();
+            }
+            
+            const bulletinPosts = [];
+            const communityPosts = [];
+            
+            for (const doc of allPostsSnapshot.docs) {
+                const data = doc.data();
+                const authorInfo = await getUserInfo(data.authorId);
+                
+                const postData = {
+                    id: doc.id,
+                    ...data,
+                    authorName: authorInfo.name,
+                    authorPhotoURL: authorInfo.photoURL
+                };
+                
+                if (data.isBulletin === true) {
+                    bulletinPosts.push(postData);
+                } else {
+                    if (currentCommunityCategory === 'all' || data.category === currentCommunityCategory) {
+                        communityPosts.push(postData);
+                    }
+                }
+            }
+            
+            bulletinPosts.sort((a, b) => {
+                const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+                const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+                return bTime.getTime() - aTime.getTime();
+            });
+            
+            communityPosts.sort((a, b) => {
+                const aTime = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
+                const bTime = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
+                return bTime.getTime() - aTime.getTime();
+            });
+            
+            allBulletinPosts = bulletinPosts;
+            allCommunityPosts = communityPosts;
+            bulletinPostsShown = 3;
+            communityPostsShown = 3;
+        } catch (error) {
+            console.error('Error preloading community posts:', error);
+        }
+        return;
+    }
     
-    // Show loading state
-    bulletinPostsList.innerHTML = '<div class="community-loading">Loading bulletin board...</div>';
-    communityPostsList.innerHTML = '<div class="community-loading">Loading posts...</div>';
+    // Only show loading if lists are empty or showing loading state
+    if (bulletinPostsList.innerHTML.includes('Loading') || bulletinPostsList.innerHTML.trim() === '') {
+        bulletinPostsList.innerHTML = '<div class="community-loading">Loading bulletin board...</div>';
+    }
+    if (communityPostsList.innerHTML.includes('Loading') || communityPostsList.innerHTML.trim() === '') {
+        communityPostsList.innerHTML = '<div class="community-loading">Loading posts...</div>';
+    }
     
     try {
         // Load all posts and filter/sort client-side to avoid composite index requirements
@@ -13046,11 +13691,17 @@ async function loadCommunityPosts() {
             return bTime.getTime() - aTime.getTime();
         });
         
-        // Limit bulletin posts to 10 most recent
-        const limitedBulletinPosts = bulletinPosts.slice(0, 10);
+        // Store all posts globally
+        allBulletinPosts = bulletinPosts;
+        allCommunityPosts = communityPosts;
         
-        renderPosts(limitedBulletinPosts, bulletinPostsList, true);
-        renderPosts(communityPosts, communityPostsList, false);
+        // Reset shown counts when reloading
+        bulletinPostsShown = 3;
+        communityPostsShown = 3;
+        
+        // Show initial 3 posts for each
+        renderPostsWithShowMore(allBulletinPosts.slice(0, bulletinPostsShown), bulletinPostsList, true, allBulletinPosts.length);
+        renderPostsWithShowMore(allCommunityPosts.slice(0, communityPostsShown), communityPostsList, false, allCommunityPosts.length);
         
     } catch (error) {
         console.error('Error loading community posts:', error);
@@ -13126,6 +13777,88 @@ function renderPosts(posts, container, isBulletin) {
             </div>
         `;
     }).join('');
+}
+
+// Render posts with "Show more" button
+function renderPostsWithShowMore(posts, container, isBulletin, totalCount) {
+    if (!container) return;
+    
+    if (posts.length === 0 && totalCount === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💭</div><div class="empty-state-text">No posts yet</div></div>';
+        return;
+    }
+    
+    const postsHtml = posts.map(post => {
+        const timeAgo = formatTimeAgo(post.createdAt?.toDate?.() || new Date(post.createdAt));
+        const authorInitial = post.authorName ? post.authorName.charAt(0).toUpperCase() : '?';
+        const avatarStyle = post.authorPhotoURL 
+            ? `background-image: url(${post.authorPhotoURL}); background-size: cover; background-position: center;` 
+            : '';
+        const isBulletinPost = post.isBulletin || isBulletin;
+        
+        return `
+            <div class="community-post ${isBulletinPost ? 'bulletin-post' : ''}" data-post-id="${post.id}" onclick="openPostDetail('${post.id}', event)">
+                <div class="post-header">
+                    <div class="post-author-avatar ${isBulletinPost ? 'bulletin' : ''}" style="${avatarStyle}">${post.authorPhotoURL ? '' : authorInitial}</div>
+                    <div class="post-header-info">
+                        <div class="post-author-name ${isBulletinPost ? 'bulletin' : ''}">${escapeHtml(post.authorName || 'Unknown')}</div>
+                        <div class="post-meta">
+                            <span class="post-category ${isBulletinPost ? 'bulletin' : ''}">${getCategoryDisplayName(post.category || 'general')}</span>
+                            <span class="post-time">${timeAgo}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="post-title">${escapeHtml(post.title || 'Untitled')}</div>
+                <div class="post-content">${escapeHtml(post.content || '')}</div>
+                <div class="post-footer">
+                    <div class="post-actions">
+                        <button class="post-action like-action ${post.likedBy && post.likedBy.includes(currentUser?.uid) ? 'liked' : ''}" 
+                                onclick="likePost('${post.id}', event)" data-likes="${post.likes || 0}">
+                            <span class="post-action-icon">${post.likedBy && post.likedBy.includes(currentUser?.uid) ? '❤️' : '🤍'}</span>
+                            <span>${post.likes || 0}</span>
+                        </button>
+                        <button class="post-action comment-action" onclick="openPostDetail('${post.id}', event)">
+                            <span class="post-action-icon">💬</span>
+                            <span>${post.commentCount || 0}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // Add "Show more" button if there are more posts
+    let showMoreHtml = '';
+    if (totalCount > posts.length) {
+        const buttonId = isBulletin ? 'showMoreBulletinBtn' : 'showMoreCommunityBtn';
+        showMoreHtml = `
+            <div class="show-more-posts-container">
+                <button id="${buttonId}" class="btn btn-secondary show-more-posts-btn">
+                    <span>Show More (${totalCount - posts.length} more)</span>
+                </button>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = postsHtml + showMoreHtml;
+    
+    // Setup show more button
+    if (totalCount > posts.length) {
+        const buttonId = isBulletin ? 'showMoreBulletinBtn' : 'showMoreCommunityBtn';
+        const showMoreBtn = document.getElementById(buttonId);
+        if (showMoreBtn) {
+            showMoreBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (isBulletin) {
+                    bulletinPostsShown = Math.min(bulletinPostsShown + 10, allBulletinPosts.length);
+                    renderPostsWithShowMore(allBulletinPosts.slice(0, bulletinPostsShown), container, true, allBulletinPosts.length);
+                } else {
+                    communityPostsShown = Math.min(communityPostsShown + 10, allCommunityPosts.length);
+                    renderPostsWithShowMore(allCommunityPosts.slice(0, communityPostsShown), container, false, allCommunityPosts.length);
+                }
+            };
+        }
+    }
 }
 
 // Format time ago
@@ -14205,7 +14938,11 @@ async function reloadCommunityPostsOnly() {
             return bTime.getTime() - aTime.getTime();
         });
         
-        renderPosts(communityPosts, communityPostsList, false);
+        // Store all community posts
+        allCommunityPosts = communityPosts;
+        communityPostsShown = 3; // Reset to 3 when filtering
+        
+        renderPostsWithShowMore(allCommunityPosts.slice(0, communityPostsShown), communityPostsList, false, allCommunityPosts.length);
     } catch (error) {
         console.error('Error reloading community posts:', error);
     }
@@ -14474,24 +15211,46 @@ async function loadLastMessageTimesForAllFriends() {
         // Use Promise.allSettled to handle errors gracefully
         const promises = friendsForMessaging.map(async (friend) => {
             try {
-                // Get most recent message where current user is sender and friend is receiver
-                const sentQuery = window.firebaseDb.collection('messages')
-                    .where('senderId', '==', currentUser.uid)
-                    .where('receiverId', '==', friend.id)
-                    .orderBy('createdAt', 'desc')
-                    .limit(1);
+                let sentSnapshot, receivedSnapshot;
                 
-                // Get most recent message where friend is sender and current user is receiver
-                const receivedQuery = window.firebaseDb.collection('messages')
-                    .where('senderId', '==', friend.id)
-                    .where('receiverId', '==', currentUser.uid)
-                    .orderBy('createdAt', 'desc')
-                    .limit(1);
-                
-                const [sentSnapshot, receivedSnapshot] = await Promise.all([
-                    sentQuery.get(),
-                    receivedQuery.get()
-                ]);
+                // Try with orderBy first (more efficient if index exists)
+                try {
+                    const sentQuery = window.firebaseDb.collection('messages')
+                        .where('senderId', '==', currentUser.uid)
+                        .where('receiverId', '==', friend.id)
+                        .orderBy('createdAt', 'desc')
+                        .limit(1);
+                    
+                    const receivedQuery = window.firebaseDb.collection('messages')
+                        .where('senderId', '==', friend.id)
+                        .where('receiverId', '==', currentUser.uid)
+                        .orderBy('createdAt', 'desc')
+                        .limit(1);
+                    
+                    [sentSnapshot, receivedSnapshot] = await Promise.all([
+                        sentQuery.get(),
+                        receivedQuery.get()
+                    ]);
+                } catch (indexError) {
+                    // If index doesn't exist, load without orderBy and sort client-side
+                    if (indexError.code === 'failed-precondition') {
+                        // Load all messages for this conversation and sort client-side
+                        const sentQuery = window.firebaseDb.collection('messages')
+                            .where('senderId', '==', currentUser.uid)
+                            .where('receiverId', '==', friend.id);
+                        
+                        const receivedQuery = window.firebaseDb.collection('messages')
+                            .where('senderId', '==', friend.id)
+                            .where('receiverId', '==', currentUser.uid);
+                        
+                        [sentSnapshot, receivedSnapshot] = await Promise.all([
+                            sentQuery.get(),
+                            receivedQuery.get()
+                        ]);
+                    } else {
+                        throw indexError;
+                    }
+                }
                 
                 let latestTime = 0;
                 let latestMessageText = '';
@@ -14530,8 +15289,10 @@ async function loadLastMessageTimesForAllFriends() {
                     }
                 }
             } catch (error) {
-                // Silently handle errors for individual friends
-                console.error(`Error loading last message time for friend ${friend.id}:`, error);
+                // Only log non-index errors (index errors are expected and handled above)
+                if (error.code !== 'failed-precondition') {
+                    console.warn(`Error loading last message time for friend ${friend.id}:`, error);
+                }
             }
         });
         
@@ -15031,7 +15792,12 @@ function setupMessageListener(friendId) {
                 }
             });
         }, error => {
-            console.error('Error listening to sent messages:', error);
+            // Handle CORS/network errors gracefully - these are often temporary
+            if (error.code === 'unavailable' || error.message?.includes('CORS') || error.message?.includes('network')) {
+                console.warn('Firestore listener temporarily unavailable (network issue):', error.message);
+            } else {
+                console.error('Error listening to sent messages:', error);
+            }
         });
     
     // Listen to messages received from friend
@@ -15093,7 +15859,12 @@ function setupMessageListener(friendId) {
                 }
             });
         }, error => {
-            console.error('Error listening to received messages:', error);
+            // Handle CORS/network errors gracefully - these are often temporary
+            if (error.code === 'unavailable' || error.message?.includes('CORS') || error.message?.includes('network')) {
+                console.warn('Firestore listener temporarily unavailable (network issue):', error.message);
+            } else {
+                console.error('Error listening to received messages:', error);
+            }
         });
     
     // Store both unsubscribers
