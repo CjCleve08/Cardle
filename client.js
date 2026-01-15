@@ -26,12 +26,17 @@ window.addEventListener('error', (event) => {
     if (event.target && event.target.tagName === 'IMG' && (
         event.target.src?.includes('googleusercontent.com') ||
         event.target.src?.includes('s96-c') ||
+        event.target.src?.includes('s48-c') ||
+        event.target.src?.includes('s128-c') ||
         event.message?.includes('429') ||
         event.filename?.includes('googleusercontent.com') ||
-        event.filename?.includes('s96-c')
+        event.filename?.includes('s96-c') ||
+        event.filename?.includes('s48-c') ||
+        event.filename?.includes('s128-c')
     )) {
         // Silently handle image rate limit errors
         event.preventDefault();
+        event.stopPropagation();
         return true;
     }
     
@@ -41,12 +46,30 @@ window.addEventListener('error', (event) => {
         event.message.includes('Failed to load resource')
     )) {
         // Check if it's a Google profile image
-        const source = event.filename || event.target?.src || event.target?.href || '';
-        if (source.includes('googleusercontent.com') || source.includes('s96-c') || source.includes('s48-c') || source.includes('s128-c')) {
+        const source = event.filename || event.target?.src || event.target?.href || event.message || '';
+        if (source.includes('googleusercontent.com') || 
+            source.includes('s96-c') || 
+            source.includes('s48-c') || 
+            source.includes('s128-c') ||
+            (source.includes('429') && source.includes('s96-c'))) {
             // Silently handle Google profile image rate limit errors
             event.preventDefault();
+            event.stopPropagation();
             return true;
         }
+    }
+    
+    // Also check the error message itself for 429 with Google image patterns
+    const errorMessage = event.message || event.filename || '';
+    if (errorMessage.includes('429') && (
+        errorMessage.includes('googleusercontent.com') ||
+        errorMessage.includes('s96-c') ||
+        errorMessage.includes('s48-c') ||
+        errorMessage.includes('s128-c')
+    )) {
+        event.preventDefault();
+        event.stopPropagation();
+        return true;
     }
 }, true);
 
@@ -74,17 +97,29 @@ const originalConsoleError = console.error;
 console.error = function(...args) {
     // Filter out 429 errors for Google profile images
     const message = args.join(' ');
-    if (message && (
-        (message.includes('429') && (
-            message.includes('googleusercontent.com') ||
-            message.includes('s96-c') ||
-            message.includes('s48-c') ||
-            message.includes('s128-c')
-        )) ||
-        (message.includes('Failed to load resource') && message.includes('429'))
-    )) {
-        // Suppress these specific errors - they're rate limits from Google's CDN
-        return;
+    if (message) {
+        // Check for any combination of 429 and Google image patterns
+        const has429 = message.includes('429');
+        const hasGoogleImage = message.includes('googleusercontent.com') ||
+                              message.includes('s96-c') ||
+                              message.includes('s48-c') ||
+                              message.includes('s128-c') ||
+                              message.match(/s\d+-c/); // Match any sXX-c pattern
+        
+        // Check for "Failed to load resource" pattern
+        const hasFailedToLoad = message.includes('Failed to load resource') ||
+                                message.includes('the server responded with a status of 429');
+        
+        // Suppress if it's a 429 error related to Google images
+        if (has429 && hasGoogleImage) {
+            // Suppress these specific errors - they're rate limits from Google's CDN
+            return;
+        }
+        
+        // Also suppress "Failed to load resource" errors for Google images (even without explicit 429)
+        if (hasFailedToLoad && hasGoogleImage) {
+            return;
+        }
     }
     // Call original console.error for other errors
     originalConsoleError.apply(console, args);
@@ -489,6 +524,10 @@ function showLobby() {
                 loadMessagesFriends().catch(error => {
                     console.error('Error loading messages:', error);
                 });
+                // Also load unread message counts on startup
+                loadUnreadMessageCounts().catch(error => {
+                    console.error('Error loading unread message counts:', error);
+                });
             }
         }, 100);
         
@@ -806,12 +845,78 @@ function hideAuthErrors() {
     if (guestNameError) guestNameError.style.display = 'none';
 }
 
+// Add global error handler for all IMG elements to catch 429 errors before they bubble
+document.addEventListener('DOMContentLoaded', () => {
+    // Use event delegation to catch image errors on all images
+    document.addEventListener('error', (event) => {
+        if (event.target && event.target.tagName === 'IMG') {
+            const src = event.target.src || '';
+            if (src.includes('googleusercontent.com') || 
+                src.includes('s96-c') || 
+                src.includes('s48-c') || 
+                src.includes('s128-c')) {
+                // Suppress 429 errors for Google profile images
+                event.preventDefault();
+                event.stopPropagation();
+                // Don't show broken image icon - keep fallback (initial) visible
+                event.target.style.display = 'none';
+                return false;
+            }
+        }
+    }, true); // Use capture phase to catch early
+}, { once: true });
+
+// Helper function to safely apply a profile image to an element with fallback
+function applyProfileImage(element, photoURL, fallbackInitial) {
+    if (!element) return;
+    
+    // Set initial immediately
+    if (fallbackInitial) {
+        element.textContent = fallbackInitial;
+    }
+    
+    if (!photoURL) {
+        element.style.backgroundImage = '';
+        element.style.backgroundSize = '';
+        element.style.backgroundPosition = '';
+        return;
+    }
+    
+    // Try to load image
+    testImageLoad(photoURL).then(() => {
+        // Image loaded successfully
+        element.style.backgroundImage = `url(${photoURL})`;
+        element.style.backgroundSize = 'cover';
+        element.style.backgroundPosition = 'center';
+        element.textContent = '';
+    }).catch(() => {
+        // Image failed to load - keep initial visible
+        element.style.backgroundImage = '';
+        element.style.backgroundSize = '';
+        element.style.backgroundPosition = '';
+        if (fallbackInitial) {
+            element.textContent = fallbackInitial;
+        }
+    });
+}
+
 // Helper function to test if an image URL loads successfully
 function testImageLoad(url) {
     return new Promise((resolve, reject) => {
         if (!url) {
             reject(new Error('No URL provided'));
             return;
+        }
+        
+        // Skip loading if it's a Google image URL that might be rate-limited
+        // We'll just use the fallback (initials) instead
+        if (url.includes('googleusercontent.com') && (
+            url.includes('s96-c') || 
+            url.includes('s48-c') || 
+            url.includes('s128-c')
+        )) {
+            // For Google images, we'll try to load but expect it might fail
+            // The error handler will catch 429 errors gracefully
         }
         
         const img = new Image();
@@ -824,8 +929,12 @@ function testImageLoad(url) {
             clearTimeout(timeout);
             resolve();
         };
-        img.onerror = () => {
+        img.onerror = (error) => {
             clearTimeout(timeout);
+            // Don't log 429 errors - they're expected rate limits
+            if (!url.includes('googleusercontent.com') || !url.match(/s\d+-c/)) {
+                // Only log non-Google image errors
+            }
             reject(new Error('Image failed to load'));
         };
         img.src = url;
@@ -1109,9 +1218,9 @@ const AVAILABLE_CAMOS = [
     { id: 'USABase', name: 'USA', filename: 'USABase.png', rarity: 'common' },
     { id: 'LeafyBase', name: 'Leafy', filename: 'LeafyBase.png', rarity: 'common' },
     { id: 'ChillBase', name: 'Chill', filename: 'ChillBase.png', rarity: 'common' },
-    { id: 'OilSpillBase', name: 'Oil Spill', filename: 'OilSpillBase.png', rarity: 'common' },
-    { id: 'AruaBase', name: 'Aura', filename: 'AruaBase.png', rarity: 'common' },
-    { id: 'JohnPorkBase', name: 'John Pork', filename: 'JohnPorkBase.png', rarity: 'common' },
+    { id: 'OilSpillBase', name: 'Oil Spill', filename: 'OilSpillBase.png', rarity: 'rare' },
+    { id: 'AruaBase', name: 'Aura', filename: 'AruaBase.png', rarity: 'epic' },
+    { id: 'JohnPorkBase', name: 'John Pork', filename: 'JohnPorkBase.png', rarity: 'rare' },
     { id: 'CarbonCoatBase', name: 'Carbon Coat', filename: 'CarbonCoatBase.png', rarity: 'rare' },
     { id: 'MatrixBase', name: 'Matrix', filename: 'MatrixBase.png', rarity: 'rare' },
     { id: 'PlamsaBase', name: 'Plasma', filename: 'PlamsaBase.png', rarity: 'rare' },
@@ -1122,7 +1231,50 @@ const AVAILABLE_CAMOS = [
     { id: 'BlackIceBase', name: 'Black Ice', filename: 'BlackIceBase.png', rarity: 'epic' },
     { id: 'AmethystBase', name: 'Amethyst', filename: 'AmethystBase_.png', rarity: 'epic' },
     { id: 'DivineBase', name: 'Divine', filename: 'DivineBase.png', rarity: 'epic' },
-    { id: 'DarkTideBase', name: 'Dark Tide', filename: 'DarkTideBase.png', rarity: 'epic' }
+    { id: 'DarkTideBase', name: 'Dark Tide', filename: 'DarkTideBase.png', rarity: 'epic' },
+    // New Epic Camos (Best 6)
+    { id: 'CorruptionBase', name: 'Corruption', filename: 'CorruptionBase.png', rarity: 'epic' },
+    { id: 'CosmosBase', name: 'Cosmos', filename: 'CosmosBase.png', rarity: 'epic' },
+    { id: 'DarkKnightBase', name: 'Dark Knight', filename: 'DarkKnightBase.png', rarity: 'epic' },
+    { id: 'DevilBase', name: 'Devil', filename: 'DevilBase.png', rarity: 'epic' },
+    { id: 'DragonScrollBase', name: 'Dragon Scroll', filename: 'DragonScrollBase.png', rarity: 'epic' },
+    { id: 'HellRaiserBase', name: 'Hell Raiser', filename: 'HellRaiserBase.png', rarity: 'epic' },
+    // New Rare Camos (Next Best 7)
+    { id: 'EnergyBase', name: 'Energy', filename: 'EnergyBase.png', rarity: 'rare' },
+    { id: 'ExtinctionBase', name: 'Extinction', filename: 'ExtinctionBase.png', rarity: 'rare' },
+    { id: 'RoyalBase', name: 'Royal', filename: 'RoyalBase.png', rarity: 'rare' },
+    { id: 'SupremeBase', name: 'Supreme', filename: 'SupremeBase.png', rarity: 'rare' },
+    { id: 'TheBeyondBase', name: 'The Beyond', filename: 'TheBeyondBase.png', rarity: 'rare' },
+    { id: 'VengefulMenaceBase', name: 'Vengeful Menace', filename: 'VengefulMenaceBase.png', rarity: 'rare' },
+    { id: 'ZeroTimeBase', name: 'Zero Time', filename: 'ZeroTimeBase.png', rarity: 'rare' },
+    // New Common Camos (Rest)
+    { id: 'BarrelBase', name: 'Barrel', filename: 'BarrelBase.png', rarity: 'common' },
+    { id: 'CallToActionBase', name: 'Call To Action', filename: 'CallToActionBase.png', rarity: 'common' },
+    { id: 'CanIHaveAWaterBase', name: 'Can I Have A Water', filename: 'CanIHaveAWaterBase.png', rarity: 'common' },
+    { id: 'CapturedBase', name: 'Captured', filename: 'CapturedBase.png', rarity: 'common' },
+    { id: 'ChillGuyBase', name: 'Chill Guy', filename: 'ChillGuyBase.png', rarity: 'common' },
+    { id: 'CivilizedWeaponBase', name: 'Civilized Weapon', filename: 'CivilizedWeaponBase.png', rarity: 'common' },
+    { id: 'CowPrintBase', name: 'Cow Print', filename: 'CowPrintBase.png', rarity: 'common' },
+    { id: 'DeadManWalkinngBase', name: 'Dead Man Walking', filename: 'DeadManWalkinngBase.png', rarity: 'common' },
+    { id: 'FiringRangeBase', name: 'Firing Range', filename: 'FiringRangeBase.png', rarity: 'common' },
+    { id: 'FullHandBase', name: 'Full Hand', filename: 'FullHandBase.png', rarity: 'common' },
+    { id: 'HackedBase', name: 'Hacked', filename: 'HackedBase.png', rarity: 'common' },
+    { id: 'HopeBase', name: 'Hope', filename: 'HopeBase.png', rarity: 'common' },
+    { id: 'JammingBase', name: 'Jamming', filename: 'JammingBase.png', rarity: 'common' },
+    { id: 'JeffAndDonald', name: 'Jeff And Donald', filename: 'JeffAndDonald.png', rarity: 'common' },
+    { id: 'LeopardPrintBase', name: 'Leopard Print', filename: 'LeopardPrintBase.png', rarity: 'common' },
+    { id: 'LonesomeWallBase', name: 'Lonesome Wall', filename: 'LonesomeWallBase.png', rarity: 'common' },
+    { id: 'McLovinBase', name: 'McLovin', filename: 'McLovinBase.png', rarity: 'common' },
+    { id: 'MercenaryBase', name: 'Mercenary', filename: 'MercenaryBase.png', rarity: 'common' },
+    { id: 'MyMommaskindaHomelessBase', name: 'My Momma\'s Kinda Homeless', filename: 'MyMomma\'sKindaHomelessBase.png', rarity: 'common' },
+    { id: 'PirateBase', name: 'Pirate', filename: 'PirateBase.png', rarity: 'common' },
+    { id: 'PortalHoppersBase', name: 'Portal Hoppers', filename: 'PortalHoppersBase.png', rarity: 'common' },
+    { id: 'PunishmentBase', name: 'Punishment', filename: 'PunishmentBase.png', rarity: 'common' },
+    { id: 'SnakeSkinBase', name: 'Snake Skin', filename: 'SnakeSkinBase.png', rarity: 'common' },
+    { id: 'SolidStealthBase', name: 'Solid Stealth', filename: 'SolidStealthBase_.png', rarity: 'common' },
+    { id: 'VirusBase', name: 'Virus', filename: 'VirusBase.png', rarity: 'common' },
+    { id: 'YesKingBase', name: 'Yes King', filename: 'YesKingBase.png', rarity: 'common' },
+    { id: 'ZenBase', name: 'Zen', filename: 'ZenBase.png', rarity: 'common' }
 ];
 
 // Check if a card is special (chainable cards)
@@ -3490,42 +3642,25 @@ socket.on('gameStarted', (data) => {
         
         // Update player 2 avatar
         if (vsPlayer2Avatar) {
+            const initial = player2Name.charAt(0).toUpperCase() || '👤';
             // Check if opponent has photoURL in the game data
             if (opponentData && opponentData.photoURL) {
-                vsPlayer2Avatar.style.backgroundImage = `url(${opponentData.photoURL})`;
-                vsPlayer2Avatar.style.backgroundSize = 'cover';
-                vsPlayer2Avatar.style.backgroundPosition = 'center';
-                vsPlayer2Avatar.textContent = '';
+                applyProfileImage(vsPlayer2Avatar, opponentData.photoURL, initial);
             } else if (opponentData && opponentData.firebaseUid && window.firebaseDb) {
                 // Try to fetch from Firestore if we have firebaseUid
                 window.firebaseDb.collection('users').doc(opponentData.firebaseUid).get()
                     .then(userDoc => {
                         if (userDoc.exists && userDoc.data().photoURL) {
-                            vsPlayer2Avatar.style.backgroundImage = `url(${userDoc.data().photoURL})`;
-                            vsPlayer2Avatar.style.backgroundSize = 'cover';
-                            vsPlayer2Avatar.style.backgroundPosition = 'center';
-                            vsPlayer2Avatar.textContent = '';
+                            applyProfileImage(vsPlayer2Avatar, userDoc.data().photoURL, initial);
                         } else {
-            vsPlayer2Avatar.style.backgroundImage = '';
-            vsPlayer2Avatar.style.backgroundSize = '';
-            vsPlayer2Avatar.style.backgroundPosition = '';
-            const initial = player2Name.charAt(0).toUpperCase();
-            vsPlayer2Avatar.textContent = initial || '👤';
+                            applyProfileImage(vsPlayer2Avatar, null, initial);
                         }
                     })
                     .catch(() => {
-                        vsPlayer2Avatar.style.backgroundImage = '';
-                        vsPlayer2Avatar.style.backgroundSize = '';
-                        vsPlayer2Avatar.style.backgroundPosition = '';
-                        const initial = player2Name.charAt(0).toUpperCase();
-                        vsPlayer2Avatar.textContent = initial || '👤';
+                        applyProfileImage(vsPlayer2Avatar, null, initial);
                     });
             } else {
-                vsPlayer2Avatar.style.backgroundImage = '';
-                vsPlayer2Avatar.style.backgroundSize = '';
-                vsPlayer2Avatar.style.backgroundPosition = '';
-                const initial = player2Name.charAt(0).toUpperCase();
-                vsPlayer2Avatar.textContent = initial || '👤';
+                applyProfileImage(vsPlayer2Avatar, null, initial);
             }
         }
         
@@ -8941,6 +9076,20 @@ async function initializeShop() {
             buyAlphaPack();
         };
     }
+    
+    // Setup gift alpha pack button
+    const giftBtn = document.getElementById('giftAlphaPackBtn');
+    if (giftBtn) {
+        giftBtn.onclick = () => {
+            showGiftFriendModal();
+        };
+    }
+    
+    // Load owned packs
+    await loadYourPacks();
+    
+    // Check for gift notifications
+    await checkGiftNotifications();
 }
 
 async function updateShopChipsDisplay() {
@@ -9032,13 +9181,18 @@ async function buyAlphaPack() {
     openAlphaPack();
 }
 
-function openAlphaPack() {
+function openAlphaPack(packId = null) {
     const modal = document.getElementById('alphaPackModal');
     const pack = document.getElementById('alphaPackPack');
     const result = document.getElementById('alphaPackResult');
     const closeBtn = document.getElementById('alphaPackCloseBtn');
     
     if (!modal || !pack || !result) return;
+    
+    // Store packId for later use if needed
+    if (packId) {
+        modal.dataset.packId = packId;
+    }
     
     // Reset state
     modal.style.display = 'flex';
@@ -9054,8 +9208,8 @@ function openAlphaPack() {
     const roll = Math.random();
     let selectedCamo;
     
-    if (roll < 0.70) {
-        // Common (70%)
+    if (roll < 0.75) {
+        // Common (75%)
         const commonCamos = availableCamos.filter(c => c.rarity === 'common');
         if (commonCamos.length > 0) {
             selectedCamo = commonCamos[Math.floor(Math.random() * commonCamos.length)];
@@ -9066,8 +9220,8 @@ function openAlphaPack() {
                 ? rareCamos[Math.floor(Math.random() * rareCamos.length)]
                 : availableCamos[Math.floor(Math.random() * availableCamos.length)];
         }
-    } else if (roll < 0.95) {
-        // Rare (25%)
+    } else if (roll < 0.97) {
+        // Rare (23%)
         const rareCamos = availableCamos.filter(c => c.rarity === 'rare');
         if (rareCamos.length > 0) {
             selectedCamo = rareCamos[Math.floor(Math.random() * rareCamos.length)];
@@ -9079,7 +9233,7 @@ function openAlphaPack() {
                 : availableCamos[Math.floor(Math.random() * availableCamos.length)];
         }
     } else {
-        // Epic (5%)
+        // Epic (2%)
         const epicCamos = availableCamos.filter(c => c.rarity === 'epic');
         if (epicCamos.length > 0) {
             selectedCamo = epicCamos[Math.floor(Math.random() * epicCamos.length)];
@@ -9155,6 +9309,435 @@ function openAlphaPack() {
     // Close button handler
     if (closeBtn) {
         closeBtn.onclick = () => {
+            modal.style.display = 'none';
+        };
+    }
+}
+
+// Gift System Functions
+async function showGiftFriendModal() {
+    if (!currentUser) {
+        showGameMessage('⚠️', 'Sign In Required', 'Please sign in to gift alpha packs');
+        return;
+    }
+    
+    const modal = document.getElementById('giftFriendModal');
+    const friendList = document.getElementById('giftFriendList');
+    const closeBtn = document.getElementById('giftFriendCloseBtn');
+    
+    if (!modal || !friendList) return;
+    
+    // Check bits
+    const stats = await getPlayerStats();
+    const currentBits = stats.bits !== undefined && stats.bits !== null ? stats.bits : 0;
+    
+    if (currentBits < ALPHA_PACK_COST) {
+        showGameMessage('💰', 'Not Enough Bits', `You need ${ALPHA_PACK_COST} bits to gift an alpha pack. You have ${Math.round(currentBits)} bits.`);
+        return;
+    }
+    
+    // Load friends
+    if (friendsListData.length === 0) {
+        await loadFriends();
+    }
+    
+    if (friendsListData.length === 0) {
+        friendList.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">👥</div>
+                <div class="empty-state-text">No friends to gift. Add friends first!</div>
+            </div>
+        `;
+    } else {
+        friendList.innerHTML = '';
+        friendsListData.forEach(friend => {
+            const friendItem = document.createElement('div');
+            friendItem.className = 'gift-friend-item';
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'gift-friend-avatar';
+            const initial = friend.name ? friend.name.charAt(0).toUpperCase() : '?';
+            avatar.textContent = initial; // Show initial immediately as fallback
+            
+            if (friend.photoURL) {
+                // Use testImageLoad to handle 429 errors gracefully
+                testImageLoad(friend.photoURL).then(() => {
+                    // Image loaded successfully - apply it
+                    avatar.style.backgroundImage = `url(${friend.photoURL})`;
+                    avatar.style.backgroundSize = 'cover';
+                    avatar.style.backgroundPosition = 'center';
+                    avatar.textContent = ''; // Hide initial when image loads
+                }).catch(() => {
+                    // Image failed to load (429, network error, etc.) - keep initial visible
+                    avatar.style.backgroundImage = '';
+                    avatar.style.backgroundSize = '';
+                    avatar.style.backgroundPosition = '';
+                    // Initial is already set above
+                });
+            }
+            
+            const name = document.createElement('div');
+            name.className = 'gift-friend-name';
+            name.textContent = friend.name || 'Unknown';
+            
+            friendItem.appendChild(avatar);
+            friendItem.appendChild(name);
+            
+            friendItem.onclick = () => {
+                const messageInput = document.getElementById('giftMessageInput');
+                const message = messageInput ? messageInput.value.trim() : '';
+                giftAlphaPackToFriend(friend.id, friend.name, message);
+            };
+            
+            friendList.appendChild(friendItem);
+        });
+    }
+    
+    modal.style.display = 'flex';
+    
+    if (closeBtn) {
+        closeBtn.onclick = () => {
+            modal.style.display = 'none';
+        };
+    }
+}
+
+async function giftAlphaPackToFriend(friendId, friendName, message = '') {
+    if (!currentUser || !window.firebaseDb) return;
+    
+    // Check bits again
+    const stats = await getPlayerStats();
+    const currentBits = stats.bits !== undefined && stats.bits !== null ? stats.bits : 0;
+    
+    if (currentBits < ALPHA_PACK_COST) {
+        showGameMessage('💰', 'Not Enough Bits', `You need ${ALPHA_PACK_COST} bits to gift an alpha pack.`);
+        return;
+    }
+    
+    try {
+        // Deduct bits
+        stats.bits = (stats.bits || 0) - ALPHA_PACK_COST;
+        await savePlayerStats(stats);
+        
+        // Create gift pack document in Firestore
+        const giftData = {
+            receiverId: friendId,
+            senderId: currentUser.uid,
+            senderName: currentUser.displayName || currentUser.email || 'Someone',
+            message: message || null,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            opened: false
+        };
+        
+        await window.firebaseDb.collection('giftedPacks').add(giftData);
+        
+        // Update displays
+        await updateShopChipsDisplay();
+        await updateStatsDisplay();
+        
+        // Close modal and clear message
+        const modal = document.getElementById('giftFriendModal');
+        const messageInput = document.getElementById('giftMessageInput');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+        if (messageInput) {
+            messageInput.value = '';
+        }
+        
+        showGameMessage('🎁', 'Gift Sent!', `You gifted an Alpha Pack to ${friendName}!`);
+    } catch (error) {
+        console.error('Error gifting alpha pack:', error);
+        showGameMessage('❌', 'Error', 'Failed to send gift. Please try again.');
+    }
+}
+
+async function loadYourPacks() {
+    if (!currentUser || !window.firebaseDb) {
+        const container = document.getElementById('yourPacksContainer');
+        if (container) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📦</div>
+                    <div class="empty-state-text">Sign in to view your packs!</div>
+                </div>
+            `;
+        }
+        return;
+    }
+    
+    try {
+        // Load packs where current user is receiver and not opened
+        // Try with orderBy first (requires index)
+        const packsQuery = window.firebaseDb.collection('giftedPacks')
+            .where('receiverId', '==', currentUser.uid)
+            .where('opened', '==', false)
+            .orderBy('timestamp', 'desc');
+        
+        const snapshot = await packsQuery.get();
+        const packs = [];
+        
+        snapshot.forEach(doc => {
+            packs.push({
+                id: doc.id,
+                ...doc.data()
+            });
+        });
+        
+        renderYourPacks(packs);
+    } catch (error) {
+        // Check if it's a failed-precondition (missing index) error
+        if (error.code === 'failed-precondition') {
+            console.warn('Index not found, using fallback query:', error);
+            // Fallback: try without orderBy if index doesn't exist
+            try {
+                const packsQuery = window.firebaseDb.collection('giftedPacks')
+                    .where('receiverId', '==', currentUser.uid)
+                    .where('opened', '==', false);
+                
+                const snapshot = await packsQuery.get();
+                const packs = [];
+                
+                snapshot.forEach(doc => {
+                    packs.push({
+                        id: doc.id,
+                        ...doc.data()
+                    });
+                });
+                
+                // Sort by timestamp client-side
+                packs.sort((a, b) => {
+                    const aTime = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp || 0);
+                    const bTime = b.timestamp?.toDate ? b.timestamp.toDate() : new Date(b.timestamp || 0);
+                    return bTime.getTime() - aTime.getTime();
+                });
+                
+                renderYourPacks(packs);
+            } catch (fallbackError) {
+                console.error('Error loading packs (fallback):', fallbackError);
+                const container = document.getElementById('yourPacksContainer');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">⚠️</div>
+                            <div class="empty-state-text">Error loading packs</div>
+                        </div>
+                    `;
+                }
+            }
+        } else {
+            // Other errors
+            console.error('Error loading your packs:', error);
+            const container = document.getElementById('yourPacksContainer');
+            if (container) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">⚠️</div>
+                        <div class="empty-state-text">Error loading packs</div>
+                    </div>
+                `;
+            }
+        }
+    }
+}
+
+function renderYourPacks(packs) {
+    const container = document.getElementById('yourPacksContainer');
+    if (!container) return;
+    
+    if (packs.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">📦</div>
+                <div class="empty-state-text">No packs yet. Buy or receive a gift to get started!</div>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = '';
+    
+    packs.forEach(pack => {
+        const packItem = document.createElement('div');
+        packItem.className = 'your-pack-item';
+        if (pack.senderId) {
+            packItem.classList.add('gifted');
+        }
+        
+        const icon = document.createElement('div');
+        icon.className = 'your-pack-icon';
+        icon.textContent = '📦';
+        
+        const label = document.createElement('div');
+        label.className = 'your-pack-label';
+        label.textContent = 'Alpha Pack';
+        
+        packItem.appendChild(icon);
+        packItem.appendChild(label);
+        
+        if (pack.senderName) {
+            const sender = document.createElement('div');
+            sender.className = 'your-pack-sender';
+            sender.textContent = `From: ${pack.senderName}`;
+            packItem.appendChild(sender);
+        }
+        
+        packItem.onclick = () => {
+            openGiftedPack(pack.id);
+        };
+        
+        container.appendChild(packItem);
+    });
+}
+
+async function openGiftedPack(packId) {
+    if (!currentUser || !window.firebaseDb) return;
+    
+    try {
+        // Mark pack as opened
+        await window.firebaseDb.collection('giftedPacks').doc(packId).update({
+            opened: true
+        });
+        
+        // Open the pack (same as regular pack opening)
+        openAlphaPack(packId);
+        
+        // Reload packs list
+        await loadYourPacks();
+    } catch (error) {
+        console.error('Error opening gifted pack:', error);
+        showGameMessage('❌', 'Error', 'Failed to open pack. Please try again.');
+    }
+}
+
+async function checkGiftNotifications() {
+    if (!currentUser || !window.firebaseDb) return;
+    
+    try {
+        // Get all unopened packs that haven't been shown yet
+        // Try with orderBy first (requires index)
+        const packsQuery = window.firebaseDb.collection('giftedPacks')
+            .where('receiverId', '==', currentUser.uid)
+            .where('opened', '==', false)
+            .orderBy('timestamp', 'desc');
+        
+        const snapshot = await packsQuery.get();
+        
+        if (!snapshot.empty) {
+            const packs = [];
+            snapshot.forEach(doc => {
+                packs.push({
+                    id: doc.id,
+                    ...doc.data()
+                });
+            });
+            
+            // Get list of already shown gift IDs
+            const shownGifts = JSON.parse(localStorage.getItem('shownGiftIds') || '[]');
+            
+            // Show notification for each unshown gift (oldest first)
+            const unshownPacks = packs.filter(pack => !shownGifts.includes(pack.id));
+            unshownPacks.reverse(); // Show oldest first
+            
+            if (unshownPacks.length > 0) {
+                // Show notifications one at a time with a delay
+                for (let i = 0; i < unshownPacks.length; i++) {
+                    const pack = unshownPacks[i];
+                    setTimeout(() => {
+                        showGiftNotification(pack.senderName || 'Someone', pack.message || null);
+                        // Mark as shown
+                        shownGifts.push(pack.id);
+                        localStorage.setItem('shownGiftIds', JSON.stringify(shownGifts));
+                    }, i * 2000); // 2 second delay between each notification
+                }
+            }
+        }
+    } catch (error) {
+        // Check if it's a failed-precondition (missing index) error
+        if (error.code === 'failed-precondition') {
+            console.warn('Index not found for gift notifications, using fallback query:', error);
+            // Fallback: try without orderBy if index doesn't exist
+            try {
+                const packsQuery = window.firebaseDb.collection('giftedPacks')
+                    .where('receiverId', '==', currentUser.uid)
+                    .where('opened', '==', false);
+                
+                const snapshot = await packsQuery.get();
+                
+                if (!snapshot.empty) {
+                    const packs = [];
+                    snapshot.forEach(doc => {
+                        packs.push({
+                            id: doc.id,
+                            ...doc.data()
+                        });
+                    });
+                    
+                    // Sort by timestamp client-side
+                    packs.sort((a, b) => {
+                        const aTime = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp || 0);
+                        const bTime = b.timestamp?.toDate ? b.timestamp.toDate() : new Date(b.timestamp || 0);
+                        return aTime.getTime() - bTime.getTime(); // Oldest first
+                    });
+                    
+                    // Get list of already shown gift IDs
+                    const shownGifts = JSON.parse(localStorage.getItem('shownGiftIds') || '[]');
+                    
+                    // Show notification for each unshown gift
+                    const unshownPacks = packs.filter(pack => !shownGifts.includes(pack.id));
+                    
+                    if (unshownPacks.length > 0) {
+                        // Show notifications one at a time with a delay
+                        for (let i = 0; i < unshownPacks.length; i++) {
+                            const pack = unshownPacks[i];
+                            setTimeout(() => {
+                                showGiftNotification(pack.senderName || 'Someone', pack.message || null);
+                                // Mark as shown
+                                shownGifts.push(pack.id);
+                                localStorage.setItem('shownGiftIds', JSON.stringify(shownGifts));
+                            }, i * 2000); // 2 second delay between each notification
+                        }
+                    }
+                }
+            } catch (fallbackError) {
+                console.error('Error checking gift notifications (fallback):', fallbackError);
+            }
+        } else {
+            console.error('Error checking gift notifications:', error);
+        }
+    }
+}
+
+function showGiftNotification(senderName, giftMessage = null) {
+    const modal = document.getElementById('giftNotificationModal');
+    const senderEl = document.getElementById('giftNotificationSender');
+    const messageEl = document.getElementById('giftNotificationMessage');
+    const noteEl = document.getElementById('giftNotificationNote');
+    const okBtn = document.getElementById('giftNotificationOkBtn');
+    
+    if (!modal) return;
+    
+    if (senderEl) {
+        senderEl.textContent = `From: ${senderName}`;
+    }
+    
+    if (messageEl) {
+        if (giftMessage) {
+            messageEl.textContent = `"${giftMessage}"`;
+            messageEl.style.display = 'block';
+        } else {
+            messageEl.style.display = 'none';
+        }
+    }
+    
+    if (noteEl) {
+        noteEl.textContent = 'Check "Your Packs" to open it!';
+    }
+    
+    modal.style.display = 'flex';
+    
+    if (okBtn) {
+        okBtn.onclick = () => {
             modal.style.display = 'none';
         };
     }
@@ -15329,9 +15912,6 @@ function renderMessagesFriendsList() {
     
     friendsListEl.innerHTML = sortedFriends.map(friend => {
         const initial = friend.name ? friend.name.charAt(0).toUpperCase() : '?';
-        const avatarStyle = friend.photoURL 
-            ? `background-image: url(${friend.photoURL}); background-size: cover; background-position: center;` 
-            : '';
         const isActive = currentChatFriendId === friend.id ? 'active' : '';
         const unreadCount = unreadMessageCounts[friend.id] || 0;
         const hasUnread = unreadCount > 0 && currentChatFriendId !== friend.id;
@@ -15339,7 +15919,7 @@ function renderMessagesFriendsList() {
         
         return `
             <div class="messages-friend-item ${isActive}" data-friend-id="${friend.id}" onclick="openChatWithFriend('${friend.id}')">
-                <div class="messages-friend-avatar" style="${avatarStyle}">${friend.photoURL ? '' : initial}</div>
+                <div class="messages-friend-avatar" data-photo-url="${friend.photoURL || ''}" data-initial="${initial}">${initial}</div>
                 ${hasUnread ? '<div class="messages-unread-indicator"></div>' : ''}
                 <div class="messages-friend-info">
                     <div class="messages-friend-name ${isFriendAdmin ? 'admin-name' : ''}">${escapeHtml(friend.name || 'Unknown')}</div>
@@ -15348,6 +15928,15 @@ function renderMessagesFriendsList() {
             </div>
         `;
     }).join('');
+    
+    // Apply profile images safely after rendering
+    sortedFriends.forEach(friend => {
+        const avatarEl = friendsListEl.querySelector(`[data-friend-id="${friend.id}"] .messages-friend-avatar`);
+        if (avatarEl) {
+            const initial = friend.name ? friend.name.charAt(0).toUpperCase() : '?';
+            applyProfileImage(avatarEl, friend.photoURL, initial);
+        }
+    });
     
     // Update notification badge in More menu
     updateMessagesNotificationBadge();
@@ -15424,11 +16013,7 @@ async function openChatWithFriend(friendId) {
     
     if (chatAvatar) {
         const initial = friend.name ? friend.name.charAt(0).toUpperCase() : '?';
-        const avatarStyle = friend.photoURL 
-            ? `background-image: url(${friend.photoURL}); background-size: cover; background-position: center;` 
-            : '';
-        chatAvatar.style.cssText = avatarStyle || '';
-        chatAvatar.textContent = friend.photoURL ? '' : initial;
+        applyProfileImage(chatAvatar, friend.photoURL, initial);
     }
     
     if (chatName) {
@@ -15877,15 +16462,27 @@ function setupMessageListener(friendId) {
 // Update messages notification badge in More menu
 function updateMessagesNotificationBadge() {
     const badge = document.getElementById('messagesNotificationBadge');
-    if (!badge) return;
+    const moreTabBadge = document.getElementById('moreTabNotificationBadge');
     
     const totalUnread = Object.values(unreadMessageCounts).reduce((sum, count) => sum + count, 0);
     
-    if (totalUnread > 0) {
-        badge.style.display = 'block';
-        badge.textContent = totalUnread > 99 ? '99+' : totalUnread.toString();
-    } else {
-        badge.style.display = 'none';
+    if (badge) {
+        if (totalUnread > 0) {
+            badge.style.display = 'flex';
+            badge.textContent = totalUnread > 99 ? '99+' : totalUnread.toString();
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+    
+    // Update More tab badge
+    if (moreTabBadge) {
+        if (totalUnread > 0) {
+            moreTabBadge.style.display = 'flex';
+            moreTabBadge.textContent = totalUnread > 99 ? '99+' : totalUnread.toString();
+        } else {
+            moreTabBadge.style.display = 'none';
+        }
     }
 }
 

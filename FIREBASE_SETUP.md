@@ -97,9 +97,10 @@ service cloud.firestore {
     }
     
     // Users can read any stats document (for displaying opponent stats), but only write their own
+    // Admins can write to any user's stats (for admin panel)
     match /stats/{userId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && (request.auth.uid == userId || isAdmin());
     }
     
     // Friends collection - users can read/write their own friend relationships
@@ -180,6 +181,29 @@ service cloud.firestore {
       allow delete: if request.auth != null && 
                      resource.data.senderId == request.auth.uid;
     }
+    
+    // Gifted Packs collection - users can read packs they received, create packs they're sending, and update packs they received
+    match /giftedPacks/{packId} {
+      // Users can read packs where they are the receiver (for queries and individual reads)
+      allow read: if request.auth != null && 
+                   resource.data.receiverId == request.auth.uid;
+      
+      // Users can create packs where they are the sender (gifting to friends)
+      allow create: if request.auth != null && 
+                     request.resource.data.senderId == request.auth.uid &&
+                     request.resource.data.receiverId != request.auth.uid;
+      
+      // Users can update packs they received (to mark as opened)
+      allow update: if request.auth != null && 
+                     resource.data.receiverId == request.auth.uid &&
+                     // Only allow updating the 'opened' field
+                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['opened']) &&
+                     request.resource.data.receiverId == resource.data.receiverId &&
+                     request.resource.data.senderId == resource.data.senderId;
+      
+      // Users cannot delete packs (only mark as opened)
+      allow delete: if false;
+    }
   }
 }
 ```
@@ -195,6 +219,7 @@ service cloud.firestore {
 - **`/communityPosts/{postId}`**: Users can read all posts, create their own, update likes/comment counts, and delete their own posts (admins can delete any post)
 - **`/communityPosts/{postId}/comments/{commentId}`**: Users can read all comments, create their own, and delete their own comments
 - **`/messages/{messageId}`**: Users can read messages where they're the sender or receiver, create messages where they're the sender, update read status, and delete messages they sent
+- **`/giftedPacks/{packId}`**: Users can read packs they received, create packs they're sending (gifting), and update packs they received (to mark as opened)
 
 ### Switching from Test Mode to Production Mode:
 
@@ -218,9 +243,9 @@ Firestore may require composite indexes for certain queries. If you see an error
 3. Click **Create Index**
 4. Follow the prompts to create the required index
 
-**Note**: The messages collection may need an index for `conversationId` + `createdAt` queries. If you see an index error, create it with:
-- Collection: `messages`
-- Fields: `conversationId` (Ascending), `createdAt` (Ascending)
+**Note**: The following collections may need composite indexes:
+- **Messages**: `conversationId` (Ascending), `createdAt` (Ascending)
+- **Gifted Packs**: `receiverId` (Ascending), `opened` (Ascending), `timestamp` (Descending)
 
 ## 8. Test Your Setup
 

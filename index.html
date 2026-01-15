@@ -697,11 +697,26 @@
                                                     <span class="rarity-indicator rarity-rare">Rare</span>
                                                     <span class="rarity-indicator rarity-epic">Epic</span>
                                                 </div>
-                                                <button id="buyAlphaPackBtn" class="btn btn-primary btn-large alpha-pack-buy-btn">
-                                                    <img src="images/Bits & Chips Images/Bits.png" alt="Bits" class="btn-icon-img">
-                                                    <span>Buy for <span id="alphaPackPrice">100</span> Bits</span>
-                                                </button>
+                                                <div class="alpha-pack-actions">
+                                                    <button id="buyAlphaPackBtn" class="btn btn-primary btn-large alpha-pack-buy-btn">
+                                                        <img src="images/Bits & Chips Images/Bits.png" alt="Bits" class="btn-icon-img">
+                                                        <span>Buy for <span id="alphaPackPrice">100</span> Bits</span>
+                                                    </button>
+                                                    <button id="giftAlphaPackBtn" class="btn btn-secondary btn-large alpha-pack-gift-btn">
+                                                        <span>🎁 Gift to Friend</span>
+                                                    </button>
+                                                </div>
                                             </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="shop-section">
+                                    <h3 class="shop-section-title">Your Packs</h3>
+                                    <div id="yourPacksContainer" class="your-packs-container">
+                                        <div class="empty-state">
+                                            <div class="empty-state-icon">📦</div>
+                                            <div class="empty-state-text">No packs yet. Buy or receive a gift to get started!</div>
                                         </div>
                                     </div>
                                 </div>
@@ -837,6 +852,7 @@
                         <button class="lobby-tab lobby-tab-more" id="moreTabBtn">
                             <div class="tab-icon-wrapper">
                                 <span class="tab-icon">⋯</span>
+                                <span id="moreTabNotificationBadge" class="tab-notification-badge" style="display: none;"></span>
                             </div>
                             <span class="tab-label">More</span>
                         </button>
@@ -1477,6 +1493,40 @@
                 </div>
             </div>
             <button class="alpha-pack-close-btn" id="alphaPackCloseBtn" style="display: none;">Close</button>
+        </div>
+    </div>
+    
+    <!-- Gift Friend Selection Modal -->
+    <div id="giftFriendModal" class="gift-friend-modal" style="display: none;">
+        <div class="gift-friend-modal-content">
+            <div class="gift-friend-header">
+                <h2>Gift Alpha Pack to Friend</h2>
+                <button class="gift-friend-close" id="giftFriendCloseBtn">&times;</button>
+            </div>
+            <div class="gift-friend-body">
+                <div class="gift-message-section">
+                    <label for="giftMessageInput" class="gift-message-label">Add a message (optional):</label>
+                    <textarea id="giftMessageInput" class="gift-message-input" placeholder="Write a message to your friend..." maxlength="200"></textarea>
+                </div>
+                <div id="giftFriendList" class="gift-friend-list">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">👥</div>
+                        <div class="empty-state-text">No friends to gift. Add friends first!</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Gift Notification Modal -->
+    <div id="giftNotificationModal" class="gift-notification-modal" style="display: none;">
+        <div class="gift-notification-content">
+            <div class="gift-notification-icon">🎁</div>
+            <div class="gift-notification-title">You Received a Gift!</div>
+            <div class="gift-notification-sender" id="giftNotificationSender"></div>
+            <div class="gift-notification-message" id="giftNotificationMessage"></div>
+            <div class="gift-notification-note" id="giftNotificationNote">Check "Your Packs" to open it!</div>
+            <button class="btn btn-primary" id="giftNotificationOkBtn">Awesome!</button>
         </div>
     </div>
     

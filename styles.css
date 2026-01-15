@@ -1057,6 +1057,7 @@ header h1 {
 }
 
 .tab-icon-wrapper {
+    position: relative;
     width: 32px;
     height: 32px;
     display: flex;
@@ -1160,6 +1161,7 @@ header h1 {
 }
 
 .more-tab-item {
+    position: relative;
     width: 100%;
     padding: 12px 16px;
     background: transparent;
@@ -1200,20 +1202,47 @@ header h1 {
 }
 
 .more-tab-notification {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: #6aaa64;
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, #dc3545, #c82333);
     color: #ffffff;
-    font-size: 0.6875rem;
+    font-size: 0.65rem;
     font-weight: 700;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-left: auto;
-    min-width: 20px;
+    padding: 0 5px;
+    box-shadow: 0 2px 6px rgba(220, 53, 69, 0.5), 0 0 0 2px rgba(18, 18, 19, 0.9);
+    line-height: 1;
+    z-index: 10;
+}
+
+.tab-notification-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #dc3545, #c82333);
+    color: #ffffff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 0 4px;
-    box-shadow: 0 2px 4px rgba(106, 170, 100, 0.4);
+    box-shadow: 0 2px 6px rgba(220, 53, 69, 0.5), 0 0 0 2px rgba(18, 18, 19, 0.9);
+    line-height: 1;
+    z-index: 10;
+}
+
+.tab-icon-wrapper {
+    position: relative;
 }
 
 /* Active state for items in more menu */
@@ -3172,10 +3201,31 @@ header h1 {
     border: 1px solid #9b59b6;
 }
 
+.alpha-pack-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+}
+
 .alpha-pack-buy-btn {
     width: 100%;
     padding: 16px;
     font-size: 1.1rem;
+}
+
+.alpha-pack-gift-btn {
+    width: 100%;
+    padding: 16px;
+    font-size: 1.1rem;
+    background: linear-gradient(135deg, #9b59b6, #8e44ad);
+    border: 2px solid #9b59b6;
+}
+
+.alpha-pack-gift-btn:hover {
+    background: linear-gradient(135deg, #8e44ad, #7d3c98);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(155, 89, 182, 0.4);
 }
 
 .collection-grid {
@@ -3305,6 +3355,11 @@ header h1 {
 .alpha-pack-pack::before {
     content: '📦';
     font-size: 8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
     z-index: 2;
     animation: packPulse 1s ease-in-out infinite;
 }
@@ -3415,6 +3470,294 @@ header h1 {
 @keyframes epicGlow {
     0%, 100% { box-shadow: 0 0 30px rgba(155, 89, 182, 0.6); }
     50% { box-shadow: 0 0 50px rgba(155, 89, 182, 0.9); }
+}
+
+/* Your Packs Section */
+.your-packs-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 20px;
+    padding: 20px;
+}
+
+.your-pack-item {
+    position: relative;
+    background: linear-gradient(145deg, #1a1a1b, #2a2a2b);
+    border: 2px solid #6aaa64;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.your-pack-item:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(106, 170, 100, 0.4);
+    border-color: #7bb86f;
+}
+
+.your-pack-item.gifted {
+    border-color: #9b59b6;
+    background: linear-gradient(145deg, #2a1a2b, #3a2a3b);
+}
+
+.your-pack-item.gifted:hover {
+    border-color: #8e44ad;
+    box-shadow: 0 8px 24px rgba(155, 89, 182, 0.4);
+}
+
+.your-pack-icon {
+    font-size: 4rem;
+    margin-bottom: 12px;
+}
+
+.your-pack-label {
+    color: #d7dadc;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.your-pack-sender {
+    color: #818384;
+    font-size: 0.75rem;
+    font-style: italic;
+}
+
+/* Gift Friend Modal */
+.gift-friend-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(10px);
+    z-index: 5000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: overlayFadeIn 0.3s ease-in;
+}
+
+.gift-friend-modal-content {
+    background: linear-gradient(145deg, #1a1a1b, #2a2a2b);
+    border: 2px solid #6aaa64;
+    border-radius: 16px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+}
+
+.gift-friend-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 2px solid #3a3a3c;
+}
+
+.gift-friend-header h2 {
+    color: #ffffff;
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.gift-friend-close {
+    background: none;
+    border: none;
+    color: #818384;
+    font-size: 2rem;
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s ease;
+}
+
+.gift-friend-close:hover {
+    color: #ffffff;
+}
+
+.gift-friend-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.gift-message-section {
+    margin-bottom: 10px;
+}
+
+.gift-message-label {
+    display: block;
+    color: #d7dadc;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.gift-message-input {
+    width: 100%;
+    min-height: 80px;
+    padding: 12px;
+    background: rgba(26, 26, 27, 0.8);
+    border: 2px solid #3a3a3c;
+    border-radius: 8px;
+    color: #d7dadc;
+    font-size: 0.95rem;
+    font-family: inherit;
+    resize: vertical;
+    transition: border-color 0.2s ease;
+}
+
+.gift-message-input:focus {
+    outline: none;
+    border-color: #6aaa64;
+}
+
+.gift-message-input::placeholder {
+    color: #818384;
+}
+
+.gift-friend-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.gift-friend-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(26, 26, 27, 0.6);
+    border: 2px solid #3a3a3c;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.gift-friend-item:hover {
+    background: rgba(106, 170, 100, 0.1);
+    border-color: #6aaa64;
+    transform: translateX(4px);
+}
+
+.gift-friend-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: #3a3a3c;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #ffffff;
+    flex-shrink: 0;
+}
+
+.gift-friend-name {
+    flex: 1;
+    color: #d7dadc;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+/* Gift Notification Modal */
+.gift-notification-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    backdrop-filter: blur(10px);
+    z-index: 6000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: overlayFadeIn 0.3s ease-in;
+}
+
+.gift-notification-content {
+    background: linear-gradient(145deg, #1a1a1b, #2a2a2b);
+    border: 3px solid #9b59b6;
+    border-radius: 16px;
+    padding: 40px;
+    text-align: center;
+    max-width: 400px;
+    width: 90%;
+    box-shadow: 0 8px 32px rgba(155, 89, 182, 0.5);
+    animation: scaleIn 0.3s ease-out;
+}
+
+@keyframes scaleIn {
+    from {
+        transform: scale(0.9);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.gift-notification-icon {
+    font-size: 5rem;
+    margin-bottom: 20px;
+    animation: bounce 1s ease-in-out infinite;
+}
+
+@keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+}
+
+.gift-notification-title {
+    color: #ffffff;
+    font-size: 1.8rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+}
+
+.gift-notification-sender {
+    color: #6aaa64;
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+.gift-notification-message {
+    color: #d7dadc;
+    font-size: 1.1rem;
+    margin-bottom: 16px;
+    line-height: 1.6;
+    font-style: italic;
+    padding: 16px;
+    background: rgba(106, 170, 100, 0.1);
+    border-left: 3px solid #6aaa64;
+    border-radius: 8px;
+    max-width: 100%;
+    word-wrap: break-word;
+}
+
+.gift-notification-note {
+    color: #818384;
+    font-size: 0.95rem;
+    margin-bottom: 24px;
 }
 
 .alpha-pack-close-btn {
