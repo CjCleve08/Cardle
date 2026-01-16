@@ -204,6 +204,16 @@ service cloud.firestore {
       // Users cannot delete packs (only mark as opened)
       allow delete: if false;
     }
+    
+    // Card Camos collection - users can only read/write their own card camo preferences
+    match /cardCamos/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Owned Camos collection - users can only read/write their own owned camos
+    match /ownedCamos/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
   }
 }
 ```
@@ -220,6 +230,8 @@ service cloud.firestore {
 - **`/communityPosts/{postId}/comments/{commentId}`**: Users can read all comments, create their own, and delete their own comments
 - **`/messages/{messageId}`**: Users can read messages where they're the sender or receiver, create messages where they're the sender, update read status, and delete messages they sent
 - **`/giftedPacks/{packId}`**: Users can read packs they received, create packs they're sending (gifting), and update packs they received (to mark as opened)
+- **`/cardCamos/{userId}`**: Users can only read and write their own card camo preferences
+- **`/ownedCamos/{userId}`**: Users can only read and write their own owned camos list
 
 ### Switching from Test Mode to Production Mode:
 

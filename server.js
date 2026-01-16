@@ -1393,13 +1393,13 @@ class BotWordleSolver {
         }
         
         // Skill-based candidate pool: higher skill = smaller pool (more optimal)
-        // Low skill (0.0): 30% of words, High skill (1.0): 5% of words
-        const poolPercentage = 0.30 - (this.skillLevel * 0.25);
+        // Toned down: Low skill (0.0): 40% of words, High skill (1.0): 15% of words (less optimal)
+        const poolPercentage = 0.40 - (this.skillLevel * 0.25);
         const candidatePoolSize = Math.max(
             1, 
             Math.min(
                 Math.ceil(this.possibleWords.length * poolPercentage),
-                Math.max(3, Math.ceil(this.possibleWords.length * 0.15))
+                Math.max(5, Math.ceil(this.possibleWords.length * 0.20)) // Increased min pool size
             )
         );
         const candidates = this.possibleWords
@@ -1411,7 +1411,7 @@ class BotWordleSolver {
 }
 
 // Bot card selection logic - ALWAYS returns a card (unless card locked)
-function botSelectCard(game, botId, botHand) {
+function botSelectCard(game, botId, botHand, botSkillLevel = 0.5) {
     if (!botHand || botHand.length === 0) {
         // If no cards, draw one immediately (shouldn't happen, but safety)
         const allCardsMetadata = getAllCardsMetadata();
@@ -1448,12 +1448,13 @@ function botSelectCard(game, botId, botHand) {
         )
     );
     
-    // If bot has negative effects, prioritize effectClear if available
+    // If bot has negative effects, prioritize effectClear if available (skill-based chance)
     if (hasNegativeEffects) {
         const effectClearCard = availableCards.find(card => card.id === 'effectClear');
         if (effectClearCard) {
-            // 80% chance to use effectClear if available and has negative effects
-            if (Math.random() < 0.8) {
+            // Lower skill = less likely to use effectClear (more mistakes)
+            const useChance = 0.5 + (botSkillLevel * 0.3); // 50% at skill 0, 80% at skill 1
+            if (Math.random() < useChance) {
                 return effectClearCard;
             }
         }
@@ -1476,26 +1477,31 @@ function botSelectCard(game, botId, botHand) {
         return null; // Last resort
     }
     
-    // Simple card selection strategy
-    if (isAhead) {
-        // Bot is ahead - prefer defensive/helpful cards, but will use any if needed
-        const helpfulCards = availableCards.filter(c => 
-            ['hiddenFeedback', 'hiddenGuess', 'extraGuess', 'gamblersCard', 'effectClear'].includes(c.id)
-        );
-        if (helpfulCards.length > 0) {
-            return helpfulCards[Math.floor(Math.random() * helpfulCards.length)];
-        }
-    } else {
-        // Bot is behind - prefer offensive cards, but will use any if needed
-        const offensiveCards = availableCards.filter(c =>
-            ['falseFeedback', 'cardLock', 'blindGuess', 'timeRush', 'wordScramble', 'amnesia'].includes(c.id)
-        );
-        if (offensiveCards.length > 0) {
-            return offensiveCards[Math.floor(Math.random() * offensiveCards.length)];
+    // Skill-based card selection: lower skill = more random, higher skill = more strategic
+    const useStrategy = Math.random() < (0.3 + botSkillLevel * 0.4); // 30% at skill 0, 70% at skill 1
+    
+    if (useStrategy) {
+        // Simple card selection strategy
+        if (isAhead) {
+            // Bot is ahead - prefer defensive/helpful cards, but will use any if needed
+            const helpfulCards = availableCards.filter(c => 
+                ['hiddenFeedback', 'hiddenGuess', 'extraGuess', 'gamblersCard', 'effectClear'].includes(c.id)
+            );
+            if (helpfulCards.length > 0) {
+                return helpfulCards[Math.floor(Math.random() * helpfulCards.length)];
+            }
+        } else {
+            // Bot is behind - prefer offensive cards, but will use any if needed
+            const offensiveCards = availableCards.filter(c =>
+                ['falseFeedback', 'cardLock', 'blindGuess', 'timeRush', 'wordScramble', 'amnesia'].includes(c.id)
+            );
+            if (offensiveCards.length > 0) {
+                return offensiveCards[Math.floor(Math.random() * offensiveCards.length)];
+            }
         }
     }
     
-    // Default: always return a random card from available
+    // Default: always return a random card from available (more common for lower skill bots)
     return availableCards[Math.floor(Math.random() * availableCards.length)];
 }
 
@@ -1508,19 +1514,27 @@ function createBotGame(humanSocket, humanName, firebaseUid = null, isTutorial = 
     const tutorialWords = ['APPLE', 'HEART', 'MUSIC', 'WATER', 'LIGHT', 'DREAM', 'HAPPY', 'SMILE'];
     const word = isTutorial ? tutorialWords[Math.floor(Math.random() * tutorialWords.length)] : getRandomWord();
     
-    // Determine bot skill level based on chips (for ranked games) or random (for casual)
-    let botSkillLevel = 0.5; // Default medium skill
-    if (isRanked && humanChipPoints !== null && humanChipPoints !== undefined) {
-        // Match bot skill to human's chip level
-        // Scale: 0 chips = 0.2 skill, 1000 chips = 0.8 skill, 2000+ chips = 0.95 skill
+    // Determine bot skill level - fluctuate around player's level to simulate real players
+    let botSkillLevel = 0.3; // Default skill for new players
+    if (!isTutorial && humanChipPoints !== null && humanChipPoints !== undefined) {
+        // Calculate player's base skill level from chips
+        // Scale: 0 chips = 0.15 skill, 1000 chips = 0.5 skill, 2000+ chips = 0.7 skill
         const normalizedChips = Math.min(humanChipPoints, 2000);
-        botSkillLevel = 0.2 + (normalizedChips / 2000) * 0.75;
-        // Add some variation (±10%) so bots aren't identical
-        botSkillLevel += (Math.random() - 0.5) * 0.2;
-        botSkillLevel = Math.max(0.1, Math.min(0.95, botSkillLevel));
+        const playerBaseSkill = 0.15 + (normalizedChips / 2000) * 0.55;
+        
+        // Fluctuate around player's level (±25%) to simulate real players
+        // This means bots can be slightly better or worse, but not extremely so
+        const variationRange = playerBaseSkill * 0.25; // 25% variation
+        botSkillLevel = playerBaseSkill + (Math.random() - 0.5) * (variationRange * 2);
+        
+        // Ensure bot skill stays within reasonable bounds (not extremely better or worse)
+        // Min: 70% of player skill, Max: 130% of player skill, but capped at 0.75 absolute max
+        const minSkill = Math.max(0.1, playerBaseSkill * 0.7);
+        const maxSkill = Math.min(0.75, playerBaseSkill * 1.3);
+        botSkillLevel = Math.max(minSkill, Math.min(maxSkill, botSkillLevel));
     } else if (!isTutorial) {
-        // Casual games: random skill between 0.3 and 0.7
-        botSkillLevel = 0.3 + Math.random() * 0.4;
+        // Fallback for casual games without chip data: moderate random skill
+        botSkillLevel = 0.25 + Math.random() * 0.35; // 0.25 to 0.6
     }
     
     // Create game state
@@ -1580,11 +1594,12 @@ function createBotGame(humanSocket, humanName, firebaseUid = null, isTutorial = 
         botHand.push(randomCard);
     }
     
-    // Store bot game info (including initialized hand)
+    // Store bot game info (including initialized hand and skill level)
     botGames.set(gameId, {
         botId: botId,
         botSolver: botSolver,
-        botHand: botHand
+        botHand: botHand,
+        botSkillLevel: botSkillLevel // Store skill level for card selection
     });
     
     // Start the game after a delay
@@ -1669,7 +1684,7 @@ function processBotTurn(gameId) {
         // ALWAYS select a card - bot must play a card every turn
         let selectedCard = null;
         if (botData.botHand && botData.botHand.length > 0) {
-            selectedCard = botSelectCard(currentGame, botId, botData.botHand);
+            selectedCard = botSelectCard(currentGame, botId, botData.botHand, botData.botSkillLevel || 0.5);
         }
         
         // If bot selected a card (should always happen unless card locked), simulate card selection

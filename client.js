@@ -528,6 +528,10 @@ function showLobby() {
                 loadUnreadMessageCounts().catch(error => {
                     console.error('Error loading unread message counts:', error);
                 });
+                // Load packs on startup to update shop tab badge
+                loadYourPacks().catch(error => {
+                    console.error('Error loading packs:', error);
+                });
             }
         }, 100);
         
@@ -1266,7 +1270,7 @@ const AVAILABLE_CAMOS = [
     { id: 'LonesomeWallBase', name: 'Lonesome Wall', filename: 'LonesomeWallBase.png', rarity: 'common' },
     { id: 'McLovinBase', name: 'McLovin', filename: 'McLovinBase.png', rarity: 'common' },
     { id: 'MercenaryBase', name: 'Mercenary', filename: 'MercenaryBase.png', rarity: 'common' },
-    { id: 'MyMommaskindaHomelessBase', name: 'My Momma\'s Kinda Homeless', filename: 'MyMomma\'sKindaHomelessBase.png', rarity: 'common' },
+    { id: 'MyMommaskindaHomelessBase', name: 'My Momma\'s Kinda Homeless', filename: 'MyMommasKindaHomelessBase.png', rarity: 'common' },
     { id: 'PirateBase', name: 'Pirate', filename: 'PirateBase.png', rarity: 'common' },
     { id: 'PortalHoppersBase', name: 'Portal Hoppers', filename: 'PortalHoppersBase.png', rarity: 'common' },
     { id: 'PunishmentBase', name: 'Punishment', filename: 'PunishmentBase.png', rarity: 'common' },
@@ -9463,6 +9467,8 @@ async function loadYourPacks() {
                 </div>
             `;
         }
+        // Update shop tab badge (0 packs when not signed in)
+        updateShopTabNotificationBadge(0);
         return;
     }
     
@@ -9485,6 +9491,8 @@ async function loadYourPacks() {
         });
         
         renderYourPacks(packs);
+        // Update shop tab badge
+        updateShopTabNotificationBadge(packs.length);
     } catch (error) {
         // Check if it's a failed-precondition (missing index) error
         if (error.code === 'failed-precondition') {
@@ -9513,6 +9521,8 @@ async function loadYourPacks() {
                 });
                 
                 renderYourPacks(packs);
+                // Update shop tab badge
+                updateShopTabNotificationBadge(packs.length);
             } catch (fallbackError) {
                 console.error('Error loading packs (fallback):', fallbackError);
                 const container = document.getElementById('yourPacksContainer');
@@ -9552,6 +9562,8 @@ function renderYourPacks(packs) {
                 <div class="empty-state-text">No packs yet. Buy or receive a gift to get started!</div>
             </div>
         `;
+        // Update shop tab badge
+        updateShopTabNotificationBadge(0);
         return;
     }
     
@@ -9588,6 +9600,22 @@ function renderYourPacks(packs) {
         
         container.appendChild(packItem);
     });
+    
+    // Update shop tab badge with unopened packs count
+    updateShopTabNotificationBadge(packs.length);
+}
+
+// Update shop tab notification badge
+function updateShopTabNotificationBadge(unopenedPacksCount) {
+    const badge = document.getElementById('shopTabNotificationBadge');
+    if (!badge) return;
+    
+    if (unopenedPacksCount > 0) {
+        badge.style.display = 'flex';
+        badge.textContent = unopenedPacksCount > 99 ? '99+' : unopenedPacksCount.toString();
+    } else {
+        badge.style.display = 'none';
+    }
 }
 
 async function openGiftedPack(packId) {
@@ -9602,7 +9630,7 @@ async function openGiftedPack(packId) {
         // Open the pack (same as regular pack opening)
         openAlphaPack(packId);
         
-        // Reload packs list
+        // Reload packs list (this will update the badge automatically)
         await loadYourPacks();
     } catch (error) {
         console.error('Error opening gifted pack:', error);
