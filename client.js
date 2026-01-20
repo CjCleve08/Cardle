@@ -9188,10 +9188,11 @@ async function buyAlphaPack() {
 function openAlphaPack(packId = null) {
     const modal = document.getElementById('alphaPackModal');
     const pack = document.getElementById('alphaPackPack');
+    const wheel = document.getElementById('alphaPackWheel');
     const result = document.getElementById('alphaPackResult');
     const closeBtn = document.getElementById('alphaPackCloseBtn');
     
-    if (!modal || !pack || !result) return;
+    if (!modal || !pack || !result || !wheel) return;
     
     // Store packId for later use if needed
     if (packId) {
@@ -9204,54 +9205,60 @@ function openAlphaPack(packId = null) {
     result.style.display = 'none';
     closeBtn.style.display = 'none';
     
-    // Get available camos (excluding None, duplicates are allowed)
-    const availableCamos = AVAILABLE_CAMOS.filter(c => c.id !== 'None');
+    // Reset wheel rotation (so repeated opens look right)
+    wheel.style.transition = 'none';
+    wheel.style.transform = 'rotate(0deg)';
+    // Force reflow
+    void wheel.offsetWidth;
     
-    // Calculate drop rates (like R6S)
-    // Common: 70%, Rare: 25%, Epic: 5%
-    const roll = Math.random();
-    let selectedCamo;
+    // Determine rarity using your current drop rates
+    // Common: 75%, Rare: 23%, Epic: 2%
+    const rarityRoll = Math.random();
+    const selectedRarity = rarityRoll < 0.75 ? 'common' : (rarityRoll < 0.97 ? 'rare' : 'epic');
     
-    if (roll < 0.75) {
-        // Common (75%)
-        const commonCamos = availableCamos.filter(c => c.rarity === 'common');
-        if (commonCamos.length > 0) {
-            selectedCamo = commonCamos[Math.floor(Math.random() * commonCamos.length)];
-        } else {
-            // Fallback to rare if no common available
-            const rareCamos = availableCamos.filter(c => c.rarity === 'rare');
-            selectedCamo = rareCamos.length > 0 
-                ? rareCamos[Math.floor(Math.random() * rareCamos.length)]
-                : availableCamos[Math.floor(Math.random() * availableCamos.length)];
-        }
-    } else if (roll < 0.97) {
-        // Rare (23%)
-        const rareCamos = availableCamos.filter(c => c.rarity === 'rare');
-        if (rareCamos.length > 0) {
-            selectedCamo = rareCamos[Math.floor(Math.random() * rareCamos.length)];
-        } else {
-            // Fallback to epic if no rare available
-            const epicCamos = availableCamos.filter(c => c.rarity === 'epic');
-            selectedCamo = epicCamos.length > 0
-                ? epicCamos[Math.floor(Math.random() * epicCamos.length)]
-                : availableCamos[Math.floor(Math.random() * availableCamos.length)];
-        }
-    } else {
-        // Epic (2%)
-        const epicCamos = availableCamos.filter(c => c.rarity === 'epic');
-        if (epicCamos.length > 0) {
-            selectedCamo = epicCamos[Math.floor(Math.random() * epicCamos.length)];
-        } else {
-            // Fallback to rare if no epic available
-            const rareCamos = availableCamos.filter(c => c.rarity === 'rare');
-            selectedCamo = rareCamos.length > 0
-                ? rareCamos[Math.floor(Math.random() * rareCamos.length)]
-                : availableCamos[Math.floor(Math.random() * availableCamos.length)];
-        }
-    }
+    // Spin wheel to land on the chosen rarity slice (match the visual slice sizes)
+    const segments = {
+        common: { start: 0, end: 270 },       // 75%
+        rare: { start: 270, end: 352.8 },     // 23%
+        epic: { start: 352.8, end: 360 }      // 2%
+    };
+    const seg = segments[selectedRarity];
+    // Keep away from edges; for tiny epic slice use a smaller margin
+    const sliceSize = (seg.end - seg.start);
+    const margin = Math.min(4, Math.max(0.6, sliceSize * 0.15));
+    const usable = Math.max(0.2, sliceSize - (margin * 2));
+    const targetAngle = seg.start + margin + (Math.random() * usable);
     
-    // Animate pack opening
+    const spins = 5 + Math.floor(Math.random() * 3); // 5-7 full spins
+    const finalDeg = (spins * 360) + (360 - targetAngle);
+    const SPIN_MS = 3400;
+    
+    wheel.style.transition = `transform ${SPIN_MS}ms cubic-bezier(0.12, 0.9, 0.2, 1)`;
+    wheel.style.transform = `rotate(${finalDeg}deg)`;
+    
+    // Reveal result after the wheel stops
     setTimeout(async () => {
+        // Get available camos (excluding None, duplicates are allowed)
+        const availableCamos = AVAILABLE_CAMOS.filter(c => c.id !== 'None');
+        
+        // Pick a camo from the selected rarity (with fallbacks if a rarity is empty)
+        let pool = availableCamos.filter(c => c.rarity === selectedRarity);
+        if (pool.length === 0) {
+            // Fallback order: rare -> common -> epic -> any
+            pool = availableCamos.filter(c => c.rarity === 'rare');
+        }
+        if (pool.length === 0) {
+            pool = availableCamos.filter(c => c.rarity === 'common');
+        }
+        if (pool.length === 0) {
+            pool = availableCamos.filter(c => c.rarity === 'epic');
+        }
+        if (pool.length === 0) {
+            pool = availableCamos;
+        }
+        
+        const selectedCamo = pool[Math.floor(Math.random() * pool.length)];
+        
         // Check if this is a duplicate
         const owned = await getOwnedCamos();
         const isDuplicate = owned[selectedCamo.id] === true;
@@ -9308,7 +9315,7 @@ function openAlphaPack(packId = null) {
                 soundManager.playCardSelect();
             }
         }
-    }, 2000); // 2 second animation
+    }, SPIN_MS + 100);
     
     // Close button handler
     if (closeBtn) {
@@ -13709,12 +13716,47 @@ async function updatePlayerStats(uid, chipPoints, bits) {
     }
 }
 
+// Set/unset admin status for a user (requires current user to be admin)
+async function setPlayerAdminStatus(targetUid, targetEmail, makeAdmin) {
+    if (!window.firebaseDb || !currentUser || !targetUid) {
+        throw new Error('Firebase not available or UID missing');
+    }
+    
+    // Verify user is admin
+    const isAdminUser = await isAdminAsync();
+    if (!isAdminUser) {
+        throw new Error('Unauthorized: Admin access required');
+    }
+    
+    const normalizedEmail = (targetEmail || '').toLowerCase().trim();
+    const isProtected = normalizedEmail === 'cjcleve2008@gmail.com';
+    if (isProtected && makeAdmin === false) {
+        throw new Error('The creator admin cannot be removed');
+    }
+    
+    const adminRef = window.firebaseDb.collection('admins').doc(targetUid);
+    
+    if (makeAdmin) {
+        await adminRef.set({
+            email: normalizedEmail || null,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedByUid: currentUser.uid,
+            updatedByEmail: (currentUser.email || '').toLowerCase() || null
+        }, { merge: true });
+    } else {
+        await adminRef.delete();
+    }
+    
+    return true;
+}
+
 // Initialize admin panel
 function initializeAdminPanel() {
     const searchBtn = document.getElementById('adminSearchBtn');
     const searchInput = document.getElementById('adminPlayerSearch');
     const saveBtn = document.getElementById('adminSaveBtn');
     const closeResultsBtn = document.getElementById('closeAdminSearchResults');
+    const adminToggle = document.getElementById('adminPlayerIsAdminToggle');
     
     if (searchBtn) {
         searchBtn.onclick = async () => {
@@ -13785,6 +13827,69 @@ function initializeAdminPanel() {
             } finally {
                 saveBtn.disabled = false;
                 saveBtn.innerHTML = '<span class="btn-icon">💾</span><span>Save Changes</span>';
+            }
+        };
+    }
+    
+    // Admin toggle handler
+    if (adminToggle) {
+        adminToggle.onchange = async () => {
+            const uid = adminToggle.dataset.playerUid;
+            const email = adminToggle.dataset.playerEmail || '';
+            const statusEl = document.getElementById('adminAdminStatus');
+            
+            if (!uid) {
+                // No player selected; revert
+                adminToggle.checked = !adminToggle.checked;
+                return;
+            }
+            
+            // Creator protection (UI-side)
+            if ((email || '').toLowerCase() === 'cjcleve2008@gmail.com' && adminToggle.checked === false) {
+                adminToggle.checked = true;
+                if (statusEl) {
+                    statusEl.textContent = 'Creator admin cannot be removed.';
+                    statusEl.style.color = '#dc3545';
+                    statusEl.style.display = 'block';
+                }
+                return;
+            }
+            
+            try {
+                adminToggle.disabled = true;
+                if (statusEl) {
+                    statusEl.textContent = adminToggle.checked ? 'Saving admin…' : 'Removing admin…';
+                    statusEl.style.color = '#818384';
+                    statusEl.style.display = 'block';
+                }
+                
+                await setPlayerAdminStatus(uid, email, adminToggle.checked);
+                
+                if (statusEl) {
+                    statusEl.textContent = adminToggle.checked ? '✓ Admin enabled' : '✓ Admin removed';
+                    statusEl.style.color = '#6aaa64';
+                    statusEl.style.display = 'block';
+                }
+                
+                // Refresh player info (so isAdmin reflects DB state)
+                const player = await loadPlayerData(uid);
+                if (player) {
+                    displayPlayerInfo(player);
+                }
+                
+                setTimeout(() => {
+                    if (statusEl) statusEl.style.display = 'none';
+                }, 2500);
+            } catch (error) {
+                // Revert toggle on error
+                adminToggle.checked = !adminToggle.checked;
+                if (statusEl) {
+                    statusEl.textContent = 'Failed: ' + (error?.message || 'Unknown error');
+                    statusEl.style.color = '#dc3545';
+                    statusEl.style.display = 'block';
+                }
+            } finally {
+                adminToggle.disabled = false;
             }
         };
     }
@@ -13894,13 +13999,29 @@ async function loadPlayerData(uid) {
         const statsDoc = await window.firebaseDb.collection('stats').doc(uid).get();
         const stats = statsDoc.exists ? statsDoc.data() : {};
         
+        // Admin status: permanent email list OR dynamic /admins/{uid} doc
+        const email = (userData.email || '').toLowerCase();
+        let isAdminUser = isAdminEmail(email);
+        if (!isAdminUser) {
+            try {
+                const adminDoc = await window.firebaseDb.collection('admins').doc(uid).get();
+                isAdminUser = adminDoc.exists === true;
+            } catch (error) {
+                // If rules don't allow, just treat as non-admin for display
+                if (error?.code !== 'permission-denied') {
+                    console.warn('Error loading admin status:', error);
+                }
+            }
+        }
+        
         return {
             uid: uid,
             email: userData.email || '',
             displayName: userData.displayName || userData.email?.split('@')[0] || 'Unknown',
             photoURL: userData.photoURL || null,
             chipPoints: stats.chipPoints !== undefined ? stats.chipPoints : 0,
-            bits: stats.bits !== undefined ? stats.bits : 0
+            bits: stats.bits !== undefined ? stats.bits : 0,
+            isAdmin: isAdminUser
         };
     } catch (error) {
         console.error('Error loading player data:', error);
@@ -13918,6 +14039,9 @@ function displayPlayerInfo(player) {
     const chipsInput = document.getElementById('adminPlayerChips');
     const bitsInput = document.getElementById('adminPlayerBits');
     const saveBtn = document.getElementById('adminSaveBtn');
+    const adminToggle = document.getElementById('adminPlayerIsAdminToggle');
+    const adminNote = document.getElementById('adminPlayerAdminNote');
+    const adminStatus = document.getElementById('adminAdminStatus');
     
     if (resultsEl) resultsEl.style.display = 'block';
     if (errorEl) errorEl.style.display = 'none';
@@ -13927,20 +14051,36 @@ function displayPlayerInfo(player) {
     if (uidEl) uidEl.textContent = `UID: ${player.uid}`;
     
     if (avatarEl) {
-        if (player.photoURL) {
-            avatarEl.style.backgroundImage = `url(${player.photoURL})`;
-            avatarEl.style.backgroundSize = 'cover';
-            avatarEl.style.backgroundPosition = 'center';
-            avatarEl.textContent = '';
-        } else {
-            avatarEl.style.backgroundImage = '';
-            avatarEl.textContent = player.displayName.charAt(0).toUpperCase();
-        }
+        const initial = player.displayName ? player.displayName.charAt(0).toUpperCase() : '?';
+        applyProfileImage(avatarEl, player.photoURL, initial);
     }
     
     if (chipsInput) chipsInput.value = Math.round(player.chipPoints);
     if (bitsInput) bitsInput.value = Math.round(player.bits);
     if (saveBtn) saveBtn.dataset.playerUid = player.uid;
+    
+    // Admin toggle setup
+    if (adminToggle) {
+        adminToggle.dataset.playerUid = player.uid;
+        adminToggle.dataset.playerEmail = (player.email || '').toLowerCase();
+        
+        const isProtected = (player.email || '').toLowerCase() === 'cjcleve2008@gmail.com';
+        adminToggle.checked = player.isAdmin === true;
+        adminToggle.disabled = isProtected;
+        
+        if (adminNote) {
+            if (isProtected) {
+                adminNote.textContent = 'Creator admin (cannot be removed).';
+            } else {
+                adminNote.textContent = 'Toggle admin access for this player.';
+            }
+        }
+        
+        if (adminStatus) {
+            adminStatus.style.display = 'none';
+            adminStatus.textContent = '';
+        }
+    }
 }
 
 function hidePlayerInfo() {
@@ -14082,8 +14222,8 @@ function isCreator() {
 // Get list of admin emails
 function getAdminEmails() {
     return [
-        'cjcleve2008@gmail.com',
-        'perkerewiczgus@gmail.com'
+        // Permanent/protected admin(s)
+        'cjcleve2008@gmail.com'
     ];
 }
 
@@ -14106,7 +14246,23 @@ async function isAdminAsync() {
         }
     }
     
-    return getAdminEmails().includes(email);
+    // Permanent admins by email
+    if (getAdminEmails().includes(email)) return true;
+    
+    // Dynamic admins via Firestore document: /admins/{uid}
+    if (window.firebaseDb && currentUser.uid) {
+        try {
+            const adminDoc = await window.firebaseDb.collection('admins').doc(currentUser.uid).get();
+            return adminDoc.exists === true;
+        } catch (error) {
+            // If missing permissions / offline, fall back to email-only check
+            if (error?.code !== 'permission-denied') {
+                console.warn('Error checking admin doc:', error);
+            }
+        }
+    }
+    
+    return false;
 }
 
 function isAdmin() {

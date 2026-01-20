@@ -772,6 +772,19 @@
                                                     <label class="admin-stat-label">Bits:</label>
                                                     <input type="number" id="adminPlayerBits" class="admin-stat-input" min="0" step="1">
                                                 </div>
+                                                <div class="admin-stat-item admin-stat-item-toggle">
+                                                    <label class="admin-stat-label">Admin:</label>
+                                                    <div class="admin-toggle-row">
+                                                        <label class="admin-toggle">
+                                                            <input type="checkbox" id="adminPlayerIsAdminToggle">
+                                                            <span class="admin-toggle-slider"></span>
+                                                        </label>
+                                                        <div class="admin-toggle-meta">
+                                                            <div class="admin-toggle-note" id="adminPlayerAdminNote"></div>
+                                                            <div class="admin-toggle-status" id="adminAdminStatus"></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                             </div>
                                             <div class="admin-actions">
                                                 <button id="adminSaveBtn" class="btn btn-primary">
@@ -1483,7 +1496,22 @@
         <div class="alpha-pack-modal-content">
             <div class="alpha-pack-opening-container">
                 <div class="alpha-pack-pack" id="alphaPackPack">
-                    <div class="alpha-pack-pack-glow"></div>
+                    <div class="alpha-pack-wheel-wrap">
+                        <div class="alpha-pack-wheel-pointer" aria-hidden="true"></div>
+                        <div class="alpha-pack-wheel" id="alphaPackWheel" aria-label="Alpha pack rarity wheel">
+                            <div class="alpha-pack-wheel-label label-common">COMMON</div>
+                            <div class="alpha-pack-wheel-label label-rare">RARE</div>
+                            <div class="alpha-pack-wheel-label label-epic">EPIC</div>
+                        </div>
+                        <div class="alpha-pack-wheel-center" aria-hidden="true"></div>
+                    </div>
+                    <div class="alpha-pack-wheel-legend" aria-hidden="true">
+                        <span class="legend-common">Common</span>
+                        <span class="legend-sep">•</span>
+                        <span class="legend-rare">Rare</span>
+                        <span class="legend-sep">•</span>
+                        <span class="legend-epic">Epic</span>
+                    </div>
                 </div>
                 <div class="alpha-pack-result" id="alphaPackResult" style="display: none;">
                     <div class="alpha-pack-result-card">

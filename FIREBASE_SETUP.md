@@ -84,10 +84,29 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // Helper function to check if user is an admin
-    function isAdmin() {
+    function isPermanentAdmin() {
       return request.auth != null && 
              request.auth.token.email != null &&
-             request.auth.token.email in ['cjcleve2008@gmail.com', 'perkerewiczgus@gmail.com'];
+             request.auth.token.email in ['cjcleve2008@gmail.com'];
+    }
+    
+    // Dynamic admin support via /admins/{uid} doc
+    function isAdmin() {
+      return isPermanentAdmin() ||
+             (request.auth != null && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+    
+    // Admins collection - allows admin panel to grant/revoke admin
+    match /admins/{userId} {
+      // Users can read their own admin doc; admins can read any
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      
+      // Admins can create/update admin docs
+      allow create, update: if isAdmin();
+      
+      // Admins can delete admin docs EXCEPT the creator admin
+      allow delete: if isAdmin() &&
+        get(/databases/$(database)/documents/users/$(userId)).data.email != 'cjcleve2008@gmail.com';
     }
     
     // Users can read any user document (for friend search), but only write their own
