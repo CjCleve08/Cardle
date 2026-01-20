@@ -98,8 +98,9 @@ service cloud.firestore {
     
     // Admins collection - allows admin panel to grant/revoke admin
     match /admins/{userId} {
-      // Users can read their own admin doc; admins can read any
-      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      // Anyone authenticated can read admin docs (so the UI can show admin glow for all admins)
+      // IMPORTANT: Keep /admins docs non-sensitive (no emails) since this is readable.
+      allow read: if request.auth != null;
       
       // Admins can create/update admin docs
       allow create, update: if isAdmin();
@@ -142,13 +143,28 @@ service cloud.firestore {
       // Anyone authenticated can read posts
       allow read: if request.auth != null;
       
-      // Anyone authenticated can create posts
-      allow create: if request.auth != null && 
-        request.auth.uid == request.resource.data.authorId;
+      // Anyone authenticated can create posts (bulletin posts require admin)
+      allow create: if request.auth != null &&
+        request.auth.uid == request.resource.data.authorId &&
+        (
+          request.resource.data.isBulletin != true ||
+          (isAdmin() && request.resource.data.category == 'bulletin')
+        );
       
       // Only the author can update their own post (for likes, comment count, etc.)
       allow update: if request.auth != null && 
-        (request.auth.uid == resource.data.authorId || 
+        ((
+          request.auth.uid == resource.data.authorId &&
+          // Don't allow non-admins to change bulletin status/category after creation
+          (
+            request.resource.data.isBulletin == resource.data.isBulletin ||
+            isAdmin()
+          ) &&
+          (
+            request.resource.data.isBulletin != true ||
+            request.resource.data.category == 'bulletin'
+          )
+        ) || 
          // Allow updates to likes and likedBy fields (anyone can like)
          (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'likedBy', 'commentCount', 'updatedAt'])));
       

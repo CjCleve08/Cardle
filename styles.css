@@ -1848,12 +1848,7 @@ header h1 {
 }
 
 /* Admin name glowing effect - Purple pulsing */
-.vs-player-name.admin-name,
-.friend-name.admin-name,
-.leaderboard-name.admin-name,
-.messages-friend-name.admin-name,
-#messagesChatName.admin-name,
-#friendStatsName.admin-name {
+.admin-name {
     position: relative;
     color: #c084fc;
     text-shadow: 

@@ -3539,34 +3539,13 @@ socket.on('gameStarted', (data) => {
         // Update player 1 (me) name
         if (vsPlayer1Name) {
             vsPlayer1Name.textContent = player1Name;
-            // Add admin class if current user is admin - check both currentUser.email and Firestore
+            // Add admin class if current user is admin (permanent list OR /admins/{uid})
             (async () => {
-                let email = currentUser?.email?.toLowerCase() || '';
-                
-                // Always also check Firestore to ensure we have the latest email
-                if (window.firebaseDb && currentUser?.uid) {
-                    try {
-                        const userDoc = await window.firebaseDb.collection('users').doc(currentUser.uid).get();
-                        if (userDoc.exists) {
-                            const userData = userDoc.data();
-                            const firestoreEmail = (userData.email || '').toLowerCase().trim();
-                            if (firestoreEmail) {
-                                email = firestoreEmail; // Prefer Firestore email as it's the source of truth
-                            }
-                        }
-                    } catch (error) {
-                        console.error('Error fetching user email for admin check:', error);
-                    }
-                }
-                
-                if (isAdminEmail(email)) {
-                    vsPlayer1Name.classList.add('admin-name');
-                    console.log('VS Screen: Added admin-name class to player 1, email:', email);
-                } else {
+                try {
+                    const isMeAdmin = await isAdminAsync();
+                    vsPlayer1Name.classList.toggle('admin-name', isMeAdmin === true);
+                } catch {
                     vsPlayer1Name.classList.remove('admin-name');
-                    if (email) {
-                        console.log('VS Screen: Player 1 is not admin, email:', email);
-                    }
                 }
             })();
         }
@@ -3620,18 +3599,20 @@ socket.on('gameStarted', (data) => {
         // Update player 2 (opponent) name
         if (vsPlayer2Name) {
             vsPlayer2Name.textContent = player2Name;
-            // Check if opponent is admin by fetching their email
+            // Check if opponent is admin (permanent list OR /admins/{uid})
             if (opponentData && opponentData.firebaseUid && window.firebaseDb) {
                 window.firebaseDb.collection('users').doc(opponentData.firebaseUid).get()
                     .then(userDoc => {
                         if (userDoc.exists) {
                             const userData = userDoc.data();
                             const opponentEmail = userData.email || '';
-                            if (isAdminEmail(opponentEmail)) {
-                                vsPlayer2Name.classList.add('admin-name');
-                            } else {
-                                vsPlayer2Name.classList.remove('admin-name');
-                            }
+                            isUserAdminByUid(opponentData.firebaseUid, opponentEmail)
+                                .then(isOppAdmin => {
+                                    vsPlayer2Name.classList.toggle('admin-name', isOppAdmin === true);
+                                })
+                                .catch(() => {
+                                    vsPlayer2Name.classList.remove('admin-name');
+                                });
                         } else {
                             vsPlayer2Name.classList.remove('admin-name');
                         }
@@ -10659,6 +10640,8 @@ async function loadLeaderboard() {
             userEmail = currentUser.email || '';
         }
         
+        const currentUserIsAdmin = await isAdminAsync();
+        
         // Fetch user info for top 10 players
         const topPlayers = [];
         for (const doc of topPlayersQuery.docs) {
@@ -10667,6 +10650,7 @@ async function loadLeaderboard() {
             let name = 'Player';
             let photoURL = null;
             let email = '';
+            let isAdminUser = false;
             
             try {
                 const userDoc = await window.firebaseDb.collection('users').doc(uid).get();
@@ -10680,13 +10664,20 @@ async function loadLeaderboard() {
                 console.error('Error fetching user info for', uid, ':', error);
             }
             
+            try {
+                isAdminUser = await isUserAdminByUid(uid, email);
+            } catch {
+                isAdminUser = false;
+            }
+            
             topPlayers.push({
                 uid: uid,
                 name: name,
                 photoURL: photoURL,
                 email: email,
                 chipPoints: stats.chipPoints || 0,
-                stats: stats
+                stats: stats,
+                isAdmin: isAdminUser
             });
         }
         
@@ -10707,7 +10698,8 @@ async function loadLeaderboard() {
                 email: userEmail,
                 chipPoints: userStats.chipPoints || 0,
                 rank: userRank,
-                stats: userStats
+                stats: userStats,
+                isAdmin: currentUserIsAdmin === true
             });
         }
         
@@ -10765,7 +10757,7 @@ function displayTopPlayers(players) {
             : '';
         
         const rankImagePath = getRankImagePath(rankInfo.tier, rankInfo.subRank);
-        const isPlayerAdmin = isAdminEmail(player.email || '');
+        const isPlayerAdmin = player.isAdmin === true || isAdminEmail(player.email || '');
         
         entry.innerHTML = `
             <div class="leaderboard-rank">#${rank}</div>
@@ -10806,7 +10798,7 @@ function displayUserRank(user) {
         : '';
     
     const rankImagePath = getRankImagePath(rankInfo.tier, rankInfo.subRank);
-    const isUserAdmin = isAdminEmail(user.email || '');
+    const isUserAdmin = user.isAdmin === true || isAdminEmail(user.email || '');
     
     userEntryEl.innerHTML = `
         <div class="leaderboard-rank">${rankText}</div>
@@ -11252,11 +11244,14 @@ async function loadFriends() {
             try {
                 const userDoc = await window.firebaseDb.collection('users').doc(friend.id).get();
                 if (userDoc.exists) {
+                    const email = userDoc.data().email || '';
+                    const isAdminUser = await isUserAdminByUid(friend.id, email);
                     return {
                         ...friend,
                         name: userDoc.data().displayName || 'Unknown',
-                        email: userDoc.data().email || '',
-                        photoURL: userDoc.data().photoURL || null
+                        email: email,
+                        photoURL: userDoc.data().photoURL || null,
+                        isAdmin: isAdminUser
                     };
                 }
                 return friend;
@@ -11271,11 +11266,14 @@ async function loadFriends() {
             try {
                 const userDoc = await window.firebaseDb.collection('users').doc(request.senderId).get();
                 if (userDoc.exists) {
+                    const senderEmail = userDoc.data().email || '';
+                    const senderIsAdmin = await isUserAdminByUid(request.senderId, senderEmail);
                     return {
                         ...request,
                         senderName: userDoc.data().displayName || 'Unknown',
-                        senderEmail: userDoc.data().email || '',
-                        senderPhotoURL: userDoc.data().photoURL || null
+                        senderEmail: senderEmail,
+                        senderPhotoURL: userDoc.data().photoURL || null,
+                        senderIsAdmin: senderIsAdmin
                     };
                 }
                 return request;
@@ -11446,7 +11444,7 @@ function renderFriendsList(friends) {
         const avatarStyle = friend.photoURL 
             ? `background-image: url(${friend.photoURL}); background-size: cover; background-position: center;` 
             : '';
-        const isFriendAdmin = isAdminEmail(friend.email || '');
+        const isFriendAdmin = friend.isAdmin === true || isAdminEmail(friend.email || '');
         return `
         <div class="friend-item" data-friend-id="${friend.id || ''}" data-friend-name="${friend.name || 'Unknown'}" data-friend-email="${friend.email || ''}" data-friend-photourl="${friend.photoURL || ''}">
             <div class="friend-avatar" style="${avatarStyle}">${friend.photoURL ? '' : avatarInitial}</div>
@@ -11501,7 +11499,7 @@ function renderFriendRequests(requests) {
         const avatarStyle = request.senderPhotoURL 
             ? `background-image: url(${request.senderPhotoURL}); background-size: cover; background-position: center;` 
             : '';
-        const isRequestAdmin = isAdminEmail(request.senderEmail || '');
+        const isRequestAdmin = request.senderIsAdmin === true || isAdminEmail(request.senderEmail || '');
         return `
         <div class="friend-item">
             <div class="friend-avatar" style="${avatarStyle}">${request.senderPhotoURL ? '' : avatarInitial}</div>
@@ -11559,9 +11557,10 @@ async function openFriendStats(friendId, friendName, friendEmail, friendPhotoURL
     if (nameEl) {
         nameEl.textContent = friendName || 'Friend Stats';
         // Add admin class if friend is admin
-        if (isAdminEmail(friendEmail || '')) {
-            nameEl.classList.add('admin-name');
-        } else {
+        try {
+            const isFriendAdmin = await isUserAdminByUid(friendId, friendEmail || '');
+            nameEl.classList.toggle('admin-name', isFriendAdmin === true);
+        } catch {
             nameEl.classList.remove('admin-name');
         }
     }
@@ -11906,7 +11905,8 @@ function showSearchResults(users) {
         
         return {
             ...user,
-            relationshipStatus
+            relationshipStatus,
+            isAdmin: await isUserAdminByUid(user.id, user.email || '')
         };
     })).then(usersWithStatus => {
         searchResultsList.innerHTML = usersWithStatus.map(user => {
@@ -11927,7 +11927,7 @@ function showSearchResults(users) {
                 </button>`;
             }
             
-            const isUserAdmin = isAdminEmail(user.email || '');
+            const isUserAdmin = user.isAdmin === true || isAdminEmail(user.email || '');
             return `
                 <div class="friend-search-result-item">
                     <div class="friend-avatar" style="${avatarStyle}">${user.photoURL ? '' : avatarInitial}</div>
@@ -13738,14 +13738,20 @@ async function setPlayerAdminStatus(targetUid, targetEmail, makeAdmin) {
     
     if (makeAdmin) {
         await adminRef.set({
-            email: normalizedEmail || null,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedByUid: currentUser.uid,
-            updatedByEmail: (currentUser.email || '').toLowerCase() || null
+            updatedByUid: currentUser.uid || null,
+            // Clean up legacy fields (older versions stored emails here)
+            email: firebase.firestore.FieldValue.delete(),
+            updatedByEmail: firebase.firestore.FieldValue.delete()
         }, { merge: true });
     } else {
         await adminRef.delete();
     }
+    
+    // Update local cache so UI reflects immediately
+    try {
+        adminUidCache.set(targetUid, makeAdmin === true);
+    } catch {}
     
     return true;
 }
@@ -13919,7 +13925,14 @@ async function performAdminSearch() {
             return;
         }
         
-        showAdminSearchResults(matchingUsers);
+        const usersWithAdmin = await Promise.all(matchingUsers.map(async (u) => {
+            return {
+                ...u,
+                isAdmin: await isUserAdminByUid(u.id, u.email || '')
+            };
+        }));
+        
+        showAdminSearchResults(usersWithAdmin);
     } catch (error) {
         console.error('Error searching for players:', error);
         showAdminError(`Error searching: ${error.message || 'Unknown error'}`);
@@ -13943,7 +13956,7 @@ function showAdminSearchResults(users) {
         const avatarStyle = user.photoURL 
             ? `background-image: url(${user.photoURL}); background-size: cover; background-position: center;` 
             : '';
-        const isUserAdmin = isAdminEmail(user.email || '');
+        const isUserAdmin = user.isAdmin === true || isAdminEmail(user.email || '');
         
         return `
             <div class="friend-search-result-item" onclick="selectAdminPlayer('${user.id}', '${(user.displayName || 'Unknown').replace(/'/g, "\\'")}')">
@@ -14046,7 +14059,10 @@ function displayPlayerInfo(player) {
     if (resultsEl) resultsEl.style.display = 'block';
     if (errorEl) errorEl.style.display = 'none';
     
-    if (nameEl) nameEl.textContent = player.displayName;
+    if (nameEl) {
+        nameEl.textContent = player.displayName;
+        nameEl.classList.toggle('admin-name', player.isAdmin === true);
+    }
     if (emailEl) emailEl.textContent = player.email;
     if (uidEl) uidEl.textContent = `UID: ${player.uid}`;
     
@@ -14292,6 +14308,40 @@ function isAdminEmail(email) {
     return isAdmin;
 }
 
+// Cache admin status lookups to avoid repetitive reads
+const adminUidCache = new Map();
+
+// Check if another user is admin (permanent email list OR /admins/{uid} exists)
+async function isUserAdminByUid(uid, email = '') {
+    const normalizedEmail = (email || '').toLowerCase().trim();
+    
+    // Permanent admins (e.g., creator)
+    if (normalizedEmail && getAdminEmails().includes(normalizedEmail)) {
+        return true;
+    }
+    
+    if (!uid || !window.firebaseDb) return false;
+    
+    if (adminUidCache.has(uid)) {
+        return adminUidCache.get(uid) === true;
+    }
+    
+    try {
+        const adminDoc = await window.firebaseDb.collection('admins').doc(uid).get();
+        const isAdminUser = adminDoc.exists === true;
+        adminUidCache.set(uid, isAdminUser);
+        return isAdminUser;
+    } catch (error) {
+        // If rules don't allow or offline, treat as non-admin for display.
+        // (If you want everyone to see admin glow, allow reads on /admins/* for authed users.)
+        if (error?.code !== 'permission-denied') {
+            console.warn('Error checking admin status for uid:', uid, error);
+        }
+        adminUidCache.set(uid, false);
+        return false;
+    }
+}
+
 // Store all loaded posts globally
 let allBulletinPosts = [];
 let allCommunityPosts = [];
@@ -14336,7 +14386,8 @@ async function loadCommunityPosts() {
                     id: doc.id,
                     ...data,
                     authorName: authorInfo.name,
-                    authorPhotoURL: authorInfo.photoURL
+                    authorPhotoURL: authorInfo.photoURL,
+                    authorIsAdmin: authorInfo.isAdmin === true
                 };
                 
                 if (data.isBulletin === true) {
@@ -14431,7 +14482,8 @@ async function loadCommunityPosts() {
                 id: doc.id,
                 ...data,
                 authorName: authorInfo.name,
-                authorPhotoURL: authorInfo.photoURL
+                authorPhotoURL: authorInfo.photoURL,
+                authorIsAdmin: authorInfo.isAdmin === true
             };
             
             // Separate bulletin posts from community posts
@@ -14481,20 +14533,23 @@ async function loadCommunityPosts() {
 async function getUserInfo(userId) {
     try {
         if (!userId || !window.firebaseDb) {
-            return { name: 'Unknown', photoURL: null };
+            return { name: 'Unknown', photoURL: null, isAdmin: false };
         }
         const userDoc = await window.firebaseDb.collection('users').doc(userId).get();
         if (userDoc.exists) {
             const data = userDoc.data();
+            const email = data.email || '';
+            const isAdminUser = await isUserAdminByUid(userId, email);
             return {
                 name: data.displayName || 'Unknown',
-                photoURL: data.photoURL || null
+                photoURL: data.photoURL || null,
+                isAdmin: isAdminUser === true
             };
         }
     } catch (error) {
         console.error('Error fetching user info:', error);
     }
-    return { name: 'Unknown', photoURL: null };
+    return { name: 'Unknown', photoURL: null, isAdmin: false };
 }
 
 // Render posts
@@ -14519,7 +14574,7 @@ function renderPosts(posts, container, isBulletin) {
                 <div class="post-header">
                     <div class="post-author-avatar ${isBulletinPost ? 'bulletin' : ''}" style="${avatarStyle}">${post.authorPhotoURL ? '' : authorInitial}</div>
                     <div class="post-header-info">
-                        <div class="post-author-name ${isBulletinPost ? 'bulletin' : ''}">${escapeHtml(post.authorName || 'Unknown')}</div>
+                        <div class="post-author-name ${isBulletinPost ? 'bulletin' : ''} ${post.authorIsAdmin ? 'admin-name' : ''}">${escapeHtml(post.authorName || 'Unknown')}</div>
                         <div class="post-meta">
                             <span class="post-category ${isBulletinPost ? 'bulletin' : ''}">${getCategoryDisplayName(post.category || 'general')}</span>
                             <span class="post-time">${timeAgo}</span>
@@ -14568,7 +14623,7 @@ function renderPostsWithShowMore(posts, container, isBulletin, totalCount) {
                 <div class="post-header">
                     <div class="post-author-avatar ${isBulletinPost ? 'bulletin' : ''}" style="${avatarStyle}">${post.authorPhotoURL ? '' : authorInitial}</div>
                     <div class="post-header-info">
-                        <div class="post-author-name ${isBulletinPost ? 'bulletin' : ''}">${escapeHtml(post.authorName || 'Unknown')}</div>
+                        <div class="post-author-name ${isBulletinPost ? 'bulletin' : ''} ${post.authorIsAdmin ? 'admin-name' : ''}">${escapeHtml(post.authorName || 'Unknown')}</div>
                         <div class="post-meta">
                             <span class="post-category ${isBulletinPost ? 'bulletin' : ''}">${getCategoryDisplayName(post.category || 'general')}</span>
                             <span class="post-time">${timeAgo}</span>
@@ -14685,8 +14740,10 @@ async function createPost(title, content, category) {
         return;
     }
     
+    const isAdminUser = await isAdminAsync();
+    
     // Prevent non-admins from posting to bulletin
-    if (category === 'bulletin' && !isAdmin()) {
+    if (category === 'bulletin' && !isAdminUser) {
         const errorEl = document.getElementById('createPostError');
         if (errorEl) {
             errorEl.textContent = 'Only admins can post to the bulletin board';
@@ -14697,7 +14754,7 @@ async function createPost(title, content, category) {
     
     try {
         // Determine if this is a bulletin post (admin only, and category must be 'bulletin')
-        const isBulletin = category === 'bulletin' && isAdmin();
+        const isBulletin = category === 'bulletin' && isAdminUser;
         
         // Get user info
         const userDoc = await window.firebaseDb.collection('users').doc(currentUser.uid).get();
@@ -14709,7 +14766,7 @@ async function createPost(title, content, category) {
             category: category, // Keep the selected category
             authorId: currentUser.uid,
             authorName: userData.displayName || currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
-            isBulletin: isBulletin, // Set to true if creator selected bulletin
+            isBulletin: isBulletin, // Set to true if admin selected bulletin
             likes: 0,
             likedBy: [],
             commentCount: 0,
@@ -14822,21 +14879,22 @@ async function openPostDetail(postId, event) {
         
         // Check if current user is the post author or an admin (for delete button)
         const isPostAuthor = postData.authorId === currentUser.uid;
-        const canDelete = isPostAuthor || isAdmin();
+        const isAdminUser = await isAdminAsync();
+        const canDelete = isPostAuthor || isAdminUser;
         
         titleEl.innerHTML = `
             <div class="post-detail-header">
                 <div class="post-header">
                     <div class="post-author-avatar ${isBulletinPost ? 'bulletin' : ''}" style="${avatarStyle}">${authorInfo.photoURL ? '' : authorInitial}</div>
                     <div class="post-header-info">
-                        <div class="post-author-name ${isBulletinPost ? 'bulletin' : ''}">${escapeHtml(authorInfo.name)}</div>
+                        <div class="post-author-name ${isBulletinPost ? 'bulletin' : ''} ${authorInfo.isAdmin ? 'admin-name' : ''}">${escapeHtml(authorInfo.name)}</div>
                         <div class="post-meta">
                             <span class="post-category ${isBulletinPost ? 'bulletin' : ''}">${getCategoryDisplayName(postData.category || 'general')}</span>
                             <span class="post-time">${timeAgo}</span>
                         </div>
                     </div>
                     ${canDelete ? `
-                    <button class="post-delete-btn" onclick="deletePost('${postId}', event)" title="${isAdmin() && !isPostAuthor ? 'Delete Post (Admin)' : 'Delete Post'}">
+                    <button class="post-delete-btn" onclick="deletePost('${postId}', event)" title="${isAdminUser && !isPostAuthor ? 'Delete Post (Admin)' : 'Delete Post'}">
                         <span class="post-delete-icon">🗑️</span>
                     </button>
                     ` : ''}
@@ -15511,7 +15569,7 @@ async function deletePost(postId, event) {
         
         const postData = postDoc.data();
         const isPostAuthor = postData.authorId === currentUser.uid;
-        const userIsAdmin = isAdmin();
+        const userIsAdmin = await isAdminAsync();
         
         if (!isPostAuthor && !userIsAdmin) {
             showGameMessage('❌', 'Permission Denied', 'You can only delete your own posts');
@@ -15558,7 +15616,7 @@ async function deletePost(postId, event) {
 }
 
 // Modal functions
-function openCreatePostModal() {
+async function openCreatePostModal() {
     const modal = document.getElementById('createPostModal');
     if (modal) {
         modal.style.display = 'flex';
@@ -15574,8 +15632,9 @@ function openCreatePostModal() {
         // Update category select - add bulletin option if admin, remove if not
         if (categorySelect) {
             const existingBulletinOption = categorySelect.querySelector('option[value="bulletin"]');
+            const isAdminUser = await isAdminAsync();
             
-            if (isAdmin()) {
+            if (isAdminUser) {
                 // Add bulletin option if admin and it doesn't exist
                 if (!existingBulletinOption) {
                     const bulletinOption = document.createElement('option');
@@ -15694,6 +15753,7 @@ async function reloadCommunityPostsOnly() {
                 ...data,
                 authorName: authorInfo.name,
                 authorPhotoURL: authorInfo.photoURL,
+                authorIsAdmin: authorInfo.isAdmin === true,
                 createdAt: data.createdAt // Preserve timestamp for sorting
             });
         }
@@ -16099,7 +16159,7 @@ function renderMessagesFriendsList() {
         const isActive = currentChatFriendId === friend.id ? 'active' : '';
         const unreadCount = unreadMessageCounts[friend.id] || 0;
         const hasUnread = unreadCount > 0 && currentChatFriendId !== friend.id;
-        const isFriendAdmin = isAdminEmail(friend.email || '');
+        const isFriendAdmin = friend.isAdmin === true || isAdminEmail(friend.email || '');
         
         return `
             <div class="messages-friend-item ${isActive}" data-friend-id="${friend.id}" onclick="openChatWithFriend('${friend.id}')">
@@ -16203,11 +16263,8 @@ async function openChatWithFriend(friendId) {
     if (chatName) {
         chatName.textContent = friend.name || 'Unknown';
         // Add admin class if friend is admin
-        if (isAdminEmail(friend.email || '')) {
-            chatName.classList.add('admin-name');
-        } else {
-            chatName.classList.remove('admin-name');
-        }
+        const isFriendAdmin = friend.isAdmin === true || isAdminEmail(friend.email || '');
+        chatName.classList.toggle('admin-name', isFriendAdmin === true);
     }
     
     // Check if friend is online (you can enhance this later)
