@@ -764,6 +764,7 @@
                                                 </div>
                                             </div>
                                             <div class="admin-player-stats">
+                                                <h4 class="admin-stats-section-title">Editable Stats</h4>
                                                 <div class="admin-stat-item">
                                                     <label class="admin-stat-label">Chips:</label>
                                                     <input type="number" id="adminPlayerChips" class="admin-stat-input" min="0" step="1">
@@ -786,6 +787,43 @@
                                                     </div>
                                                 </div>
                                             </div>
+                                            <div class="admin-player-view-stats">
+                                                <h4 class="admin-stats-section-title">Player Statistics</h4>
+                                                <div class="admin-view-stats-grid">
+                                                    <div class="admin-view-stat-item">
+                                                        <span class="admin-view-stat-label">Games Played:</span>
+                                                        <span class="admin-view-stat-value" id="adminPlayerGamesPlayed">-</span>
+                                                    </div>
+                                                    <div class="admin-view-stat-item">
+                                                        <span class="admin-view-stat-label">Wins:</span>
+                                                        <span class="admin-view-stat-value" id="adminPlayerWins">-</span>
+                                                    </div>
+                                                    <div class="admin-view-stat-item">
+                                                        <span class="admin-view-stat-label">Losses:</span>
+                                                        <span class="admin-view-stat-value" id="adminPlayerLosses">-</span>
+                                                    </div>
+                                                    <div class="admin-view-stat-item">
+                                                        <span class="admin-view-stat-label">Win Rate:</span>
+                                                        <span class="admin-view-stat-value" id="adminPlayerWinRate">-</span>
+                                                    </div>
+                                                    <div class="admin-view-stat-item">
+                                                        <span class="admin-view-stat-label">Current Win Streak:</span>
+                                                        <span class="admin-view-stat-value" id="adminPlayerWinStreak">-</span>
+                                                    </div>
+                                                    <div class="admin-view-stat-item">
+                                                        <span class="admin-view-stat-label">Best Win Streak:</span>
+                                                        <span class="admin-view-stat-value" id="adminPlayerBestWinStreak">-</span>
+                                                    </div>
+                                                    <div class="admin-view-stat-item">
+                                                        <span class="admin-view-stat-label">Total Guesses:</span>
+                                                        <span class="admin-view-stat-value" id="adminPlayerTotalGuesses">-</span>
+                                                    </div>
+                                                    <div class="admin-view-stat-item">
+                                                        <span class="admin-view-stat-label">Games With Guesses:</span>
+                                                        <span class="admin-view-stat-value" id="adminPlayerGamesWithGuesses">-</span>
+                                                    </div>
+                                                </div>
+                                            </div>
                                             <div class="admin-actions">
                                                 <button id="adminSaveBtn" class="btn btn-primary">
                                                     <span class="btn-icon">💾</span>
@@ -797,6 +835,16 @@
                                     </div>
                                     
                                     <div id="adminSearchError" class="admin-error" style="display: none;"></div>
+                                </div>
+                                
+                                <!-- Admin Activity Log (only visible to creator) -->
+                                <div id="adminActivityLogSection" class="admin-section" style="display: none;">
+                                    <h3 class="admin-section-title">Admin Activity Log</h3>
+                                    <div class="admin-activity-log-container">
+                                        <div id="adminActivityLogList" class="admin-activity-log-list">
+                                            <div class="admin-loading">Loading activity log...</div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

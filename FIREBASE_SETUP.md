@@ -110,6 +110,18 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(userId)).data.email != 'cjcleve2008@gmail.com';
     }
     
+    // Admin Activity Logs - tracks all admin actions (only creator can read)
+    match /adminActivityLogs/{logId} {
+      // Only creator can read activity logs
+      allow read: if isPermanentAdmin();
+      
+      // Admins can create logs (when they make changes)
+      allow create: if isAdmin();
+      
+      // No updates or deletes allowed (immutable audit trail)
+      allow update, delete: if false;
+    }
+    
     // Users can read any user document (for friend search), but only write their own
     match /users/{userId} {
       allow read: if request.auth != null;

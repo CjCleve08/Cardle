@@ -1275,7 +1275,7 @@ const AVAILABLE_CAMOS = [
     { id: 'PortalHoppersBase', name: 'Portal Hoppers', filename: 'PortalHoppersBase.png', rarity: 'common' },
     { id: 'PunishmentBase', name: 'Punishment', filename: 'PunishmentBase.png', rarity: 'common' },
     { id: 'SnakeSkinBase', name: 'Snake Skin', filename: 'SnakeSkinBase.png', rarity: 'common' },
-    { id: 'SolidStealthBase', name: 'Solid Stealth', filename: 'SolidStealthBase_.png', rarity: 'common' },
+    { id: 'SolidStealthBase', name: 'Solid Stealth', filename: 'SolidStealthBase.png', rarity: 'common' },
     { id: 'VirusBase', name: 'Virus', filename: 'VirusBase.png', rarity: 'common' },
     { id: 'YesKingBase', name: 'Yes King', filename: 'YesKingBase.png', rarity: 'common' },
     { id: 'ZenBase', name: 'Zen', filename: 'ZenBase.png', rarity: 'common' }
@@ -10490,6 +10490,8 @@ function switchTab(tabName) {
     
     // If switching to admin tab, initialize admin panel
     if (tabName === 'admin') {
+        // Load activity log when opening admin tab (only visible to creator)
+        loadAdminActivityLog();
         // Verify admin access
         isAdminAsync().then(isAdmin => {
             if (!isAdmin) {
@@ -13691,7 +13693,7 @@ async function searchPlayers(searchQuery) {
 }
 
 // Update player chips and bits
-async function updatePlayerStats(uid, chipPoints, bits) {
+async function updatePlayerStats(uid, chipPoints, bits, targetName = null) {
     if (!window.firebaseDb || !uid) {
         throw new Error('Firebase not available or UID missing');
     }
@@ -13703,16 +13705,62 @@ async function updatePlayerStats(uid, chipPoints, bits) {
     }
     
     try {
+        // Get old values for logging
+        const oldStatsDoc = await window.firebaseDb.collection('stats').doc(uid).get();
+        const oldStats = oldStatsDoc.exists ? oldStatsDoc.data() : {};
+        const oldChips = oldStats.chipPoints !== undefined ? oldStats.chipPoints : 0;
+        const oldBits = oldStats.bits !== undefined ? oldStats.bits : 0;
+        
+        const newChips = chipPoints !== undefined && chipPoints !== null ? Math.max(0, Math.round(chipPoints)) : 0;
+        const newBits = bits !== undefined && bits !== null ? Math.max(0, Math.round(bits)) : 0;
+        
         const statsUpdate = {
-            chipPoints: chipPoints !== undefined && chipPoints !== null ? Math.max(0, Math.round(chipPoints)) : 0,
-            bits: bits !== undefined && bits !== null ? Math.max(0, Math.round(bits)) : 0
+            chipPoints: newChips,
+            bits: newBits
         };
         
         await window.firebaseDb.collection('stats').doc(uid).set(statsUpdate, { merge: true });
+        
+        // Log changes if values actually changed
+        const changes = {};
+        if (oldChips !== newChips) {
+            changes.chips = { old: oldChips, new: newChips };
+        }
+        if (oldBits !== newBits) {
+            changes.bits = { old: oldBits, new: newBits };
+        }
+        if (Object.keys(changes).length > 0) {
+            await logAdminActivity('stats_changed', uid, targetName, changes);
+        }
+        
         return true;
     } catch (error) {
         console.error('Error updating player stats:', error);
         throw error;
+    }
+}
+
+// Log admin activity (only creator can view)
+async function logAdminActivity(action, targetUid, targetName, changes) {
+    if (!window.firebaseDb || !currentUser) return;
+    
+    try {
+        const adminName = currentUser.displayName || currentUser.email?.split('@')[0] || 'Unknown';
+        const adminEmail = currentUser.email || '';
+        
+        await window.firebaseDb.collection('adminActivityLogs').add({
+            action: action, // 'chips_changed', 'bits_changed', 'admin_granted', 'admin_revoked'
+            adminUid: currentUser.uid,
+            adminName: adminName,
+            adminEmail: adminEmail,
+            targetUid: targetUid,
+            targetName: targetName || 'Unknown',
+            changes: changes, // Object with old/new values
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    } catch (error) {
+        console.error('Error logging admin activity:', error);
+        // Don't throw - logging failure shouldn't break admin actions
     }
 }
 
@@ -13753,7 +13801,122 @@ async function setPlayerAdminStatus(targetUid, targetEmail, makeAdmin) {
         adminUidCache.set(targetUid, makeAdmin === true);
     } catch {}
     
+    // Log admin status change
+    const targetName = targetEmail?.split('@')[0] || 'Unknown';
+    await logAdminActivity(
+        makeAdmin ? 'admin_granted' : 'admin_revoked',
+        targetUid,
+        targetName,
+        { adminStatus: { old: !makeAdmin, new: makeAdmin } }
+    );
+    
     return true;
+}
+
+// Load and display admin activity log (only for creator)
+async function loadAdminActivityLog() {
+    const logSection = document.getElementById('adminActivityLogSection');
+    const logList = document.getElementById('adminActivityLogList');
+    
+    if (!logSection || !logList) return;
+    
+    // Only show for creator
+    if (!isCreator()) {
+        logSection.style.display = 'none';
+        return;
+    }
+    
+    logSection.style.display = 'block';
+    logList.innerHTML = '<div class="admin-loading">Loading activity log...</div>';
+    
+    if (!window.firebaseDb) {
+        logList.innerHTML = '<div class="admin-error">Firebase not available</div>';
+        return;
+    }
+    
+    try {
+        // Load recent activity (last 50 entries)
+        const logsQuery = window.firebaseDb.collection('adminActivityLogs')
+            .orderBy('timestamp', 'desc')
+            .limit(50);
+        
+        const logsSnapshot = await logsQuery.get();
+        
+        if (logsSnapshot.empty) {
+            logList.innerHTML = '<div class="admin-empty">No admin activity yet</div>';
+            return;
+        }
+        
+        const logs = [];
+        logsSnapshot.forEach(doc => {
+            const data = doc.data();
+            logs.push({
+                id: doc.id,
+                ...data
+            });
+        });
+        
+        // Render logs
+        logList.innerHTML = logs.map(log => {
+            const timeAgo = formatTimeAgo(log.timestamp?.toDate?.() || new Date(log.timestamp || Date.now()));
+            const actionText = getActionText(log.action);
+            const changesText = formatChanges(log.changes);
+            
+            return `
+                <div class="admin-activity-log-item">
+                    <div class="admin-activity-log-header">
+                        <div class="admin-activity-log-action">${actionText}</div>
+                        <div class="admin-activity-log-time">${timeAgo}</div>
+                    </div>
+                    <div class="admin-activity-log-details">
+                        <div class="admin-activity-log-admin">
+                            <strong>Admin:</strong> ${escapeHtml(log.adminName || 'Unknown')} (${escapeHtml(log.adminEmail || 'N/A')})
+                        </div>
+                        <div class="admin-activity-log-target">
+                            <strong>Target:</strong> ${escapeHtml(log.targetName || 'Unknown')}
+                        </div>
+                        ${changesText ? `<div class="admin-activity-log-changes">${changesText}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+    } catch (error) {
+        console.error('Error loading admin activity log:', error);
+        logList.innerHTML = '<div class="admin-error">Error loading activity log</div>';
+    }
+}
+
+// Get human-readable action text
+function getActionText(action) {
+    const actionMap = {
+        'stats_changed': '📊 Stats Changed',
+        'chips_changed': '🪙 Chips Changed',
+        'bits_changed': '💎 Bits Changed',
+        'admin_granted': '👑 Admin Granted',
+        'admin_revoked': '❌ Admin Revoked'
+    };
+    return actionMap[action] || action;
+}
+
+// Format changes object into readable text
+function formatChanges(changes) {
+    if (!changes || typeof changes !== 'object') return '';
+    
+    const parts = [];
+    
+    if (changes.chips) {
+        parts.push(`Chips: ${changes.chips.old} → ${changes.chips.new}`);
+    }
+    if (changes.bits) {
+        parts.push(`Bits: ${changes.bits.old} → ${changes.bits.new}`);
+    }
+    if (changes.adminStatus) {
+        const status = changes.adminStatus.new ? 'Granted' : 'Revoked';
+        parts.push(`Admin Status: ${status}`);
+    }
+    
+    return parts.join(' | ');
 }
 
 // Initialize admin panel
@@ -13796,8 +13959,10 @@ function initializeAdminPanel() {
             
             const chipsInput = document.getElementById('adminPlayerChips');
             const bitsInput = document.getElementById('adminPlayerBits');
+            const nameEl = document.getElementById('adminPlayerName');
             const chips = chipsInput ? parseFloat(chipsInput.value) : 0;
             const bits = bitsInput ? parseFloat(bitsInput.value) : 0;
+            const targetName = nameEl ? nameEl.textContent : null;
             
             if (isNaN(chips) || isNaN(bits) || chips < 0 || bits < 0) {
                 showAdminError('Please enter valid numbers (0 or greater)');
@@ -13808,7 +13973,7 @@ function initializeAdminPanel() {
                 saveBtn.disabled = true;
                 saveBtn.innerHTML = '<span class="btn-icon">⏳</span><span>Saving...</span>';
                 
-                await updatePlayerStats(uid, chips, bits);
+                await updatePlayerStats(uid, chips, bits, targetName);
                 
                 const statusEl = document.getElementById('adminSaveStatus');
                 if (statusEl) {
@@ -14034,7 +14199,15 @@ async function loadPlayerData(uid) {
             photoURL: userData.photoURL || null,
             chipPoints: stats.chipPoints !== undefined ? stats.chipPoints : 0,
             bits: stats.bits !== undefined ? stats.bits : 0,
-            isAdmin: isAdminUser
+            isAdmin: isAdminUser,
+            // Include all stats for display
+            gamesPlayed: stats.gamesPlayed !== undefined ? stats.gamesPlayed : 0,
+            wins: stats.wins !== undefined ? stats.wins : 0,
+            losses: stats.losses !== undefined ? stats.losses : 0,
+            winStreak: stats.winStreak !== undefined ? stats.winStreak : 0,
+            bestWinStreak: stats.bestWinStreak !== undefined ? stats.bestWinStreak : 0,
+            totalGuesses: stats.totalGuesses !== undefined ? stats.totalGuesses : 0,
+            gamesWithGuesses: stats.gamesWithGuesses !== undefined ? stats.gamesWithGuesses : 0
         };
     } catch (error) {
         console.error('Error loading player data:', error);
@@ -14074,6 +14247,37 @@ function displayPlayerInfo(player) {
     if (chipsInput) chipsInput.value = Math.round(player.chipPoints);
     if (bitsInput) bitsInput.value = Math.round(player.bits);
     if (saveBtn) saveBtn.dataset.playerUid = player.uid;
+    
+    // Display view-only stats
+    const gamesPlayedEl = document.getElementById('adminPlayerGamesPlayed');
+    const winsEl = document.getElementById('adminPlayerWins');
+    const lossesEl = document.getElementById('adminPlayerLosses');
+    const winRateEl = document.getElementById('adminPlayerWinRate');
+    const winStreakEl = document.getElementById('adminPlayerWinStreak');
+    const bestWinStreakEl = document.getElementById('adminPlayerBestWinStreak');
+    const totalGuessesEl = document.getElementById('adminPlayerTotalGuesses');
+    const gamesWithGuessesEl = document.getElementById('adminPlayerGamesWithGuesses');
+    
+    if (gamesPlayedEl) gamesPlayedEl.textContent = player.gamesPlayed || 0;
+    if (winsEl) winsEl.textContent = player.wins || 0;
+    if (lossesEl) lossesEl.textContent = player.losses || 0;
+    
+    // Calculate win rate
+    if (winRateEl) {
+        const gamesPlayed = player.gamesPlayed || 0;
+        const wins = player.wins || 0;
+        if (gamesPlayed > 0) {
+            const winRate = ((wins / gamesPlayed) * 100).toFixed(1);
+            winRateEl.textContent = `${winRate}%`;
+        } else {
+            winRateEl.textContent = '0%';
+        }
+    }
+    
+    if (winStreakEl) winStreakEl.textContent = player.winStreak || 0;
+    if (bestWinStreakEl) bestWinStreakEl.textContent = player.bestWinStreak || 0;
+    if (totalGuessesEl) totalGuessesEl.textContent = player.totalGuesses || 0;
+    if (gamesWithGuessesEl) gamesWithGuessesEl.textContent = player.gamesWithGuesses || 0;
     
     // Admin toggle setup
     if (adminToggle) {
