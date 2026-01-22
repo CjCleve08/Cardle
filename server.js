@@ -5,7 +5,6 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const nodemailer = require('nodemailer');
-const sgMail = require('@sendgrid/mail');
 
 // Load email configuration
 let emailConfig = null;
@@ -807,22 +806,11 @@ app.get('/', (req, res) => {
 });
 
 // Email configuration
-// Priority: SendGrid API > SMTP (nodemailer) > Firebase
-// To enable email sending, configure these environment variables:
-// Option 1 (Recommended for Render): SENDGRID_API_KEY
-// Option 2: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+// To enable email sending, configure these environment variables or update the values below:
+// SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+// For Gmail: Use an App Password (not your regular password)
+// For other services: Check their SMTP settings
 let emailTransporter = null;
-let sendGridConfigured = false;
-
-// Initialize SendGrid if API key is available
-const sendGridApiKey = process.env.SENDGRID_API_KEY;
-if (sendGridApiKey) {
-    sgMail.setApiKey(sendGridApiKey);
-    sendGridConfigured = true;
-    console.log('✅ SendGrid email service configured');
-} else {
-    console.log('ℹ️  SendGrid not configured (set SENDGRID_API_KEY environment variable)');
-}
 
 function initializeEmailTransporter() {
     // Priority: email-config.js > environment variables > defaults
@@ -943,14 +931,10 @@ app.get('/api/test-email-config', (req, res) => {
     const smtpPort = emailConfig?.port || process.env.SMTP_PORT || 587;
     const smtpUser = emailConfig?.user || process.env.SMTP_USER || '';
     const smtpPass = emailConfig?.pass || process.env.SMTP_PASS || '';
-    const sendGridKey = process.env.SENDGRID_API_KEY;
-    const isSMTPConfigured = !!(smtpHost && smtpUser && smtpPass);
-    const isSendGridConfigured = !!sendGridKey;
-    const isConfigured = isSendGridConfigured || isSMTPConfigured;
+    const isConfigured = !!(smtpHost && smtpUser && smtpPass);
     
     // Check all environment variables
     const envVars = {
-        SENDGRID_API_KEY: sendGridKey ? '***' + sendGridKey.slice(-4) : '(not set)',
         SMTP_HOST: process.env.SMTP_HOST || '(not set)',
         SMTP_PORT: process.env.SMTP_PORT || '(not set)',
         SMTP_USER: process.env.SMTP_USER || '(not set)',
@@ -960,10 +944,8 @@ app.get('/api/test-email-config', (req, res) => {
     
     res.json({
         configured: isConfigured,
-        sendGridConfigured: isSendGridConfigured,
-        smtpConfigured: isSMTPConfigured,
         hasTransporter: !!emailTransporter,
-        configSource: isSendGridConfigured ? 'SendGrid API' : (emailConfig ? 'email-config.js' : (process.env.SMTP_HOST ? 'environment variables' : 'none')),
+        configSource: emailConfig ? 'email-config.js' : (process.env.SMTP_HOST ? 'environment variables' : 'none'),
         host: smtpHost || '(not set)',
         port: smtpPort,
         user: smtpUser || '(not set)',
@@ -972,54 +954,31 @@ app.get('/api/test-email-config', (req, res) => {
         environmentVariables: envVars,
         nodeEnv: process.env.NODE_ENV || '(not set)',
         message: isConfigured 
-            ? (isSendGridConfigured ? 'SendGrid is configured (recommended for Render)' : (emailTransporter ? 'SMTP is configured and transporter is ready' : 'SMTP is configured but transporter verification may have failed - check server logs'))
-            : 'Email is not configured - set SENDGRID_API_KEY (recommended) or SMTP environment variables on Render'
+            ? (emailTransporter ? 'Email is configured and transporter is ready' : 'Email is configured but transporter verification may have failed - check server logs')
+            : 'Email is not configured - set environment variables on Render'
     });
 });
 
 // Test endpoint to send a test email
 app.post('/api/test-send-email', async (req, res) => {
+    if (!emailTransporter) {
+        return res.status(500).json({ 
+            error: 'Email transporter not initialized',
+            message: 'Check server logs for SMTP configuration errors'
+        });
+    }
+    
     const { testEmail } = req.body;
     if (!testEmail) {
         return res.status(400).json({ error: 'testEmail parameter is required' });
     }
     
-    const fromEmail = emailConfig?.from || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@cardle.com';
-    
-    // Try SendGrid first
-    if (sendGridConfigured) {
-        try {
-            const msg = {
-                to: testEmail,
-                from: fromEmail,
-                subject: 'Test Email from Cardle Server',
-                text: 'This is a test email from your Cardle server. If you receive this, email is working correctly!',
-                html: '<p>This is a test email from your Cardle server. If you receive this, email is working correctly!</p>'
-            };
-            
-            await sgMail.send(msg);
-            return res.json({ 
-                success: true, 
-                message: 'Test email sent successfully via SendGrid',
-                method: 'SendGrid'
-            });
-        } catch (error) {
-            console.error('SendGrid test email error:', error);
-            // Fall through to SMTP
-        }
-    }
-    
-    // Fallback to SMTP
-    if (!emailTransporter) {
-        return res.status(500).json({ 
-            error: 'No email service configured',
-            message: 'Set SENDGRID_API_KEY (recommended) or SMTP environment variables'
-        });
-    }
-    
     try {
+        const smtpUser = emailConfig?.user || process.env.SMTP_USER || '';
+        const fromAddress = emailConfig?.from || process.env.SMTP_FROM || smtpUser || 'noreply@cardle.com';
+        
         const info = await emailTransporter.sendMail({
-            from: `"Cardle Test" <${fromEmail}>`,
+            from: `"Cardle Test" <${fromAddress}>`,
             to: testEmail,
             subject: 'Test Email from Cardle Server',
             text: 'This is a test email from your Cardle server. If you receive this, email is working correctly!',
@@ -1028,13 +987,12 @@ app.post('/api/test-send-email', async (req, res) => {
         
         res.json({ 
             success: true, 
-            message: 'Test email sent successfully via SMTP',
+            message: 'Test email sent successfully',
             messageId: info.messageId,
-            response: info.response,
-            method: 'SMTP'
+            response: info.response
         });
     } catch (error) {
-        console.error('SMTP test email error:', error);
+        console.error('Test email error:', error);
         res.status(500).json({ 
             error: 'Failed to send test email',
             details: error.message,
@@ -1057,27 +1015,30 @@ app.post('/api/send-verification-email', async (req, res) => {
         const smtpHost = emailConfig?.host || process.env.SMTP_HOST || '';
         const smtpUser = emailConfig?.user || process.env.SMTP_USER || '';
         const smtpPass = emailConfig?.pass || process.env.SMTP_PASS || '';
-        const configSource = sendGridConfigured ? 'SendGrid API' : (emailConfig ? 'email-config.js' : (process.env.SMTP_HOST ? 'environment variables' : 'none'));
+        const configSource = emailConfig ? 'email-config.js' : (process.env.SMTP_HOST ? 'environment variables' : 'none');
         
         console.log(`\n📧 Email send request received:`);
         console.log(`   To: ${email}`);
         console.log(`   Code: ${code}`);
         console.log(`   Config Source: ${configSource}`);
-        console.log(`   SendGrid: ${sendGridConfigured ? 'configured' : 'not configured'}`);
-        console.log(`   SMTP: ${emailTransporter ? 'initialized' : 'not initialized'}`);
+        console.log(`   SMTP Host: ${smtpHost || '(not set)'}`);
+        console.log(`   SMTP User: ${smtpUser || '(not set)'}`);
+        console.log(`   Has Password: ${!!smtpPass}`);
+        console.log(`   Email Transporter: ${emailTransporter ? 'initialized' : 'NOT initialized'}`);
         
-        // Check if any email service is available
-        if (!sendGridConfigured && !emailTransporter) {
-            console.error('❌ No email service configured!');
-            console.error('   Options:');
-            console.error('   1. Set SENDGRID_API_KEY (recommended for Render)');
-            console.error('   2. Set SMTP environment variables (SMTP_HOST, SMTP_USER, SMTP_PASS)');
+        if (!emailTransporter) {
+            console.error('❌ Email transporter is not initialized!');
+            console.error('   This usually means:');
+            console.error('   1. Environment variables are not set on the server');
+            console.error('   2. SMTP connection verification failed during startup');
+            console.error('   3. Check server startup logs for SMTP errors');
             console.error('   Config status:', {
-                sendGridConfigured: sendGridConfigured,
-                hasSMTP: !!emailTransporter,
+                configSource: configSource,
                 hasHost: !!smtpHost,
                 hasUser: !!smtpUser,
-                hasPass: !!smtpPass
+                hasPass: !!smtpPass,
+                host: smtpHost,
+                user: smtpUser
             });
             
             // Still log the code for manual verification
@@ -1087,13 +1048,17 @@ app.post('/api/send-verification-email', async (req, res) => {
             console.log('================================================\n');
             
             return res.status(500).json({ 
-                error: 'No email service configured',
+                error: 'Email transporter not initialized',
                 code: code, // Include code for debugging
-                message: 'Set SENDGRID_API_KEY (recommended) or SMTP environment variables',
+                message: 'SMTP configuration issue - check server logs for details',
                 details: {
-                    sendGridConfigured: sendGridConfigured,
-                    smtpConfigured: !!emailTransporter,
-                    suggestion: 'For Render, use SendGrid: Set SENDGRID_API_KEY environment variable'
+                    configSource: configSource,
+                    hasHost: !!smtpHost,
+                    hasUser: !!smtpUser,
+                    hasPass: !!smtpPass,
+                    host: smtpHost || '(not set)',
+                    user: smtpUser || '(not set)',
+                    suggestion: 'Check Render logs for SMTP verification errors. Verification may have failed but email might still work - try sending a test email.'
                 }
             });
         }
@@ -1152,34 +1117,6 @@ If you didn't create an account, please ignore this email.
 © Cardle - Multiplayer Wordle Game
         `;
         
-        // Try SendGrid first (works better on Render)
-        if (sendGridConfigured) {
-            try {
-                const fromEmail = emailConfig?.from || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@cardle.com';
-                
-                const msg = {
-                    to: email,
-                    from: fromEmail,
-                    subject: emailSubject,
-                    text: emailText,
-                    html: emailHtml
-                };
-                
-                console.log(`📧 Sending verification email via SendGrid to ${email}`);
-                await sgMail.send(msg);
-                
-                console.log(`✅ Verification email sent successfully via SendGrid to ${email}`);
-                console.log(`   Verification Code: ${code}`);
-                return res.json({ success: true, message: 'Verification email sent', method: 'SendGrid' });
-            } catch (sendGridError) {
-                console.error('❌ SendGrid error:', sendGridError);
-                console.error('   Error response:', sendGridError.response?.body);
-                // Fall through to try SMTP
-                console.log('   Falling back to SMTP...');
-            }
-        }
-        
-        // Fallback to SMTP (nodemailer)
         if (emailTransporter) {
             // Send email via SMTP
             // For Gmail, the "from" address must match the authenticated user
@@ -1216,12 +1153,11 @@ If you didn't create an account, please ignore this email.
                         )
                     ]);
                     
-                console.log(`✅ Verification email sent successfully via SMTP to ${email}`);
-                console.log(`   Message ID: ${info.messageId}`);
-                console.log(`   Response: ${info.response || 'N/A'}`);
-                console.log(`   Verification Code: ${code}`);
-                console.log(`   Attempt: ${attempt}/${maxRetries}`);
-                return res.json({ success: true, message: 'Verification email sent', method: 'SMTP' });
+                    console.log(`✅ Verification email sent successfully to ${email}`);
+                    console.log(`   Message ID: ${info.messageId}`);
+                    console.log(`   Response: ${info.response || 'N/A'}`);
+                    console.log(`   Verification Code: ${code}`);
+                    console.log(`   Attempt: ${attempt}/${maxRetries}`);
                     break; // Success, exit retry loop
                     
                 } catch (emailError) {
@@ -1266,15 +1202,12 @@ If you didn't create an account, please ignore this email.
                 }
             }
         } else {
-            // No email service configured
+            // Log to console if email is not configured
             console.log('\n=== VERIFICATION EMAIL (NOT SENT - EMAIL NOT CONFIGURED) ===');
             console.log(`To: ${email}`);
             console.log(`Subject: ${emailSubject}`);
             console.log(`Code: ${code}`);
             console.log('===========================================================\n');
-            console.log('To enable email sending:');
-            console.log('  1. Set SENDGRID_API_KEY environment variable (recommended for Render)');
-            console.log('  2. OR set SMTP environment variables (SMTP_HOST, SMTP_USER, SMTP_PASS)');
             
             // Still return success but include the code
             return res.json({ 
@@ -1283,6 +1216,8 @@ If you didn't create an account, please ignore this email.
                 code: code // Include code for development
             });
         }
+        
+        res.json({ success: true, message: 'Verification email sent' });
     } catch (error) {
         console.error('Error sending verification email:', error);
         res.status(500).json({ error: 'Failed to send verification email' });

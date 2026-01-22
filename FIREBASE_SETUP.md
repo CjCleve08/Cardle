@@ -361,22 +361,13 @@ export SMTP_FROM=your-email@gmail.com
 
 **For different hosting platforms:**
 
-**Render.com (Recommended: Use SendGrid):**
-1. Sign up for free at [SendGrid](https://sendgrid.com) (100 emails/day free)
-2. Get your API key from SendGrid dashboard → Settings → API Keys
-3. In Render dashboard → Your Service → Environment tab:
-   - Add: `SENDGRID_API_KEY` = `your-sendgrid-api-key`
-   - (Optional) Add: `SMTP_FROM` = `your-verified-sender-email@yourdomain.com`
-4. **Redeploy your service**
-5. Check logs: `✅ SendGrid email service configured`
-
-**Render.com (Alternative: SMTP - may have connection issues):**
+**Render.com:**
 1. Go to your Render dashboard
 2. Select your service (e.g., "cardle")
 3. Go to **Environment** tab
 4. Click **Add Environment Variable** for each:
    - `SMTP_HOST` = `smtp.gmail.com`
-   - `SMTP_PORT` = `587` (or `465` if 587 is blocked)
+   - `SMTP_PORT` = `587`
    - `SMTP_USER` = `your-email@gmail.com`
    - `SMTP_PASS` = `your-app-password` (Gmail App Password, no spaces)
    - `SMTP_FROM` = `your-email@gmail.com`
