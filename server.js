@@ -805,6 +805,7 @@ const rematchRequests = new Map(); // gameId -> Set of player socket IDs who req
 const onlineUsers = new Map(); // socket.id -> firebaseUid (track all online users)
 const pendingChallenges = new Map(); // challengeId -> { challengerSocketId, challengerFirebaseUid, challengerName, targetFirebaseUid, targetName }
 const firebaseUidToSocket = new Map(); // firebaseUid -> socket.id (for finding socket by firebaseUid)
+const pendingGameResults = new Map(); // firebaseUid -> { gameOverData, timestamp } - stores game results for disconnected players
 
 // Matchmaking queues
 const matchmakingQueue = []; // Ranked matchmaking
@@ -2304,6 +2305,22 @@ io.on('connection', (socket) => {
             firebaseUidToSocket.set(data.firebaseUid, socket.id);
             console.log('User', data.firebaseUid, 'registered as online (socket:', socket.id + ')');
             console.log('Total online users:', onlineUsers.size);
+            
+            // Check for pending game results (from disconnecting during a game)
+            const pendingResult = pendingGameResults.get(data.firebaseUid);
+            if (pendingResult) {
+                // Check if result is still valid (within 5 minutes)
+                const timeSinceDisconnect = Date.now() - pendingResult.timestamp;
+                if (timeSinceDisconnect < 5 * 60 * 1000) { // 5 minutes
+                    console.log(`[PENDING RESULT] Sending pending game result to reconnected player ${data.firebaseUid}`);
+                    socket.emit('gameOver', pendingResult.gameOverData);
+                    pendingGameResults.delete(data.firebaseUid);
+                } else {
+                    // Result too old, remove it
+                    console.log(`[PENDING RESULT] Removing expired game result for ${data.firebaseUid}`);
+                    pendingGameResults.delete(data.firebaseUid);
+                }
+            }
         }
     });
     
@@ -5281,36 +5298,37 @@ io.on('connection', (socket) => {
                         botGames.delete(game.gameId);
                     }
                     
-                    // Send gameOver to remaining player
+                    // Calculate chip changes for ranked games
+                    let chipChangeWinner = 0;
+                    let chipChangeLoser = 0;
+                    
+                    if (game.isRanked) {
+                        // Winner gets 10 chips for disconnect wins (fixed amount)
+                        chipChangeWinner = 10;
+                        
+                        // Loser loses 50 chips
+                        chipChangeLoser = -50;
+                    } else {
+                        // Non-ranked games: no chip changes
+                        chipChangeWinner = 0;
+                        chipChangeLoser = 0;
+                    }
+                    
+                    console.log(`Disconnect handler: game.isRanked=${game.isRanked}, winner chipChange=${chipChangeWinner}, loser chipChange=${chipChangeLoser}`);
+                    
+                    // Handle duel deck mode for disconnect
+                    let disconnectWordData = { word: game.word };
+                    if (game.settings && game.settings.gameMode === 'duelDeck') {
+                        const disconnectedWord = game.playerWords?.get(socket.id);
+                        disconnectWordData = {
+                            opponentWord: disconnectedWord // The word the remaining player was trying to guess
+                        };
+                    }
+                    
+                    // Send gameOver to remaining player (winner)
                     const remainingSocket = io.sockets.sockets.get(remainingPlayer.id);
                     if (remainingSocket) {
                         const remainingPlayerGuesses = remainingPlayer.guesses ? remainingPlayer.guesses.length : 0;
-                        
-                        // Calculate chip changes for ranked games
-                        let chipChangeWinner = 0;
-                        let chipChangeLoser = 0;
-                        
-                        if (game.isRanked) {
-                            // Winner gets 10 chips for disconnect wins (fixed amount)
-                            chipChangeWinner = 10;
-                            
-                            // Loser loses 50 chips
-                            chipChangeLoser = -50;
-                        } else {
-                            // Non-ranked games: no chip changes
-                            chipChangeWinner = 0;
-                            chipChangeLoser = 0;
-                        }
-                        
-                        console.log(`Disconnect handler: game.isRanked=${game.isRanked}, sending chipChange=${chipChangeWinner} to player ${remainingPlayer.id}`);
-                        // Handle duel deck mode for disconnect
-                        let disconnectWordData = { word: game.word };
-                        if (game.settings && game.settings.gameMode === 'duelDeck') {
-                            const disconnectedWord = game.playerWords?.get(socket.id);
-                            disconnectWordData = {
-                                opponentWord: disconnectedWord // The word the remaining player was trying to guess
-                            };
-                        }
                         
                         remainingSocket.emit('gameOver', {
                             winner: remainingPlayer.id,
@@ -5318,12 +5336,47 @@ io.on('connection', (socket) => {
                             gameId: game.gameId,
                             disconnected: true,
                             chipChange: chipChangeWinner,
+                            isRanked: game.isRanked || false,
                             isPrivateGame: game.isPrivateGame || false,
                             guesses: remainingPlayerGuesses,
                             gameMode: game.settings?.gameMode || 'classic'
                         });
+                        console.log(`[DISCONNECT] Sent gameOver to winner ${remainingPlayer.id} (${remainingPlayer.name || 'Unknown'})`);
                     } else {
-                        console.error(`Could not find socket for remaining player ${remainingPlayer.id}`);
+                        console.error(`[DISCONNECT] Could not find socket for remaining player ${remainingPlayer.id}`);
+                    }
+                    
+                    // CRITICAL: Send gameOver to disconnected player if they reconnect
+                    // Try to find their socket by Firebase UID (they might have reconnected with new socket)
+                    if (disconnectedPlayer && disconnectedPlayer.firebaseUid) {
+                        const disconnectedPlayerGuesses = disconnectedPlayer.guesses ? disconnectedPlayer.guesses.length : 0;
+                        
+                        const gameOverDataForLoser = {
+                            winner: remainingPlayer.id,
+                            ...disconnectWordData,
+                            gameId: game.gameId,
+                            disconnected: true,
+                            chipChange: chipChangeLoser, // Negative value for loss
+                            loserChipChange: chipChangeLoser, // Explicit loser change (for client processing)
+                            isRanked: game.isRanked || false,
+                            isPrivateGame: game.isPrivateGame || false,
+                            guesses: disconnectedPlayerGuesses,
+                            gameMode: game.settings?.gameMode || 'classic'
+                        };
+                        
+                        const disconnectedSocket = findSocketByFirebaseUid(disconnectedPlayer.firebaseUid);
+                        if (disconnectedSocket) {
+                            // Player is online, send immediately
+                            disconnectedSocket.emit('gameOver', gameOverDataForLoser);
+                            console.log(`[DISCONNECT] Sent gameOver (LOSS) to disconnected player ${disconnectedPlayer.firebaseUid} (socket: ${disconnectedSocket.id}), chipChange: ${chipChangeLoser}`);
+                        } else {
+                            // Player not online, store for when they reconnect
+                            pendingGameResults.set(disconnectedPlayer.firebaseUid, {
+                                gameOverData: gameOverDataForLoser,
+                                timestamp: Date.now()
+                            });
+                            console.log(`[DISCONNECT] Disconnected player ${disconnectedPlayer.firebaseUid} not found online - stored pending game result (will be sent on reconnect)`);
+                        }
                     }
                     
                     // Remove players from tracking
@@ -5367,44 +5420,92 @@ io.on('connection', (socket) => {
         }
     });
     
-    // Challenge system
+    // Helper function to reliably find a socket by firebaseUid
+    function findSocketByFirebaseUid(firebaseUid) {
+        // First try the map
+        const socketId = firebaseUidToSocket.get(firebaseUid);
+        if (socketId) {
+            const socket = io.sockets.sockets.get(socketId);
+            if (socket && socket.connected) {
+                return socket;
+            }
+        }
+        
+        // If map lookup failed or socket is disconnected, search all sockets
+        // This handles cases where the map is out of sync
+        for (const [id, sock] of io.sockets.sockets) {
+            const uid = onlineUsers.get(id);
+            if (uid === firebaseUid && sock.connected) {
+                // Update the map to keep it in sync
+                firebaseUidToSocket.set(firebaseUid, id);
+                return sock;
+            }
+        }
+        
+        return null;
+    }
+    
+    // Challenge system - SIMPLIFIED: Only check if target is online, send challenge immediately
     socket.on('challengeFriend', (data) => {
         const { challengerFirebaseUid, challengerName, targetFirebaseUid, targetName } = data;
         
+        console.log(`[CHALLENGE] ===== NEW CHALLENGE REQUEST =====`);
+        console.log(`[CHALLENGE] From: ${challengerName} (${challengerFirebaseUid})`);
+        console.log(`[CHALLENGE] To: ${targetName} (${targetFirebaseUid})`);
+        console.log(`[CHALLENGE] Socket ID: ${socket.id}`);
+        
+        // Basic validation
         if (!challengerFirebaseUid || !targetFirebaseUid) {
+            console.log('[CHALLENGE] ❌ REJECTED: Invalid challenge data - missing UIDs');
             socket.emit('error', { message: 'Invalid challenge data' });
             return;
         }
         
-        // Check if target is online
-        const targetSocketId = firebaseUidToSocket.get(targetFirebaseUid);
-        if (!targetSocketId) {
+        // Find target socket using reliable method - THIS IS THE ONLY BLOCKING CHECK
+        const targetSocket = findSocketByFirebaseUid(targetFirebaseUid);
+        if (!targetSocket) {
+            console.log(`[CHALLENGE] ❌ REJECTED: Target ${targetName} (${targetFirebaseUid}) is not online`);
             socket.emit('error', { message: 'Friend is not online' });
             return;
         }
         
-        // Check if challenger is already in a game
-        const challengerGameId = userToGame.get(challengerFirebaseUid);
-        if (challengerGameId) {
-            const challengerGame = games.get(challengerGameId);
-            if (challengerGame && challengerGame.status !== 'finished') {
-                socket.emit('error', { message: 'You are already in a game' });
-                return;
-            }
+        if (!targetSocket.connected) {
+            console.log(`[CHALLENGE] ❌ REJECTED: Target socket ${targetSocket.id} is not connected`);
+            socket.emit('error', { message: 'Friend disconnected. Please try again.' });
+            return;
         }
         
-        // Check if target is already in a game
-        const targetGameId = userToGame.get(targetFirebaseUid);
-        if (targetGameId) {
-            const targetGame = games.get(targetGameId);
-            if (targetGame && targetGame.status !== 'finished') {
-                socket.emit('error', { message: 'Friend is already in a game' });
-                return;
+        console.log(`[CHALLENGE] ✅ Target ${targetName} found online (socket: ${targetSocket.id}, connected: ${targetSocket.connected})`);
+        
+        // Clean up ANY existing pending challenges between these two users
+        // This is critical - old challenges must be removed before sending new ones
+        let cleanedCount = 0;
+        const challengesToDelete = [];
+        pendingChallenges.forEach((challenge, challengeId) => {
+            const involvesChallenger = challenge.challengerFirebaseUid === challengerFirebaseUid || 
+                                      challenge.targetFirebaseUid === challengerFirebaseUid;
+            const involvesTarget = challenge.challengerFirebaseUid === targetFirebaseUid || 
+                                  challenge.targetFirebaseUid === targetFirebaseUid;
+            
+            if (involvesChallenger && involvesTarget) {
+                challengesToDelete.push(challengeId);
             }
+        });
+        
+        if (challengesToDelete.length > 0) {
+            console.log(`[CHALLENGE] 🧹 Cleaning up ${challengesToDelete.length} old pending challenge(s)`);
+            challengesToDelete.forEach(challengeId => {
+                pendingChallenges.delete(challengeId);
+                cleanedCount++;
+                console.log(`[CHALLENGE]   - Deleted: ${challengeId}`);
+            });
+        } else {
+            console.log(`[CHALLENGE] ℹ️ No old challenges to clean up`);
         }
         
-        // Generate challenge ID
+        // Generate unique challenge ID
         const challengeId = `challenge_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        console.log(`[CHALLENGE] 📝 Generated challenge ID: ${challengeId}`);
         
         // Store challenge
         pendingChallenges.set(challengeId, {
@@ -5416,16 +5517,36 @@ io.on('connection', (socket) => {
             targetName: targetName,
             targetPhotoURL: data.targetPhotoURL || null
         });
+        console.log(`[CHALLENGE] 💾 Stored challenge in pendingChallenges (total pending: ${pendingChallenges.size})`);
         
-        // Send challenge request to target
-        const targetSocket = io.sockets.sockets.get(targetSocketId);
-        if (targetSocket) {
-            targetSocket.emit('challengeRequest', {
-                challengeId: challengeId,
-                challengerFirebaseUid: challengerFirebaseUid,
-                challengerName: challengerName
+        // ALWAYS send the challenge - no other checks, no other conditions
+        const challengeData = {
+            challengeId: challengeId,
+            challengerFirebaseUid: challengerFirebaseUid,
+            challengerName: challengerName,
+            challengerPhotoURL: data.challengerPhotoURL || null
+        };
+        
+        try {
+            // Send to target
+            targetSocket.emit('challengeRequest', challengeData);
+            console.log(`[CHALLENGE] ✅✅✅ SUCCESS: Challenge sent to ${targetName} (socket: ${targetSocket.id})`);
+            console.log(`[CHALLENGE] 📤 Challenge data:`, JSON.stringify(challengeData));
+            
+            // Confirm to challenger
+            socket.emit('challengeSent', { 
+                success: true, 
+                targetName: targetName,
+                challengeId: challengeId 
             });
-            console.log('Challenge sent from', challengerName, 'to', targetName);
+            console.log(`[CHALLENGE] ✅ Confirmation sent to challenger ${challengerName}`);
+            console.log(`[CHALLENGE] ===== CHALLENGE COMPLETE =====\n`);
+        } catch (error) {
+            console.error('[CHALLENGE] ❌❌❌ ERROR sending challenge:', error);
+            console.error('[CHALLENGE] Error stack:', error.stack);
+            // Clean up on error
+            pendingChallenges.delete(challengeId);
+            socket.emit('error', { message: 'Failed to send challenge. Please try again.' });
         }
     });
     
@@ -5445,12 +5566,16 @@ io.on('connection', (socket) => {
             return;
         }
         
-        // Get challenger socket
-        const challengerSocket = io.sockets.sockets.get(challenge.challengerSocketId);
-        if (!challengerSocket) {
-            socket.emit('error', { message: 'Challenger is no longer online' });
-            pendingChallenges.delete(challengeId);
-            return;
+        // Get challenger socket using reliable method (in case socket ID changed)
+        let challengerSocket = io.sockets.sockets.get(challenge.challengerSocketId);
+        if (!challengerSocket || !challengerSocket.connected) {
+            // Try to find challenger socket by firebaseUid as fallback
+            challengerSocket = findSocketByFirebaseUid(challenge.challengerFirebaseUid);
+            if (!challengerSocket) {
+                socket.emit('error', { message: 'Challenger is no longer online' });
+                pendingChallenges.delete(challengeId);
+                return;
+            }
         }
         
         // Remove challenge
@@ -5558,8 +5683,12 @@ io.on('connection', (socket) => {
             return;
         }
         
-        // Get challenger socket
-        const challengerSocket = io.sockets.sockets.get(challenge.challengerSocketId);
+        // Get challenger socket using reliable method (in case socket ID changed)
+        let challengerSocket = io.sockets.sockets.get(challenge.challengerSocketId);
+        if (!challengerSocket || !challengerSocket.connected) {
+            // Try to find challenger socket by firebaseUid as fallback
+            challengerSocket = findSocketByFirebaseUid(challenge.challengerFirebaseUid);
+        }
         if (challengerSocket) {
             challengerSocket.emit('challengeDenied', {
                 targetName: challenge.targetName
@@ -5568,7 +5697,7 @@ io.on('connection', (socket) => {
         
         // Remove challenge
         pendingChallenges.delete(challengeId);
-        console.log('Challenge denied:', challengeId);
+        console.log('Challenge denied:', challengeId, 'cleaned up from pendingChallenges');
     });
 });
 

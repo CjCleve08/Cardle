@@ -3827,6 +3827,115 @@ header h1 {
     font-weight: 600;
 }
 
+/* Message Notification Popup */
+.message-notification-popup {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 5000;
+    display: none;
+    max-width: 350px;
+    width: calc(100% - 40px);
+    animation: slideInRight 0.3s ease-out;
+}
+
+.message-notification-popup.show {
+    display: block;
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.message-notification-content {
+    background: linear-gradient(145deg, #1a1a1b, #2a2a2b);
+    border: 2px solid #6aaa64;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 8px 32px rgba(106, 170, 100, 0.4);
+    backdrop-filter: blur(10px);
+}
+
+.message-notification-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(58, 58, 60, 0.5);
+}
+
+.message-notification-icon {
+    font-size: 1.5rem;
+}
+
+.message-notification-title {
+    flex: 1;
+    color: #ffffff;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.message-notification-close {
+    background: none;
+    border: none;
+    color: #818384;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background 0.2s ease, color 0.2s ease;
+}
+
+.message-notification-close:hover {
+    background: rgba(58, 58, 60, 0.5);
+    color: #ffffff;
+}
+
+.message-notification-body {
+    margin-bottom: 12px;
+}
+
+.message-notification-sender {
+    color: #6aaa64;
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.message-notification-text {
+    color: #d7dadc;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    word-wrap: break-word;
+}
+
+.message-notification-action {
+    width: 100%;
+    padding: 10px 16px;
+    background: linear-gradient(135deg, rgba(106, 170, 100, 0.9), rgba(74, 124, 89, 0.9));
+    border: 1px solid rgba(106, 170, 100, 0.5);
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.message-notification-action:hover {
+    background: linear-gradient(135deg, rgba(106, 170, 100, 1), rgba(74, 124, 89, 1));
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(106, 170, 100, 0.3);
+}
+
 .card-info-close {
     position: absolute;
     top: 10px;

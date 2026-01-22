@@ -222,6 +222,15 @@ let uiStateRecoveryInterval = setInterval(ensureUIStateCorrect, 2000); // Check 
 
 // Clear interval on page unload to prevent memory leaks
 window.addEventListener('beforeunload', () => {
+    // Clean up global listeners on page unload
+    if (globalMessageListener) {
+        globalMessageListener();
+    }
+    if (giftBadgeListener) {
+        giftBadgeListener();
+    }
+    // Clean up per-conversation listeners
+    Object.values(messageListeners).forEach(unsubscribe => unsubscribe());
     if (uiStateRecoveryInterval) {
         clearInterval(uiStateRecoveryInterval);
     }
@@ -532,6 +541,9 @@ function showLobby() {
                 loadYourPacks().catch(error => {
                     console.error('Error loading packs:', error);
                 });
+                // Set up real-time listeners for notifications
+                setupGlobalMessageListener();
+                setupGiftBadgeListener(); // Lightweight listener just for badge updates
             }
         }, 100);
         
@@ -578,6 +590,15 @@ function continueToAuth() {
                     }
                 }
                 
+                // Check if user is banned
+                const banned = await isUserBanned(user.uid);
+                if (banned) {
+                    showGameMessage('🚫', 'Account Banned', 'Your account has been banned. Please contact support if you believe this is an error.');
+                    // Sign them out
+                    await window.firebaseAuth.signOut();
+                    return;
+                }
+                
                 // Clear stats cache when user changes
                 clearStatsCache();
         clearDecksCache();
@@ -591,9 +612,23 @@ function continueToAuth() {
                 isGuestMode = false;
                 guestName = null;
                 console.log('User signed out');
+                
+                // Clean up global listeners on sign out
+                if (globalMessageListener) {
+                    globalMessageListener();
+                    globalMessageListener = null;
+                }
+                if (giftBadgeListener) {
+                    giftBadgeListener();
+                    giftBadgeListener = null;
+                }
+                // Clean up per-conversation listeners
+                Object.values(messageListeners).forEach(unsubscribe => unsubscribe());
+                messageListeners = {};
+                
                 // Clear stats cache on logout
                 clearStatsCache();
-        clearDecksCache();
+                clearDecksCache();
                 // User is signed out - show login
                 ScreenManager.show('login');
             }
@@ -808,6 +843,20 @@ function handleContinueAsGuest() {
 }
 
 async function handleLogout() {
+    // Clean up global listeners
+    if (globalMessageListener) {
+        globalMessageListener();
+        globalMessageListener = null;
+    }
+    if (giftBadgeListener) {
+        giftBadgeListener();
+        giftBadgeListener = null;
+    }
+    
+    // Clean up per-conversation listeners
+    Object.values(messageListeners).forEach(unsubscribe => unsubscribe());
+    messageListeners = {};
+    
     // Clear guest mode if active
     if (isGuestMode) {
         isGuestMode = false;
@@ -9073,7 +9122,7 @@ async function initializeShop() {
     // Load owned packs
     await loadYourPacks();
     
-    // Check for gift notifications
+    // Check for gift notifications when opening shop tab (restore old behavior)
     await checkGiftNotifications();
 }
 
@@ -10177,6 +10226,15 @@ document.getElementById('dailyChipClaimBtn')?.addEventListener('click', async ()
 
 // Shared function for starting matchmaking (ranked or casual)
 async function startMatchmaking(isRanked = true) {
+    // Check if user is banned
+    if (currentUser && currentUser.uid) {
+        const banned = await isUserBanned(currentUser.uid);
+        if (banned) {
+            showGameMessage('🚫', 'Account Banned', 'Your account has been banned. Please contact support if you believe this is an error.');
+            return;
+        }
+    }
+    
     const name = getPlayerName();
     if (!name) {
         showGameMessage('⚠️', 'Name Required', 'Please enter your name');
@@ -10547,6 +10605,11 @@ function switchTab(tabName) {
         loadUnreadMessageCounts();
         // Note: Individual friend unread counts (green dots) remain until you open their specific chat
         // The notification badge will update automatically based on remaining unread counts
+    } else {
+        // When switching away from messages tab, clear currentChatFriendId so notifications work again
+        if (currentChatFriendId !== null) {
+            currentChatFriendId = null;
+        }
     }
     
     // If switching to community tab, refresh posts display (already loaded on startup)
@@ -11987,7 +12050,11 @@ async function challengeFriend(friendFirebaseUid, friendName, event) {
         return;
     }
     
-    console.log('Challenging friend:', friendFirebaseUid, friendName);
+    console.log('[CLIENT] ===== SENDING CHALLENGE =====');
+    console.log('[CLIENT] Challenging friend:', friendFirebaseUid, friendName);
+    console.log('[CLIENT] Socket connected:', socket && socket.connected);
+    console.log('[CLIENT] Socket ID:', socket ? socket.id : 'NO SOCKET');
+    
     const challengerPhotoURL = currentUser ? currentUser.photoURL : null;
     // Try to get target photoURL from Firestore
     let targetPhotoURL = null;
@@ -11998,24 +12065,42 @@ async function challengeFriend(friendFirebaseUid, friendName, event) {
                 targetPhotoURL = targetUserDoc.data().photoURL || null;
             }
         } catch (error) {
-            console.error('Error fetching target photoURL:', error);
+            console.error('[CLIENT] Error fetching target photoURL:', error);
         }
     }
-    socket.emit('challengeFriend', {
+    
+    const challengeData = {
         challengerFirebaseUid: currentUser.uid,
         challengerName: playerName,
         challengerPhotoURL: challengerPhotoURL,
         targetFirebaseUid: friendFirebaseUid,
         targetName: friendName,
         targetPhotoURL: targetPhotoURL
-    });
+    };
     
+    console.log('[CLIENT] Emitting challengeFriend with data:', challengeData);
+    socket.emit('challengeFriend', challengeData);
+    console.log('[CLIENT] ✅ challengeFriend event emitted');
+    console.log('[CLIENT] ===== CHALLENGE EMIT COMPLETE =====\n');
+    
+    // Show optimistic success message immediately
     showGameMessage('⚔️', 'Challenge Sent', `Challenge sent to ${friendName}!`, 2000);
 }
 
+// Handle challenge sent confirmation from server
+socket.on('challengeSent', (data) => {
+    if (data && data.success) {
+        console.log('[CLIENT] ✅ Challenge confirmed sent by server:', data.challengeId);
+        // Server has confirmed the challenge was sent successfully
+    } else {
+        console.log('[CLIENT] ⚠️ Challenge sent confirmation received but success=false:', data);
+    }
+});
+
 // Handle incoming challenge request
 socket.on('challengeRequest', (data) => {
-    console.log('Received challenge request:', data);
+    console.log('[CLIENT] ===== RECEIVED CHALLENGE REQUEST =====');
+    console.log('[CLIENT] Challenge data:', data);
     const challengerName = data.challengerName || 'Unknown';
     
     const overlay = document.getElementById('challengeRequestOverlay');
@@ -12024,8 +12109,21 @@ socket.on('challengeRequest', (data) => {
     const acceptBtn = document.getElementById('challengeAcceptBtn');
     const denyBtn = document.getElementById('challengeDenyBtn');
     
+    console.log('[CLIENT] Overlay element:', overlay);
+    console.log('[CLIENT] Title element:', titleEl);
+    console.log('[CLIENT] Text element:', textEl);
+    console.log('[CLIENT] Accept button:', acceptBtn);
+    console.log('[CLIENT] Deny button:', denyBtn);
+    
     if (!overlay || !titleEl || !textEl || !acceptBtn || !denyBtn) {
-        console.error('Challenge popup elements not found');
+        console.error('[CLIENT] ❌ Challenge popup elements not found!');
+        console.error('[CLIENT] Missing elements:', {
+            overlay: !overlay,
+            titleEl: !titleEl,
+            textEl: !textEl,
+            acceptBtn: !acceptBtn,
+            denyBtn: !denyBtn
+        });
         return;
     }
     
@@ -12037,21 +12135,40 @@ socket.on('challengeRequest', (data) => {
     overlay.dataset.challengerFirebaseUid = data.challengerFirebaseUid;
     overlay.dataset.challengerName = data.challengerName;
     
-    // Show overlay using the same pattern as gameMessage (with class, not direct display)
-    overlay.classList.remove('show', 'hiding');
-    void overlay.offsetWidth; // Force reflow
-    overlay.classList.add('show');
+    console.log('[CLIENT] Challenge data stored in overlay dataset');
+    
+    // CRITICAL: Ensure overlay is visible by removing display:none and adding show class
+    // Remove inline display:none that might have been set when closing
+    overlay.style.display = ''; // Clear inline display style so CSS class can work
+    overlay.classList.remove('hiding'); // Remove hiding class if present
+    overlay.classList.remove('show'); // Remove show class first to reset animation
+    void overlay.offsetWidth; // Force reflow to reset animation
+    overlay.classList.add('show'); // Add show class - this sets display:flex via CSS
+    
+    console.log('[CLIENT] Overlay classes after update:', overlay.className);
+    console.log('[CLIENT] Overlay display style:', overlay.style.display);
+    console.log('[CLIENT] Overlay computed display:', window.getComputedStyle(overlay).display);
     
     // Set up button handlers
-    acceptBtn.onclick = () => acceptChallenge(data.challengeId, data.challengerFirebaseUid, data.challengerName);
-    denyBtn.onclick = () => denyChallenge(data.challengeId);
+    acceptBtn.onclick = () => {
+        console.log('[CLIENT] Accept button clicked');
+        acceptChallenge(data.challengeId, data.challengerFirebaseUid, data.challengerName);
+    };
+    denyBtn.onclick = () => {
+        console.log('[CLIENT] Deny button clicked');
+        denyChallenge(data.challengeId);
+    };
     
     // Close on overlay click (outside content)
     overlay.onclick = (e) => {
         if (e.target === overlay) {
+            console.log('[CLIENT] Overlay background clicked, denying challenge');
             denyChallenge(data.challengeId);
         }
     };
+    
+    console.log('[CLIENT] ✅ Challenge popup should now be visible');
+    console.log('[CLIENT] ===== CHALLENGE REQUEST HANDLED =====\n');
 });
 
 // Accept challenge
@@ -13813,6 +13930,69 @@ async function setPlayerAdminStatus(targetUid, targetEmail, makeAdmin) {
     return true;
 }
 
+// Set player banned status (only creator can ban)
+async function setPlayerBannedStatus(targetUid, targetEmail, isBanned) {
+    if (!window.firebaseDb || !targetUid) {
+        throw new Error('Firebase not available or UID missing');
+    }
+    
+    // Verify user is creator (only creator can ban)
+    if (!isCreator()) {
+        throw new Error('Unauthorized: Only the creator can ban accounts');
+    }
+    
+    const normalizedEmail = (targetEmail || '').toLowerCase().trim();
+    const isProtected = normalizedEmail === 'cjcleve2008@gmail.com';
+    if (isProtected && isBanned === true) {
+        throw new Error('The creator cannot be banned');
+    }
+    
+    // Update banned status in users collection
+    const userRef = window.firebaseDb.collection('users').doc(targetUid);
+    await userRef.set({
+        banned: isBanned,
+        bannedAt: isBanned ? firebase.firestore.FieldValue.serverTimestamp() : firebase.firestore.FieldValue.delete(),
+        bannedBy: isBanned ? currentUser.uid : firebase.firestore.FieldValue.delete()
+    }, { merge: true });
+    
+    // Get target name for logging
+    let targetName = null;
+    try {
+        const userDoc = await userRef.get();
+        if (userDoc.exists) {
+            targetName = userDoc.data().displayName || userDoc.data().name || null;
+        }
+    } catch (error) {
+        console.error('Error fetching target name for logging:', error);
+    }
+    
+    await logAdminActivity('ban_status_changed', targetUid, targetName, {
+        action: isBanned ? 'banned' : 'unbanned',
+        email: normalizedEmail
+    });
+    
+    return true;
+}
+
+// Check if a user is banned
+async function isUserBanned(uid) {
+    if (!window.firebaseDb || !uid) {
+        return false;
+    }
+    
+    try {
+        const userDoc = await window.firebaseDb.collection('users').doc(uid).get();
+        if (userDoc.exists) {
+            const userData = userDoc.data();
+            return userData.banned === true;
+        }
+    } catch (error) {
+        console.error('Error checking banned status:', error);
+    }
+    
+    return false;
+}
+
 // Load and display admin activity log (only for creator)
 async function loadAdminActivityLog() {
     const logSection = document.getElementById('adminActivityLogSection');
@@ -14064,6 +14244,70 @@ function initializeAdminPanel() {
             }
         };
     }
+    
+    // Ban toggle handler
+    const banToggle = document.getElementById('adminPlayerBannedToggle');
+    if (banToggle) {
+        banToggle.onchange = async () => {
+            const uid = banToggle.dataset.playerUid;
+            const email = banToggle.dataset.playerEmail || '';
+            const statusEl = document.getElementById('adminBannedStatus');
+            
+            if (!uid) {
+                // No player selected; revert
+                banToggle.checked = !banToggle.checked;
+                return;
+            }
+            
+            // Creator protection (UI-side)
+            if ((email || '').toLowerCase() === 'cjcleve2008@gmail.com') {
+                banToggle.checked = false;
+                if (statusEl) {
+                    statusEl.textContent = 'Creator cannot be banned.';
+                    statusEl.style.color = '#dc3545';
+                    statusEl.style.display = 'block';
+                }
+                return;
+            }
+            
+            try {
+                banToggle.disabled = true;
+                if (statusEl) {
+                    statusEl.textContent = banToggle.checked ? 'Banning player…' : 'Unbanning player…';
+                    statusEl.style.color = '#818384';
+                    statusEl.style.display = 'block';
+                }
+                
+                await setPlayerBannedStatus(uid, email, banToggle.checked);
+                
+                if (statusEl) {
+                    statusEl.textContent = banToggle.checked ? '✓ Player banned' : '✓ Player unbanned';
+                    statusEl.style.color = '#6aaa64';
+                    statusEl.style.display = 'block';
+                }
+                
+                // Refresh player info
+                const player = await loadPlayerData(uid);
+                if (player) {
+                    displayPlayerInfo(player);
+                }
+                
+                setTimeout(() => {
+                    if (statusEl) statusEl.style.display = 'none';
+                }, 2500);
+            } catch (error) {
+                // Revert toggle on error
+                banToggle.checked = !banToggle.checked;
+                if (statusEl) {
+                    statusEl.textContent = 'Failed: ' + (error?.message || 'Unknown error');
+                    statusEl.style.color = '#dc3545';
+                    statusEl.style.display = 'block';
+                }
+            } finally {
+                banToggle.disabled = false;
+            }
+        };
+    }
 }
 
 // Perform admin search (like friend search)
@@ -14167,6 +14411,9 @@ async function loadPlayerData(uid) {
         return null;
     }
     
+    // Check if user is banned first (for security)
+    const isBanned = await isUserBanned(uid);
+    
     try {
         const userDoc = await window.firebaseDb.collection('users').doc(uid).get();
         if (!userDoc.exists) {
@@ -14192,6 +14439,9 @@ async function loadPlayerData(uid) {
             }
         }
         
+        // Banned status
+        const isBanned = userData.banned === true;
+        
         return {
             uid: uid,
             email: userData.email || '',
@@ -14200,6 +14450,7 @@ async function loadPlayerData(uid) {
             chipPoints: stats.chipPoints !== undefined ? stats.chipPoints : 0,
             bits: stats.bits !== undefined ? stats.bits : 0,
             isAdmin: isAdminUser,
+            banned: isBanned,
             // Include all stats for display
             gamesPlayed: stats.gamesPlayed !== undefined ? stats.gamesPlayed : 0,
             wins: stats.wins !== undefined ? stats.wins : 0,
@@ -14299,6 +14550,33 @@ function displayPlayerInfo(player) {
         if (adminStatus) {
             adminStatus.style.display = 'none';
             adminStatus.textContent = '';
+        }
+    }
+    
+    // Ban toggle setup
+    const banToggle = document.getElementById('adminPlayerBannedToggle');
+    const banNote = document.getElementById('adminPlayerBannedNote');
+    const banStatus = document.getElementById('adminBannedStatus');
+    
+    if (banToggle) {
+        banToggle.dataset.playerUid = player.uid;
+        banToggle.dataset.playerEmail = (player.email || '').toLowerCase();
+        
+        const isProtected = (player.email || '').toLowerCase() === 'cjcleve2008@gmail.com';
+        banToggle.checked = player.banned === true;
+        banToggle.disabled = isProtected;
+        
+        if (banNote) {
+            if (isProtected) {
+                banNote.textContent = 'Creator cannot be banned.';
+            } else {
+                banNote.textContent = banToggle.checked ? 'Player is banned from the game.' : 'Ban this player from accessing the game.';
+            }
+        }
+        
+        if (banStatus) {
+            banStatus.style.display = 'none';
+            banStatus.textContent = '';
         }
     }
 }
@@ -16122,8 +16400,269 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ==================== MESSAGING FUNCTIONALITY ====================
 
+// Set up global real-time listener for all incoming messages (shows notifications)
+function setupGlobalMessageListener() {
+    if (!currentUser || !window.firebaseDb) return;
+    
+    // Clean up existing listener if it exists
+    if (globalMessageListener) {
+        globalMessageListener();
+        globalMessageListener = null;
+    }
+    
+    // Track when listener starts to ignore initial snapshot
+    globalMessageListenerStartTime = Date.now();
+    let isInitialSnapshot = true; // Track if this is the first snapshot
+    
+    // Listen for all messages where current user is the receiver
+    // Don't filter by 'read' - listen to all messages and check if we've shown notification
+    globalMessageListener = window.firebaseDb.collection('messages')
+        .where('receiverId', '==', currentUser.uid)
+        .orderBy('createdAt', 'desc')
+        .limit(50) // Only listen to recent messages to avoid performance issues
+        .onSnapshot(snapshot => {
+            // Skip all messages from initial snapshot (they're existing, not new)
+            if (isInitialSnapshot) {
+                isInitialSnapshot = false;
+                // Mark all existing messages as processed so we don't process them again
+                snapshot.forEach(doc => {
+                    shownMessageIds.add(doc.id);
+                });
+                return; // Don't process initial snapshot
+            }
+            
+            // Process only NEW changes (not from initial snapshot)
+            // Use a Set to track messages processed in this snapshot to prevent duplicates within the same snapshot
+            const processedInThisSnapshot = new Set();
+            
+            // First, collect all message IDs that need processing
+            const messagesToProcess = [];
+            snapshot.docChanges().forEach(change => {
+                // Only process 'added' changes (new messages)
+                if (change.type !== 'added') {
+                    return;
+                }
+                
+                const messageId = change.doc.id;
+                
+                // CRITICAL: Check shownMessageIds FIRST (before any other logic)
+                // This is the most important check to prevent duplicates
+                if (shownMessageIds.has(messageId)) {
+                    return; // Already processed this message, skip completely
+                }
+                
+                // Also check if processed in this snapshot (defense in depth)
+                if (processedInThisSnapshot.has(messageId)) {
+                    return; // Already processed in this snapshot iteration
+                }
+                
+                // Mark as processed IMMEDIATELY (synchronously, before any async operations)
+                shownMessageIds.add(messageId);
+                processedInThisSnapshot.add(messageId);
+                
+                const message = change.doc.data();
+                const senderId = message.senderId;
+                
+                // Skip if message is already read
+                if (message.read === true) {
+                    return;
+                }
+                
+                // Don't update unread count if user is currently viewing this conversation
+                if (currentChatFriendId === senderId) {
+                    return;
+                }
+                
+                // Add to processing queue
+                messagesToProcess.push({ messageId, senderId });
+            });
+            
+            // Process all messages (update unread counts)
+            if (messagesToProcess.length > 0) {
+                messagesToProcess.forEach(({ senderId }) => {
+                    unreadMessageCounts[senderId] = (unreadMessageCounts[senderId] || 0) + 1;
+                });
+                saveUnreadCounts();
+                updateMessagesNotificationBadge();
+                renderMessagesFriendsList();
+            }
+        }, error => {
+            // If orderBy fails (no index), fall back to listening without orderBy
+            if (error.code === 'failed-precondition') {
+                console.warn('Message listener index not found, using fallback');
+                // Fallback: listen without orderBy (less efficient but works)
+                globalMessageListenerStartTime = Date.now();
+                let isInitialSnapshotFallback = true;
+                globalMessageListener = window.firebaseDb.collection('messages')
+                    .where('receiverId', '==', currentUser.uid)
+                    .onSnapshot(snapshot => {
+                        // Skip all messages from initial snapshot
+                        if (isInitialSnapshotFallback) {
+                            isInitialSnapshotFallback = false;
+                            snapshot.forEach(doc => {
+                                shownMessageIds.add(doc.id);
+                            });
+                            return;
+                        }
+                        
+                        // Process only NEW changes
+                        // Use a Set to track messages processed in this snapshot to prevent duplicates
+                        const processedInThisSnapshot = new Set();
+                        
+                        // First, collect all message IDs that need processing
+                        const messagesToProcess = [];
+                        snapshot.docChanges().forEach(change => {
+                            // Only process 'added' changes (new messages)
+                            if (change.type !== 'added') {
+                                return;
+                            }
+                            
+                            const messageId = change.doc.id;
+                            
+                            // CRITICAL: Check BOTH global shownMessageIds AND this snapshot's processed set
+                            if (shownMessageIds.has(messageId) || processedInThisSnapshot.has(messageId)) {
+                                return; // Already processed, skip
+                            }
+                            
+                            // Mark as processed in both sets IMMEDIATELY (synchronously)
+                            shownMessageIds.add(messageId);
+                            processedInThisSnapshot.add(messageId);
+                            
+                            const message = change.doc.data();
+                            const senderId = message.senderId;
+                            
+                            // Skip if message is already read
+                            if (message.read === true) {
+                                return;
+                            }
+                            
+                            // Don't update unread count if user is currently viewing this conversation
+                            if (currentChatFriendId === senderId) {
+                                return;
+                            }
+                            
+                            // Add to processing queue
+                            messagesToProcess.push({ messageId, senderId });
+                        });
+                        
+                        // Process all messages (update unread counts)
+                        if (messagesToProcess.length > 0) {
+                            messagesToProcess.forEach(({ senderId }) => {
+                                unreadMessageCounts[senderId] = (unreadMessageCounts[senderId] || 0) + 1;
+                            });
+                            saveUnreadCounts();
+                            updateMessagesNotificationBadge();
+                            renderMessagesFriendsList();
+                        }
+                    }, error => {
+                        if (error.code !== 'unavailable' && !error.message?.includes('CORS') && !error.message?.includes('network')) {
+                            console.error('Error in global message listener (fallback):', error);
+                        }
+                    });
+            } else if (error.code !== 'unavailable' && !error.message?.includes('CORS') && !error.message?.includes('network')) {
+                console.error('Error in global message listener:', error);
+            }
+        });
+}
+
+// Set up lightweight listener for gift badge updates (no popup, just badge)
+function setupGiftBadgeListener() {
+    if (!currentUser || !window.firebaseDb) return;
+    
+    // Clean up existing listener
+    if (giftBadgeListener) {
+        giftBadgeListener();
+        giftBadgeListener = null;
+    }
+    
+    // Listen for new unopened gifts (just to update badge, not show popup)
+    try {
+        giftBadgeListener = window.firebaseDb.collection('giftedPacks')
+            .where('receiverId', '==', currentUser.uid)
+            .where('opened', '==', false)
+            .onSnapshot(snapshot => {
+                // Update badge count based on current unopened packs
+                const unopenedCount = snapshot.size;
+                updateShopTabNotificationBadge(unopenedCount);
+            }, error => {
+                // Handle index errors gracefully - badge will update when shop tab opens
+                if (error.code === 'failed-precondition') {
+                    console.warn('Gift badge listener requires index, badge will update when shop opens');
+                } else if (error.code !== 'unavailable' && !error.message?.includes('CORS') && !error.message?.includes('network')) {
+                    console.error('Error in gift badge listener:', error);
+                }
+            });
+    } catch (error) {
+        console.warn('Could not set up gift badge listener:', error);
+    }
+}
+
+// Show popup notification for new message
+function showMessageNotification(senderName, messageText, senderId) {
+    // Create or get notification element
+    let notification = document.getElementById('messageNotificationPopup');
+    if (!notification) {
+        notification = document.createElement('div');
+        notification.id = 'messageNotificationPopup';
+        notification.className = 'message-notification-popup';
+        document.body.appendChild(notification);
+    }
+    
+    // Truncate message if too long
+    const displayText = messageText.length > 50 ? messageText.substring(0, 50) + '...' : messageText;
+    
+    notification.innerHTML = `
+        <div class="message-notification-content">
+            <div class="message-notification-header">
+                <span class="message-notification-icon">💬</span>
+                <span class="message-notification-title">New Message</span>
+                <button class="message-notification-close" onclick="closeMessageNotification()">✕</button>
+            </div>
+            <div class="message-notification-body">
+                <div class="message-notification-sender">From: ${escapeHtml(senderName)}</div>
+                <div class="message-notification-text">${escapeHtml(displayText)}</div>
+            </div>
+            <button class="message-notification-action" onclick="openMessagesTab('${senderId}')">Open Messages</button>
+        </div>
+    `;
+    
+    // Show notification
+    notification.style.display = 'block';
+    notification.classList.add('show');
+    
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+        closeMessageNotification();
+    }, 5000);
+}
+
+// Close message notification
+function closeMessageNotification() {
+    const notification = document.getElementById('messageNotificationPopup');
+    if (notification) {
+        notification.classList.remove('show');
+        setTimeout(() => {
+            notification.style.display = 'none';
+        }, 300);
+    }
+}
+
+// Open messages tab and chat with specific friend
+function openMessagesTab(friendId) {
+    closeMessageNotification();
+    switchTab('messages');
+    // Small delay to ensure tab is loaded
+    setTimeout(() => {
+        openChatWithFriend(friendId);
+    }, 100);
+}
+
 let currentChatFriendId = null;
 let messageListeners = {}; // Store listeners for cleanup
+let globalMessageListener = null; // Global listener for all incoming messages
+let giftBadgeListener = null; // Lightweight listener for gift badge updates only
+let shownMessageIds = new Set(); // Track message IDs we've already shown notifications for
+let globalMessageListenerStartTime = null; // Track when listener started to ignore initial snapshot
 let friendsForMessaging = [];
 let unreadMessageCounts = {}; // Track unread messages per friend: { friendId: count }
 let lastMessageTimes = {}; // Track last message time per friend: { friendId: timestamp }
@@ -16185,41 +16724,45 @@ async function loadMessagesFriends() {
     if (!currentUser || !window.firebaseDb) return;
     
     const friendsListEl = document.getElementById('messagesFriendsList');
-    if (friendsListEl) {
-        // Show loading indicator
-        friendsListEl.innerHTML = `
-            <div class="messages-loading-state">
-                <div class="messages-loading-spinner"></div>
-                <div class="messages-loading-text">Loading conversations...</div>
-            </div>
-        `;
-    }
     
     try {
-        // Load persisted data first
+        // Load persisted data first (from localStorage - instant)
         loadMessageTimes();
         loadUnreadCounts();
         
         // Reuse the friends list data if available, otherwise load it
         if (friendsListData.length === 0) {
+            if (friendsListEl) {
+                friendsListEl.innerHTML = `
+                    <div class="messages-loading-state">
+                        <div class="messages-loading-spinner"></div>
+                        <div class="messages-loading-text">Loading friends...</div>
+                    </div>
+                `;
+            }
             await loadFriends();
         }
         
         friendsForMessaging = [...friendsListData];
         
-        // Load last message times for all friends and update persisted data
-        await loadLastMessageTimesForAllFriends();
-        
-        // Save the updated times
-        saveMessageTimes();
-        
-        // Load actual unread counts from Firestore and update persisted data
-        await loadUnreadMessageCounts();
-        
-        // Save the updated counts
-        saveUnreadCounts();
-        
+        // Render immediately with cached data (fast!)
         renderMessagesFriendsList();
+        
+        // Load fresh data in background (non-blocking)
+        // This updates the UI incrementally as data loads
+        Promise.all([
+            loadLastMessageTimesForAllFriends().then(() => {
+                saveMessageTimes();
+                renderMessagesFriendsList(); // Re-render with updated times
+            }),
+            loadUnreadMessageCounts().then(() => {
+                saveUnreadCounts();
+                renderMessagesFriendsList(); // Re-render with updated counts
+            })
+        ]).catch(error => {
+            console.error('Error loading message data in background:', error);
+        });
+        
     } catch (error) {
         console.error('Error loading friends for messaging:', error);
         if (friendsListEl) {
@@ -16233,101 +16776,113 @@ async function loadMessagesFriends() {
     }
 }
 
-// Load last message time for all friends
+// Load last message time for all friends (optimized - batches queries)
 async function loadLastMessageTimesForAllFriends() {
     if (!currentUser || !window.firebaseDb || friendsForMessaging.length === 0) return;
     
     try {
-        // Load the most recent message for each friend
-        // Use Promise.allSettled to handle errors gracefully
-        const promises = friendsForMessaging.map(async (friend) => {
-            try {
-                let sentSnapshot, receivedSnapshot;
-                
-                // Try with orderBy first (more efficient if index exists)
+        // Batch process friends in chunks to avoid overwhelming Firestore
+        const BATCH_SIZE = 5; // Process 5 friends at a time
+        const friendChunks = [];
+        for (let i = 0; i < friendsForMessaging.length; i += BATCH_SIZE) {
+            friendChunks.push(friendsForMessaging.slice(i, i + BATCH_SIZE));
+        }
+        
+        // Process chunks sequentially, but friends within each chunk in parallel
+        for (const chunk of friendChunks) {
+            const promises = chunk.map(async (friend) => {
                 try {
-                    const sentQuery = window.firebaseDb.collection('messages')
-                        .where('senderId', '==', currentUser.uid)
-                        .where('receiverId', '==', friend.id)
-                        .orderBy('createdAt', 'desc')
-                        .limit(1);
+                    let sentSnapshot, receivedSnapshot;
                     
-                    const receivedQuery = window.firebaseDb.collection('messages')
-                        .where('senderId', '==', friend.id)
-                        .where('receiverId', '==', currentUser.uid)
-                        .orderBy('createdAt', 'desc')
-                        .limit(1);
-                    
-                    [sentSnapshot, receivedSnapshot] = await Promise.all([
-                        sentQuery.get(),
-                        receivedQuery.get()
-                    ]);
-                } catch (indexError) {
-                    // If index doesn't exist, load without orderBy and sort client-side
-                    if (indexError.code === 'failed-precondition') {
-                        // Load all messages for this conversation and sort client-side
+                    // Try with orderBy first (more efficient if index exists)
+                    try {
                         const sentQuery = window.firebaseDb.collection('messages')
                             .where('senderId', '==', currentUser.uid)
-                            .where('receiverId', '==', friend.id);
+                            .where('receiverId', '==', friend.id)
+                            .orderBy('createdAt', 'desc')
+                            .limit(1);
                         
                         const receivedQuery = window.firebaseDb.collection('messages')
                             .where('senderId', '==', friend.id)
-                            .where('receiverId', '==', currentUser.uid);
+                            .where('receiverId', '==', currentUser.uid)
+                            .orderBy('createdAt', 'desc')
+                            .limit(1);
                         
                         [sentSnapshot, receivedSnapshot] = await Promise.all([
                             sentQuery.get(),
                             receivedQuery.get()
                         ]);
-                    } else {
-                        throw indexError;
+                    } catch (indexError) {
+                        // If index doesn't exist, load without orderBy and sort client-side
+                        if (indexError.code === 'failed-precondition') {
+                            // Load all messages for this conversation and sort client-side
+                            const sentQuery = window.firebaseDb.collection('messages')
+                                .where('senderId', '==', currentUser.uid)
+                                .where('receiverId', '==', friend.id);
+                            
+                            const receivedQuery = window.firebaseDb.collection('messages')
+                                .where('senderId', '==', friend.id)
+                                .where('receiverId', '==', currentUser.uid);
+                            
+                            [sentSnapshot, receivedSnapshot] = await Promise.all([
+                                sentQuery.get(),
+                                receivedQuery.get()
+                            ]);
+                        } else {
+                            throw indexError;
+                        }
+                    }
+                    
+                    let latestTime = 0;
+                    let latestMessageText = '';
+                    
+                    // Check sent messages
+                    sentSnapshot.forEach(doc => {
+                        const msg = doc.data();
+                        const msgTime = msg.createdAt?.toDate ? msg.createdAt.toDate() : new Date(msg.createdAt || 0);
+                        const time = msgTime.getTime();
+                        if (time > latestTime) {
+                            latestTime = time;
+                            latestMessageText = msg.text || '';
+                        }
+                    });
+                    
+                    // Check received messages
+                    receivedSnapshot.forEach(doc => {
+                        const msg = doc.data();
+                        const msgTime = msg.createdAt?.toDate ? msg.createdAt.toDate() : new Date(msg.createdAt || 0);
+                        const time = msgTime.getTime();
+                        if (time > latestTime) {
+                            latestTime = time;
+                            latestMessageText = msg.text || '';
+                        }
+                    });
+                    
+                    if (latestTime > 0) {
+                        // Only update if this is newer than what we have (preserve order)
+                        const currentTime = lastMessageTimes[friend.id] || 0;
+                        if (latestTime > currentTime) {
+                            lastMessageTimes[friend.id] = latestTime;
+                        }
+                        // Update preview text
+                        if (latestMessageText) {
+                            updateFriendPreview(friend.id, latestMessageText);
+                        }
+                    }
+                } catch (error) {
+                    // Only log non-index errors (index errors are expected and handled above)
+                    if (error.code !== 'failed-precondition') {
+                        console.warn(`Error loading last message time for friend ${friend.id}:`, error);
                     }
                 }
-                
-                let latestTime = 0;
-                let latestMessageText = '';
-                
-                // Check sent messages
-                sentSnapshot.forEach(doc => {
-                    const msg = doc.data();
-                    const msgTime = msg.createdAt?.toDate ? msg.createdAt.toDate() : new Date(msg.createdAt || 0);
-                    const time = msgTime.getTime();
-                    if (time > latestTime) {
-                        latestTime = time;
-                        latestMessageText = msg.text || '';
-                    }
-                });
-                
-                // Check received messages
-                receivedSnapshot.forEach(doc => {
-                    const msg = doc.data();
-                    const msgTime = msg.createdAt?.toDate ? msg.createdAt.toDate() : new Date(msg.createdAt || 0);
-                    const time = msgTime.getTime();
-                    if (time > latestTime) {
-                        latestTime = time;
-                        latestMessageText = msg.text || '';
-                    }
-                });
-                
-                if (latestTime > 0) {
-                    // Only update if this is newer than what we have (preserve order)
-                    const currentTime = lastMessageTimes[friend.id] || 0;
-                    if (latestTime > currentTime) {
-                        lastMessageTimes[friend.id] = latestTime;
-                    }
-                    // Update preview text
-                    if (latestMessageText) {
-                        updateFriendPreview(friend.id, latestMessageText);
-                    }
-                }
-            } catch (error) {
-                // Only log non-index errors (index errors are expected and handled above)
-                if (error.code !== 'failed-precondition') {
-                    console.warn(`Error loading last message time for friend ${friend.id}:`, error);
-                }
-            }
-        });
-        
-        await Promise.allSettled(promises);
+            });
+            
+            // Wait for this chunk to complete before moving to next
+            await Promise.allSettled(promises);
+            
+            // Update UI after each chunk (progressive loading)
+            renderMessagesFriendsList();
+        }
     } catch (error) {
         console.error('Error loading last message times:', error);
     }
@@ -16852,12 +17407,9 @@ function setupMessageListener(friendId) {
                         updateFriendPreview(friendId, message.text);
                     }
                     
-                    // If chat is not open with this friend, increment unread count and show indicator
-                    if (currentChatFriendId !== friendId) {
-                        unreadMessageCounts[friendId] = (unreadMessageCounts[friendId] || 0) + 1;
-                        saveUnreadCounts(); // Persist unread counts
-                        updateMessagesNotificationBadge();
-                    } else {
+                    // Note: Unread count is handled by the global listener to prevent duplicates
+                    // This per-conversation listener only handles UI updates for the specific conversation
+                    if (currentChatFriendId === friendId) {
                         // Chat is open, mark message as read immediately (async, don't await)
                         const messageRef = window.firebaseDb.collection('messages').doc(message.id);
                         messageRef.update({ read: true }).catch(error => {
