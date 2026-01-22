@@ -1430,7 +1430,44 @@ const AVAILABLE_CAMOS = [
     { id: 'SolidStealthBase', name: 'Solid Stealth', filename: 'SolidStealthBase.png', rarity: 'common' },
     { id: 'VirusBase', name: 'Virus', filename: 'VirusBase.png', rarity: 'common' },
     { id: 'YesKingBase', name: 'Yes King', filename: 'YesKingBase.png', rarity: 'common' },
-    { id: 'ZenBase', name: 'Zen', filename: 'ZenBase.png', rarity: 'common' }
+    { id: 'ZenBase', name: 'Zen', filename: 'ZenBase.png', rarity: 'common' },
+    // New Epic Camo
+    { id: 'PurpleHaze', name: 'Purple Haze', filename: 'PurpleHaze.png', rarity: 'epic' },
+    { id: 'ArchibaldSmithBase', name: 'Archibald Smith', filename: 'ArchibaldSmithBase.png', rarity: 'epic' },
+    { id: 'BanishedKnightBase', name: 'Banished Knight', filename: 'BanishedKnightBase.png', rarity: 'epic' },
+    { id: 'CursedLordBase', name: 'Cursed Lord', filename: 'CursedLordBase.png', rarity: 'epic' },
+    { id: 'FallenAngelBase', name: 'Fallen Angel', filename: 'FallenAngelBase.png', rarity: 'epic' },
+    { id: 'HeroOfTimeBase', name: 'Hero of Time', filename: 'HeroOfTimeBase.png', rarity: 'epic' },
+    { id: 'HolyLightBase', name: 'Holy Light', filename: 'HolyLightBase.png', rarity: 'epic' },
+    { id: 'MetalManBase', name: 'Metal Man', filename: 'MetalManBase.png', rarity: 'epic' },
+    { id: 'RipVanWinkleBase', name: 'Rip Van Winkle', filename: 'RipVanWinkleBase.png', rarity: 'epic' },
+    { id: 'StuntManBase', name: 'Stunt Man', filename: 'StuntManBase.png', rarity: 'epic' },
+    { id: 'SynthWaveBase', name: 'Synth Wave', filename: 'SynthWaveBase.png', rarity: 'epic' },
+    { id: 'TacitusKilgoreBase', name: 'Tacitus Kilgore', filename: 'TacitusKilgoreBase.png', rarity: 'epic' },
+    { id: 'TheGifterBase', name: 'The Gifter', filename: 'TheGifterBase.png', rarity: 'epic' },
+    { id: 'TheSpireBase', name: 'The Spire', filename: 'TheSpireBase.png', rarity: 'epic' },
+    { id: 'TurtleHopperBase', name: 'Turtle Hopper', filename: 'TurtleHopperBase.png', rarity: 'epic' },
+    { id: 'WildBase', name: 'Wild', filename: 'WildBase.png', rarity: 'epic' },
+    // New Rare Camo
+    { id: 'ChessBase', name: 'Chess', filename: 'ChessBase.png', rarity: 'rare' },
+    { id: 'CopperBase', name: 'Copper', filename: 'CopperBase.png', rarity: 'rare' },
+    { id: 'CrafterBase', name: 'Crafter', filename: 'CrafterBase.png', rarity: 'rare' },
+    { id: 'DetectiveBase', name: 'Detective', filename: 'DetectiveBase.png', rarity: 'rare' },
+    { id: 'GangViolenceBase', name: 'Gang Violence', filename: 'GangViolenceBase.png', rarity: 'rare' },
+    { id: 'GreatJeansBase', name: 'Great Jeans', filename: 'GreatJeansBase.png', rarity: 'rare' },
+    { id: 'KysBase', name: 'KYS', filename: 'KysBase.png', rarity: 'rare' },
+    { id: 'LifeLineBase', name: 'Life Line', filename: 'LifeLineBase.png', rarity: 'rare' },
+    { id: 'TheDBase', name: 'The D', filename: 'TheDBase.png', rarity: 'rare' },
+    { id: 'ThermiteBase', name: 'Thermite', filename: 'ThermiteBase.png', rarity: 'rare' },
+    // New Ring Camo (Rare themed collection)
+    { id: 'BlackRingBase', name: 'Black Ring', filename: 'BlackRingBase.png', rarity: 'rare' },
+    { id: 'BlueRingBase', name: 'Blue Ring', filename: 'BlueRingBase.png', rarity: 'rare' },
+    { id: 'GreenRingBase', name: 'Green Ring', filename: 'GreenRingBase.png', rarity: 'rare' },
+    { id: 'OrangeRingBase', name: 'Orange Ring', filename: 'OrangeRingBase.png', rarity: 'rare' },
+    { id: 'PurpleRingBase', name: 'Purple Ring', filename: 'PurpleRingBase.png', rarity: 'rare' },
+    { id: 'RedRingBase', name: 'Red Ring', filename: 'RedRingBase.png', rarity: 'rare' },
+    { id: 'WhiteRingBase', name: 'White Ring', filename: 'WhiteRingBase.png', rarity: 'rare' },
+    { id: 'YellowRingBase', name: 'Yellow Ring', filename: 'YellowRingBase.png', rarity: 'rare' }
 ];
 
 // Check if a card is special (chainable cards)
@@ -9082,21 +9119,31 @@ async function showCamoSelection(card) {
     currentCamoCard = card;
     isApplyingToAll = false;
     selectedCamoId = getCardCamo(card.id); // Initialize with current camo
-    
+
     const modal = document.getElementById('camoSelectionModal');
     const grid = document.getElementById('camoSelectionGrid');
-    
+
     if (!modal || !grid) {
         console.error('Camo selection modal elements not found');
         return;
     }
-    
+
     // Clear grid
     grid.innerHTML = '';
-    
+
     // Refresh owned camos cache to get latest unlocks
     cachedOwnedCamos = null;
     const ownedCamos = await getOwnedCamos();
+
+    // Calculate owned camos count (excluding 'None')
+    const totalCamos = AVAILABLE_CAMOS.length - 1; // Exclude 'None'
+    const ownedCount = Object.keys(ownedCamos).filter(camoId => camoId !== 'None' && ownedCamos[camoId]).length;
+
+    // Update modal title with count
+    const headerTitle = modal.querySelector('.camo-selection-header h2');
+    if (headerTitle) {
+        headerTitle.textContent = `Select Camo (${ownedCount}/${totalCamos})`;
+    }
     
     // Get current camo for this card
     const currentCamo = getCardCamo(card.id);
