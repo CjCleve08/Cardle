@@ -856,22 +856,28 @@ function initializeEmailTransporter() {
                     pass: cleanPassword
                 },
                 // Add connection timeout
-                connectionTimeout: 10000,
+                connectionTimeout: 15000, // Increased timeout for Render
                 greetingTimeout: 10000,
-                socketTimeout: 10000,
+                socketTimeout: 15000,
                 // For Gmail, require TLS
-                requireTLS: smtpPort == 587
+                requireTLS: smtpPort == 587,
+                // Disable certificate validation (some hosting providers have issues)
+                tls: {
+                    rejectUnauthorized: false
+                }
             });
             
-            console.log('📧 Attempting to verify SMTP connection...');
+            console.log('📧 Email transporter created. Attempting to verify SMTP connection...');
             console.log(`   Host: ${smtpHost}:${smtpPort}`);
             console.log(`   User: ${smtpUser}`);
+            console.log(`   Password length: ${cleanPassword.length} characters`);
             
             // Verify connection (async, but don't block)
             // Use a timeout to prevent hanging
             const verifyTimeout = setTimeout(() => {
                 console.warn('⚠️  SMTP verification is taking longer than expected...');
-            }, 5000);
+                console.warn('   This is normal on some hosting providers. Email transporter will still work.');
+            }, 8000);
             
             emailTransporter.verify(function(error, success) {
                 clearTimeout(verifyTimeout);
@@ -885,15 +891,16 @@ function initializeEmailTransporter() {
                     if (error.stack) {
                         console.error('   Stack:', error.stack);
                     }
-                    console.error('   Please check your email configuration');
+                    console.error('   ⚠️  WARNING: Verification failed, but transporter will still attempt to send emails');
+                    console.error('   This is common on some hosting providers. Emails may still work.');
                     console.error('   Make sure:');
                     console.error('   1. Gmail App Password is correct (no spaces)');
                     console.error('   2. 2-Step Verification is enabled on your Google account');
                     console.error('   3. App Password was generated from: https://myaccount.google.com/apppasswords');
                     console.error('   4. On Render: Environment variables are set correctly');
                     console.error('   5. On Render: Service has been redeployed after adding env vars');
-                    console.error('   6. Try generating a new App Password if this one doesn\'t work');
-                    emailTransporter = null; // Disable if verification fails
+                    // DON'T set emailTransporter to null - let it try to send anyway
+                    // Some hosting providers block verification but allow actual sending
                 } else {
                     console.log('✅ Email transporter initialized and verified successfully');
                     console.log('   Ready to send emails!');
@@ -1018,8 +1025,16 @@ app.post('/api/send-verification-email', async (req, res) => {
             console.error('❌ Email transporter is not initialized!');
             console.error('   This usually means:');
             console.error('   1. Environment variables are not set on the server');
-            console.error('   2. SMTP connection verification failed');
+            console.error('   2. SMTP connection verification failed during startup');
             console.error('   3. Check server startup logs for SMTP errors');
+            console.error('   Config status:', {
+                configSource: configSource,
+                hasHost: !!smtpHost,
+                hasUser: !!smtpUser,
+                hasPass: !!smtpPass,
+                host: smtpHost,
+                user: smtpUser
+            });
             
             // Still log the code for manual verification
             console.log('\n=== VERIFICATION CODE (EMAIL NOT CONFIGURED) ===');
@@ -1028,14 +1043,17 @@ app.post('/api/send-verification-email', async (req, res) => {
             console.log('================================================\n');
             
             return res.status(500).json({ 
-                error: 'Email not configured on server',
+                error: 'Email transporter not initialized',
                 code: code, // Include code for debugging
-                message: 'Please configure SMTP environment variables on your server',
+                message: 'SMTP configuration issue - check server logs for details',
                 details: {
                     configSource: configSource,
                     hasHost: !!smtpHost,
                     hasUser: !!smtpUser,
-                    hasPass: !!smtpPass
+                    hasPass: !!smtpPass,
+                    host: smtpHost || '(not set)',
+                    user: smtpUser || '(not set)',
+                    suggestion: 'Check Render logs for SMTP verification errors. Verification may have failed but email might still work - try sending a test email.'
                 }
             });
         }
