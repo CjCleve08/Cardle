@@ -864,21 +864,35 @@ function initializeEmailTransporter() {
             });
             
             console.log('📧 Attempting to verify SMTP connection...');
+            console.log(`   Host: ${smtpHost}:${smtpPort}`);
+            console.log(`   User: ${smtpUser}`);
             
             // Verify connection (async, but don't block)
+            // Use a timeout to prevent hanging
+            const verifyTimeout = setTimeout(() => {
+                console.warn('⚠️  SMTP verification is taking longer than expected...');
+            }, 5000);
+            
             emailTransporter.verify(function(error, success) {
+                clearTimeout(verifyTimeout);
+                
                 if (error) {
                     console.error('❌ SMTP connection verification failed:', error);
                     console.error('   Error code:', error.code);
                     console.error('   Error command:', error.command);
                     console.error('   Error response:', error.response);
-                    console.error('   Full error:', JSON.stringify(error, null, 2));
-                    console.error('   Please check your email-config.js settings');
+                    console.error('   Error responseCode:', error.responseCode);
+                    if (error.stack) {
+                        console.error('   Stack:', error.stack);
+                    }
+                    console.error('   Please check your email configuration');
                     console.error('   Make sure:');
                     console.error('   1. Gmail App Password is correct (no spaces)');
                     console.error('   2. 2-Step Verification is enabled on your Google account');
                     console.error('   3. App Password was generated from: https://myaccount.google.com/apppasswords');
-                    console.error('   4. Try generating a new App Password if this one doesn\'t work');
+                    console.error('   4. On Render: Environment variables are set correctly');
+                    console.error('   5. On Render: Service has been redeployed after adding env vars');
+                    console.error('   6. Try generating a new App Password if this one doesn\'t work');
                     emailTransporter = null; // Disable if verification fails
                 } else {
                     console.log('✅ Email transporter initialized and verified successfully');
@@ -907,14 +921,73 @@ app.get('/api/test-email-config', (req, res) => {
     const smtpPass = emailConfig?.pass || process.env.SMTP_PASS || '';
     const isConfigured = !!(smtpHost && smtpUser && smtpPass);
     
+    // Check all environment variables
+    const envVars = {
+        SMTP_HOST: process.env.SMTP_HOST || '(not set)',
+        SMTP_PORT: process.env.SMTP_PORT || '(not set)',
+        SMTP_USER: process.env.SMTP_USER || '(not set)',
+        SMTP_PASS: process.env.SMTP_PASS ? '***' + process.env.SMTP_PASS.slice(-4) : '(not set)',
+        SMTP_FROM: process.env.SMTP_FROM || '(not set)'
+    };
+    
     res.json({
         configured: isConfigured,
         hasTransporter: !!emailTransporter,
+        configSource: emailConfig ? 'email-config.js' : (process.env.SMTP_HOST ? 'environment variables' : 'none'),
         host: smtpHost || '(not set)',
         port: smtpPort,
         user: smtpUser || '(not set)',
-        passSet: !!smtpPass
+        passSet: !!smtpPass,
+        from: emailConfig?.from || process.env.SMTP_FROM || smtpUser || '(not set)',
+        environmentVariables: envVars,
+        nodeEnv: process.env.NODE_ENV || '(not set)',
+        message: isConfigured 
+            ? (emailTransporter ? 'Email is configured and transporter is ready' : 'Email is configured but transporter verification may have failed - check server logs')
+            : 'Email is not configured - set environment variables on Render'
     });
+});
+
+// Test endpoint to send a test email
+app.post('/api/test-send-email', async (req, res) => {
+    if (!emailTransporter) {
+        return res.status(500).json({ 
+            error: 'Email transporter not initialized',
+            message: 'Check server logs for SMTP configuration errors'
+        });
+    }
+    
+    const { testEmail } = req.body;
+    if (!testEmail) {
+        return res.status(400).json({ error: 'testEmail parameter is required' });
+    }
+    
+    try {
+        const smtpUser = emailConfig?.user || process.env.SMTP_USER || '';
+        const fromAddress = emailConfig?.from || process.env.SMTP_FROM || smtpUser || 'noreply@cardle.com';
+        
+        const info = await emailTransporter.sendMail({
+            from: `"Cardle Test" <${fromAddress}>`,
+            to: testEmail,
+            subject: 'Test Email from Cardle Server',
+            text: 'This is a test email from your Cardle server. If you receive this, email is working correctly!',
+            html: '<p>This is a test email from your Cardle server. If you receive this, email is working correctly!</p>'
+        });
+        
+        res.json({ 
+            success: true, 
+            message: 'Test email sent successfully',
+            messageId: info.messageId,
+            response: info.response
+        });
+    } catch (error) {
+        console.error('Test email error:', error);
+        res.status(500).json({ 
+            error: 'Failed to send test email',
+            details: error.message,
+            code: error.code,
+            response: error.response
+        });
+    }
 });
 
 // API endpoint to send verification email
@@ -924,6 +997,47 @@ app.post('/api/send-verification-email', async (req, res) => {
         
         if (!email || !code) {
             return res.status(400).json({ error: 'Email and code are required' });
+        }
+        
+        // Log configuration status for debugging
+        const smtpHost = emailConfig?.host || process.env.SMTP_HOST || '';
+        const smtpUser = emailConfig?.user || process.env.SMTP_USER || '';
+        const smtpPass = emailConfig?.pass || process.env.SMTP_PASS || '';
+        const configSource = emailConfig ? 'email-config.js' : (process.env.SMTP_HOST ? 'environment variables' : 'none');
+        
+        console.log(`\n📧 Email send request received:`);
+        console.log(`   To: ${email}`);
+        console.log(`   Code: ${code}`);
+        console.log(`   Config Source: ${configSource}`);
+        console.log(`   SMTP Host: ${smtpHost || '(not set)'}`);
+        console.log(`   SMTP User: ${smtpUser || '(not set)'}`);
+        console.log(`   Has Password: ${!!smtpPass}`);
+        console.log(`   Email Transporter: ${emailTransporter ? 'initialized' : 'NOT initialized'}`);
+        
+        if (!emailTransporter) {
+            console.error('❌ Email transporter is not initialized!');
+            console.error('   This usually means:');
+            console.error('   1. Environment variables are not set on the server');
+            console.error('   2. SMTP connection verification failed');
+            console.error('   3. Check server startup logs for SMTP errors');
+            
+            // Still log the code for manual verification
+            console.log('\n=== VERIFICATION CODE (EMAIL NOT CONFIGURED) ===');
+            console.log(`To: ${email}`);
+            console.log(`Code: ${code}`);
+            console.log('================================================\n');
+            
+            return res.status(500).json({ 
+                error: 'Email not configured on server',
+                code: code, // Include code for debugging
+                message: 'Please configure SMTP environment variables on your server',
+                details: {
+                    configSource: configSource,
+                    hasHost: !!smtpHost,
+                    hasUser: !!smtpUser,
+                    hasPass: !!smtpPass
+                }
+            });
         }
         
         const emailSubject = 'Verify Your Cardle Account';

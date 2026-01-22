@@ -418,20 +418,49 @@ export SMTP_FROM=your-email@gmail.com
 If emails work locally but not on your server:
 
 1. **Check environment variables are set:**
-   - Visit `http://your-server/api/test-email-config` to see configuration status
-   - Or check server logs for "Email Configuration Check"
+   - Visit `https://your-server.onrender.com/api/test-email-config` to see configuration status
+   - This will show which environment variables are set and if the transporter is initialized
+   - Look for `"hasTransporter": false` - this means SMTP verification failed
 
-2. **Verify SMTP connection:**
-   - Check server logs for `❌ SMTP connection verification failed`
-   - Common issues: wrong password, firewall blocking port 587, or Gmail blocking the connection
+2. **Verify environment variables on Render:**
+   - Go to Render dashboard → Your Service → Environment tab
+   - Make sure ALL variables are set (no typos in variable names):
+     - `SMTP_HOST` (not `SMTP_HOSTS` or `SMTPHOST`)
+     - `SMTP_PORT` (not `SMTP_PORTS`)
+     - `SMTP_USER` (not `SMTP_USERS`)
+     - `SMTP_PASS` (not `SMTP_PASSWORD` or `SMTP_PASSWD`)
+     - `SMTP_FROM` (optional, defaults to SMTP_USER)
+   - **IMPORTANT:** After adding/changing variables, you MUST redeploy the service
 
-3. **Check server logs:**
-   - Look for `📧 Attempting to send verification email`
-   - Check for error messages with details
+3. **Check server logs on Render:**
+   - Go to Render dashboard → Your Service → Logs tab
+   - Look for these messages:
+     - `✅ Email transporter initialized and verified successfully` = Working!
+     - `❌ SMTP connection verification failed` = Check password/credentials
+     - `⚠️ Email transporter not configured` = Environment variables not set
+   - Look for `📧 Attempting to send verification email` when someone signs up
+   - Check for detailed error messages
 
-4. **Network/Firewall issues:**
+4. **Test email sending:**
+   - You can test by sending a POST request to `/api/test-send-email`:
+   ```bash
+   curl -X POST https://your-server.onrender.com/api/test-send-email \
+     -H "Content-Type: application/json" \
+     -d '{"testEmail": "your-email@gmail.com"}'
+   ```
+
+5. **Common issues:**
+   - **Environment variables not set:** Check Render dashboard → Environment tab
+   - **Service not redeployed:** After adding env vars, service must be redeployed
+   - **Wrong app password:** Generate a new Gmail App Password
+   - **Spaces in password:** Server automatically removes spaces, but double-check
+   - **Firewall blocking:** Some providers block SMTP - try port 465 (SSL) instead of 587
+   - **Gmail blocking:** Gmail may block connections from new IPs - wait a few minutes
+
+6. **Network/Firewall issues:**
    - Ensure your server can make outbound connections on port 587
    - Some hosting providers block SMTP ports - you may need to use a different port or email service
+   - If port 587 doesn't work, try port 465 with `secure: true`
 
 ## 9. Test Your Setup
 
