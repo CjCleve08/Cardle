@@ -9,4 +9,16 @@ services:
         value: production
       - key: PORT
         value: 10000
+      # Email configuration (required for email verification and password reset)
+      # Set these in Render dashboard: Service → Environment → Add Environment Variable
+      # - key: SMTP_HOST
+      #   value: smtp.gmail.com
+      # - key: SMTP_PORT
+      #   value: 587
+      # - key: SMTP_USER
+      #   value: your-email@gmail.com
+      # - key: SMTP_PASS
+      #   value: your-app-password
+      # - key: SMTP_FROM
+      #   value: your-email@gmail.com
 

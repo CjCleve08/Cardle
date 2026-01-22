@@ -331,39 +331,107 @@ Firestore may require composite indexes for certain queries. If you see an error
 
 The game now includes email verification and password reset functionality. To enable email sending:
 
-### Option 1: Using Environment Variables (Recommended)
+### For Local Development
 
-Set these environment variables before starting your server:
+Create `email-config.js` file (already in `.gitignore` for security) with your SMTP settings:
+
+```javascript
+module.exports = {
+    host: 'smtp.gmail.com',
+    port: 587,
+    user: 'your-email@gmail.com',
+    pass: 'your-app-password',
+    from: 'your-email@gmail.com'
+};
+```
+
+### For Production/Server Deployment
+
+**IMPORTANT:** The `email-config.js` file is gitignored and won't be on your server. You **must** use environment variables.
+
+Set these environment variables on your server before starting:
 
 ```bash
 export SMTP_HOST=smtp.gmail.com
 export SMTP_PORT=587
 export SMTP_USER=your-email@gmail.com
 export SMTP_PASS=your-app-password
-export SMTP_FROM=noreply@cardle.com
+export SMTP_FROM=your-email@gmail.com
+```
+
+**For different hosting platforms:**
+
+**Render.com:**
+1. Go to your Render dashboard
+2. Select your service (e.g., "cardle")
+3. Go to **Environment** tab
+4. Click **Add Environment Variable** for each:
+   - `SMTP_HOST` = `smtp.gmail.com`
+   - `SMTP_PORT` = `587`
+   - `SMTP_USER` = `your-email@gmail.com`
+   - `SMTP_PASS` = `your-app-password` (Gmail App Password, no spaces)
+   - `SMTP_FROM` = `your-email@gmail.com`
+5. After adding all variables, **redeploy your service** for changes to take effect
+6. Check your service logs to verify: `✅ Email transporter initialized and verified successfully`
+
+**Heroku:**
+```bash
+heroku config:set SMTP_HOST=smtp.gmail.com
+heroku config:set SMTP_PORT=587
+heroku config:set SMTP_USER=your-email@gmail.com
+heroku config:set SMTP_PASS=your-app-password
+heroku config:set SMTP_FROM=your-email@gmail.com
+```
+
+**DigitalOcean/VPS:**
+Add to your `.env` file or export in your startup script:
+```bash
+export SMTP_HOST=smtp.gmail.com
+export SMTP_PORT=587
+export SMTP_USER=your-email@gmail.com
+export SMTP_PASS=your-app-password
+export SMTP_FROM=your-email@gmail.com
 ```
 
 **For Gmail:**
 1. Enable 2-Step Verification on your Google account
 2. Generate an App Password: [Google App Passwords](https://myaccount.google.com/apppasswords)
 3. Use the generated app password (not your regular password) for `SMTP_PASS`
+4. Remove any spaces from the app password
 
 **For other email providers:**
 - Check your email provider's SMTP settings
 - Common ports: 587 (TLS), 465 (SSL), 25 (not recommended)
 
-### Option 2: Update server.js Directly
-
-You can also hardcode the values in `server.js` in the `initializeEmailTransporter()` function, though environment variables are more secure.
-
 ### Testing Email
 
 1. Start your server: `npm start`
-2. Try signing up with a new account
-3. Check your email for the verification code
-4. If email is not configured, the code will be logged to the server console
+2. Check the console for: `✅ Email transporter initialized and verified successfully`
+3. Try signing up with a new account
+4. Check your email (and spam folder) for the verification code
+5. If email is not configured, the code will be logged to the server console
 
 **Note:** Without email configuration, verification codes will be logged to the server console. This is fine for development but not recommended for production.
+
+### Troubleshooting Email on Production
+
+If emails work locally but not on your server:
+
+1. **Check environment variables are set:**
+   - Visit `http://your-server/api/test-email-config` to see configuration status
+   - Or check server logs for "Email Configuration Check"
+
+2. **Verify SMTP connection:**
+   - Check server logs for `❌ SMTP connection verification failed`
+   - Common issues: wrong password, firewall blocking port 587, or Gmail blocking the connection
+
+3. **Check server logs:**
+   - Look for `📧 Attempting to send verification email`
+   - Check for error messages with details
+
+4. **Network/Firewall issues:**
+   - Ensure your server can make outbound connections on port 587
+   - Some hosting providers block SMTP ports - you may need to use a different port or email service
 
 ## 9. Test Your Setup
 

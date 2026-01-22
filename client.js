@@ -3662,6 +3662,12 @@ const ScreenManager = {
             if (typeof soundManager !== 'undefined') {
                 soundManager.stopBackgroundMusic();
             }
+            // CRITICAL: Clear all game effects when leaving game screen
+            removeDrunkEffect();
+            if (gameState) {
+                gameState.activeEffects = [];
+                console.log('Cleared all active effects when leaving game screen');
+            }
         }
         
         // Stop lobby music if leaving lobby (but not if going to game or vs, game/vs will handle their own music)
@@ -4016,6 +4022,10 @@ socket.on('gameStarted', (data) => {
     // Remove yourPlayerId from data before storing in gameState, but preserve isTutorial
     const { yourPlayerId, ...gameStateData } = data;
     
+    // CRITICAL: Clear all game effects when starting a new game
+    // Remove drunk effect (moonshine) - ensure it's cleared before new game
+    removeDrunkEffect();
+    
     // CRITICAL: Ensure activeEffects is always properly initialized for new games
     // This prevents cards from being grayed out due to stale cardLock effects from previous games
     if (!gameStateData.activeEffects || !Array.isArray(gameStateData.activeEffects)) {
@@ -4024,10 +4034,9 @@ socket.on('gameStarted', (data) => {
         // If server sent activeEffects with content, log a warning but trust the server
         // (shouldn't happen for new games, but if it does, we want to know)
         console.warn('New game has activeEffects - this should be empty for new games:', gameStateData.activeEffects);
-        // However, for safety, clear any cardLock effects targeting currentPlayer that might be stale
-        gameStateData.activeEffects = gameStateData.activeEffects.filter(e => 
-            !(e && e.type === 'cardLock' && e.target === currentPlayer)
-        );
+        // However, for safety, clear ALL effects for new game (server should send empty array)
+        gameStateData.activeEffects = [];
+        console.log('Cleared all active effects from gameStarted event');
     }
     
     gameState = gameStateData;
@@ -5505,6 +5514,16 @@ async function fetchWordDefinition(word) {
 socket.on('gameOver', (data) => {
     console.log('gameOver event received:', data);
     
+    // CRITICAL: Clear all game effects when game ends
+    // Remove drunk effect (moonshine)
+    removeDrunkEffect();
+    
+    // Clear all active effects from gameState
+    if (gameState) {
+        gameState.activeEffects = [];
+        console.log('Cleared all active effects on game over');
+    }
+    
     // CRITICAL: Skip stats updates for spectators - they should use the spectator game over screen
     if (window.isSpectator && window.spectatorGameId) {
         console.log('Spectator detected in gameOver - skipping main handler, using spectator handler');
@@ -6087,19 +6106,15 @@ async function initializeGame(data) {
     window.handBlackHandFlippedState = false; // Clear black hand flip state
     selectedCard = null; // Clear any selected card
     
-    // Ensure activeEffects is properly initialized (double-check)
+    // CRITICAL: Clear all game effects when starting a new game
+    // Remove drunk effect (moonshine) - ensure it's cleared
+    removeDrunkEffect();
+    
+    // Ensure activeEffects is properly initialized and cleared
     if (gameState) {
-        if (!gameState.activeEffects || !Array.isArray(gameState.activeEffects)) {
-            gameState.activeEffects = [];
-        }
-        // Safety: Remove any cardLock effects targeting currentPlayer (shouldn't exist in new game)
-        const oldLength = gameState.activeEffects.length;
-        gameState.activeEffects = gameState.activeEffects.filter(e => 
-            !(e && e.type === 'cardLock' && e.target === currentPlayer)
-        );
-        if (gameState.activeEffects.length !== oldLength) {
-            console.warn('Removed stale cardLock effects from new game initialization:', oldLength - gameState.activeEffects.length);
-        }
+        // Clear all active effects for new game
+        gameState.activeEffects = [];
+        console.log('Cleared all active effects for new game initialization');
     }
     
     // Reset card hand and initialize deck pool for new game
@@ -13180,6 +13195,13 @@ socket.on('cardPlayed', (data) => {
 socket.on('gameOver', (data) => {
     if (window.isSpectator && window.spectatorGameId) {
         console.log('Spectator game over event received:', data);
+        
+        // CRITICAL: Clear all game effects when spectator game ends
+        removeDrunkEffect();
+        if (gameState) {
+            gameState.activeEffects = [];
+            console.log('Cleared all active effects on spectator game over');
+        }
         
         // Exit spectator mode first (but keep spectator flag temporarily for display)
         const wasSpectating = window.isSpectator;

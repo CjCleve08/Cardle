@@ -10,8 +10,10 @@ const nodemailer = require('nodemailer');
 let emailConfig = null;
 try {
     emailConfig = require('./email-config.js');
+    console.log('✅ Loaded email configuration from email-config.js');
 } catch (error) {
-    console.log('email-config.js not found, using environment variables or defaults');
+    console.log('ℹ️  email-config.js not found (this is normal on production servers)');
+    console.log('   Using environment variables: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM');
 }
 
 const app = express();
@@ -818,29 +820,50 @@ function initializeEmailTransporter() {
     const smtpPass = emailConfig?.pass || process.env.SMTP_PASS || '';
     const smtpFrom = emailConfig?.from || process.env.SMTP_FROM || smtpUser || 'noreply@cardle.com';
     
+    // Determine source of configuration
+    const configSource = emailConfig ? 'email-config.js' : (process.env.SMTP_HOST ? 'environment variables' : 'none');
+    
     console.log('\n=== Email Configuration Check ===');
+    console.log(`Configuration Source: ${configSource}`);
     console.log(`SMTP Host: ${smtpHost || '(not set)'}`);
     console.log(`SMTP Port: ${smtpPort}`);
     console.log(`SMTP User: ${smtpUser || '(not set)'}`);
     console.log(`SMTP Pass: ${smtpPass ? '***' + smtpPass.slice(-4) : '(not set)'}`);
     console.log(`From Address: ${smtpFrom}`);
+    
+    if (!smtpHost || !smtpUser || !smtpPass) {
+        console.log('\n⚠️  Email not configured! To enable email sending on production:');
+        console.log('   Set these environment variables:');
+        console.log('   - SMTP_HOST=smtp.gmail.com');
+        console.log('   - SMTP_PORT=587');
+        console.log('   - SMTP_USER=your-email@gmail.com');
+        console.log('   - SMTP_PASS=your-app-password');
+        console.log('   - SMTP_FROM=your-email@gmail.com');
+    }
     console.log('================================\n');
     
     if (smtpHost && smtpUser && smtpPass) {
         try {
+            // Remove spaces from app password (Gmail app passwords sometimes have spaces in the UI but shouldn't in code)
+            const cleanPassword = smtpPass.replace(/\s+/g, '');
+            
             emailTransporter = nodemailer.createTransport({
                 host: smtpHost,
                 port: parseInt(smtpPort),
                 secure: smtpPort == 465, // true for 465, false for other ports
                 auth: {
                     user: smtpUser,
-                    pass: smtpPass
+                    pass: cleanPassword
                 },
                 // Add connection timeout
                 connectionTimeout: 10000,
                 greetingTimeout: 10000,
-                socketTimeout: 10000
+                socketTimeout: 10000,
+                // For Gmail, require TLS
+                requireTLS: smtpPort == 587
             });
+            
+            console.log('📧 Attempting to verify SMTP connection...');
             
             // Verify connection (async, but don't block)
             emailTransporter.verify(function(error, success) {
@@ -848,11 +871,14 @@ function initializeEmailTransporter() {
                     console.error('❌ SMTP connection verification failed:', error);
                     console.error('   Error code:', error.code);
                     console.error('   Error command:', error.command);
+                    console.error('   Error response:', error.response);
+                    console.error('   Full error:', JSON.stringify(error, null, 2));
                     console.error('   Please check your email-config.js settings');
                     console.error('   Make sure:');
-                    console.error('   1. Gmail App Password is correct');
+                    console.error('   1. Gmail App Password is correct (no spaces)');
                     console.error('   2. 2-Step Verification is enabled on your Google account');
                     console.error('   3. App Password was generated from: https://myaccount.google.com/apppasswords');
+                    console.error('   4. Try generating a new App Password if this one doesn\'t work');
                     emailTransporter = null; // Disable if verification fails
                 } else {
                     console.log('✅ Email transporter initialized and verified successfully');
