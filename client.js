@@ -14639,7 +14639,7 @@ async function loadAdminActivityLog() {
     }
     
     logSection.style.display = 'block';
-    logList.innerHTML = '<div class="admin-loading">Loading activity log...</div>';
+    logList.innerHTML = '<div class="admin-loading">Loading all activity logs...</div>';
     
     if (!window.firebaseDb) {
         logList.innerHTML = '<div class="admin-error">Firebase not available</div>';
@@ -14647,29 +14647,60 @@ async function loadAdminActivityLog() {
     }
     
     try {
-        // Load recent activity (last 50 entries)
-        const logsQuery = window.firebaseDb.collection('adminActivityLogs')
-            .orderBy('timestamp', 'desc')
-            .limit(50);
+        // Load ALL activity logs (no limit)
+        // Firestore has a limit per query, so we need to paginate to get all
+        const logs = [];
+        let lastDoc = null;
+        let hasMore = true;
+        const batchSize = 100; // Firestore limit is 1000, but we'll use 100 per batch
         
-        const logsSnapshot = await logsQuery.get();
+        console.log('Loading all admin activity logs...');
         
-        if (logsSnapshot.empty) {
+        while (hasMore) {
+            let logsQuery = window.firebaseDb.collection('adminActivityLogs')
+                .orderBy('timestamp', 'desc')
+                .limit(batchSize);
+            
+            // If we have a last document, start from there (pagination)
+            if (lastDoc) {
+                logsQuery = logsQuery.startAfter(lastDoc);
+            }
+            
+            const logsSnapshot = await logsQuery.get();
+            
+            if (logsSnapshot.empty) {
+                hasMore = false;
+                break;
+            }
+            
+            logsSnapshot.forEach(doc => {
+                const data = doc.data();
+                logs.push({
+                    id: doc.id,
+                    ...data
+                });
+                lastDoc = doc;
+            });
+            
+            // If we got fewer than batchSize, we've reached the end
+            if (logsSnapshot.size < batchSize) {
+                hasMore = false;
+            }
+        }
+        
+        console.log(`Loaded ${logs.length} activity log entries`);
+        
+        if (logs.length === 0) {
             logList.innerHTML = '<div class="admin-empty">No admin activity yet</div>';
             return;
         }
         
-        const logs = [];
-        logsSnapshot.forEach(doc => {
-            const data = doc.data();
-            logs.push({
-                id: doc.id,
-                ...data
-            });
-        });
+        // Render logs (show count at top)
+        const logCount = `<div class="admin-activity-log-count" style="padding: 12px; margin-bottom: 16px; background: rgba(106, 170, 100, 0.1); border-radius: 8px; border: 1px solid rgba(106, 170, 100, 0.3); color: #6aaa64; font-weight: 600;">
+            Total Activity Logs: ${logs.length}
+        </div>`;
         
-        // Render logs
-        logList.innerHTML = logs.map(log => {
+        logList.innerHTML = logCount + logs.map(log => {
             const timeAgo = formatTimeAgo(log.timestamp?.toDate?.() || new Date(log.timestamp || Date.now()));
             const actionText = getActionText(log.action);
             const changesText = formatChanges(log.changes);
