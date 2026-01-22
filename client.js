@@ -904,14 +904,25 @@ async function handleSignup() {
                 })
             });
             
+            const result = await response.json();
+            
             if (!response.ok) {
-                console.error('Failed to send verification email');
-                showAuthError('signupError', 'Failed to send verification email. Please try again.');
+                console.error('Failed to send verification email:', result);
+                // If server returned the code, show it to user for debugging
+                if (result.code) {
+                    console.log('Verification code (email failed):', result.code);
+                    showAuthError('signupError', `Failed to send email. Check server console for code: ${result.code}`);
+                } else {
+                    showAuthError('signupError', 'Failed to send verification email. Please check your email settings and try again.');
+                }
                 return;
             }
+            
+            // Log success
+            console.log('Verification email request sent:', result);
         } catch (error) {
             console.error('Error sending verification email:', error);
-            showAuthError('signupError', 'Failed to send verification email. Please try again.');
+            showAuthError('signupError', 'Failed to send verification email. Please check your connection and try again.');
             return;
         }
         

@@ -842,14 +842,21 @@ function initializeEmailTransporter() {
                 socketTimeout: 10000
             });
             
-            // Verify connection
+            // Verify connection (async, but don't block)
             emailTransporter.verify(function(error, success) {
                 if (error) {
                     console.error('❌ SMTP connection verification failed:', error);
+                    console.error('   Error code:', error.code);
+                    console.error('   Error command:', error.command);
                     console.error('   Please check your email-config.js settings');
+                    console.error('   Make sure:');
+                    console.error('   1. Gmail App Password is correct');
+                    console.error('   2. 2-Step Verification is enabled on your Google account');
+                    console.error('   3. App Password was generated from: https://myaccount.google.com/apppasswords');
                     emailTransporter = null; // Disable if verification fails
                 } else {
                     console.log('✅ Email transporter initialized and verified successfully');
+                    console.log('   Ready to send emails!');
                 }
             });
         } catch (error) {
@@ -949,10 +956,17 @@ If you didn't create an account, please ignore this email.
         
         if (emailTransporter) {
             // Send email via SMTP
-            const fromAddress = emailConfig?.from || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@cardle.com';
+            // For Gmail, the "from" address must match the authenticated user
+            const smtpUser = emailConfig?.user || process.env.SMTP_USER || '';
+            const fromAddress = emailConfig?.from || process.env.SMTP_FROM || smtpUser || 'noreply@cardle.com';
+            
+            console.log(`📧 Attempting to send verification email to ${email}`);
+            console.log(`   From: ${fromAddress}`);
+            console.log(`   Code: ${code}`);
+            
             try {
                 const info = await emailTransporter.sendMail({
-                    from: fromAddress,
+                    from: `"Cardle" <${fromAddress}>`, // Use name and email format
                     to: email,
                     subject: emailSubject,
                     text: emailText,
@@ -960,21 +974,28 @@ If you didn't create an account, please ignore this email.
                 });
                 console.log(`✅ Verification email sent successfully to ${email}`);
                 console.log(`   Message ID: ${info.messageId}`);
+                console.log(`   Response: ${info.response || 'N/A'}`);
                 console.log(`   Verification Code: ${code}`);
             } catch (emailError) {
                 console.error('❌ Error sending email:', emailError);
-                console.error('   Error details:', {
-                    code: emailError.code,
-                    command: emailError.command,
-                    response: emailError.response,
-                    responseCode: emailError.responseCode
-                });
+                console.error('   Error code:', emailError.code);
+                console.error('   Error command:', emailError.command);
+                console.error('   Error response:', emailError.response);
+                console.error('   Error responseCode:', emailError.responseCode);
+                console.error('   Full error:', JSON.stringify(emailError, null, 2));
+                
                 // Still log the code so user can verify manually
-                console.log('\n=== VERIFICATION CODE (EMAIL FAILED) ===');
+                console.log('\n=== VERIFICATION CODE (EMAIL FAILED - CHECK CODE BELOW) ===');
                 console.log(`To: ${email}`);
                 console.log(`Code: ${code}`);
-                console.log('==========================================\n');
-                throw emailError; // Re-throw to be caught by outer catch
+                console.log('===========================================================\n');
+                
+                // Return error but don't throw - let the request complete
+                return res.status(500).json({ 
+                    error: 'Failed to send verification email',
+                    code: code, // Include code in response for debugging
+                    details: emailError.message 
+                });
             }
         } else {
             // Log to console if email is not configured
@@ -983,6 +1004,13 @@ If you didn't create an account, please ignore this email.
             console.log(`Subject: ${emailSubject}`);
             console.log(`Code: ${code}`);
             console.log('===========================================================\n');
+            
+            // Still return success but include the code
+            return res.json({ 
+                success: true, 
+                message: 'Verification code generated (email not configured - check server console)',
+                code: code // Include code for development
+            });
         }
         
         res.json({ success: true, message: 'Verification email sent' });
