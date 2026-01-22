@@ -756,6 +756,37 @@ header h1 {
     margin: 0;
 }
 
+.auth-success {
+    padding: 10px 14px;
+    background: rgba(40, 167, 69, 0.1);
+    border: 1px solid rgba(40, 167, 69, 0.3);
+    border-radius: 8px;
+    color: #28a745;
+    font-size: 0.8125rem;
+    text-align: left;
+    animation: fadeIn 0.3s ease-in;
+    margin: 0;
+}
+
+.forgot-password-link {
+    text-align: right;
+    margin-top: -8px;
+    margin-bottom: 4px;
+}
+
+.link-text {
+    color: #6aaa64;
+    text-decoration: none;
+    font-size: 0.8125rem;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.link-text:hover {
+    color: #8bc34a;
+    text-decoration: underline;
+}
+
 .auth-divider {
     display: flex;
     align-items: center;

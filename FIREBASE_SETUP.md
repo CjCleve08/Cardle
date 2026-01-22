@@ -123,9 +123,14 @@ service cloud.firestore {
     }
     
     // Users can read any user document (for friend search), but only write their own
+    // Creator can update banned status for any user
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == userId;
+      // Users can write their own document
+      allow create, update: if request.auth != null && request.auth.uid == userId;
+      // Creator can update banned status for any user
+      allow update: if isPermanentAdmin() && 
+                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['banned', 'bannedAt', 'bannedBy']);
     }
     
     // Users can read any stats document (for displaying opponent stats), but only write their own
@@ -261,6 +266,22 @@ service cloud.firestore {
     match /ownedCamos/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
+    
+    // Email Verification Codes collection - users can only read/write their own verification codes
+    match /emailVerificationCodes/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Pending Signups collection - stores signup data before account creation (no auth required for writes)
+    // Anyone can create (for signup), but only the server/admin should be able to read
+    match /pendingSignups/{email} {
+      // Allow anyone to create/update (for signup flow)
+      allow create, update: if true;
+      // Only allow reads by authenticated users (for verification)
+      allow read: if request.auth != null;
+      // Allow delete after account creation
+      allow delete: if request.auth != null;
+    }
   }
 }
 ```
@@ -306,12 +327,52 @@ Firestore may require composite indexes for certain queries. If you see an error
 - **Messages**: `conversationId` (Ascending), `createdAt` (Ascending)
 - **Gifted Packs**: `receiverId` (Ascending), `opened` (Ascending), `timestamp` (Descending)
 
-## 8. Test Your Setup
+## 8. Configure Email Sending (Optional but Recommended)
+
+The game now includes email verification and password reset functionality. To enable email sending:
+
+### Option 1: Using Environment Variables (Recommended)
+
+Set these environment variables before starting your server:
+
+```bash
+export SMTP_HOST=smtp.gmail.com
+export SMTP_PORT=587
+export SMTP_USER=your-email@gmail.com
+export SMTP_PASS=your-app-password
+export SMTP_FROM=noreply@cardle.com
+```
+
+**For Gmail:**
+1. Enable 2-Step Verification on your Google account
+2. Generate an App Password: [Google App Passwords](https://myaccount.google.com/apppasswords)
+3. Use the generated app password (not your regular password) for `SMTP_PASS`
+
+**For other email providers:**
+- Check your email provider's SMTP settings
+- Common ports: 587 (TLS), 465 (SSL), 25 (not recommended)
+
+### Option 2: Update server.js Directly
+
+You can also hardcode the values in `server.js` in the `initializeEmailTransporter()` function, though environment variables are more secure.
+
+### Testing Email
+
+1. Start your server: `npm start`
+2. Try signing up with a new account
+3. Check your email for the verification code
+4. If email is not configured, the code will be logged to the server console
+
+**Note:** Without email configuration, verification codes will be logged to the server console. This is fine for development but not recommended for production.
+
+## 9. Test Your Setup
 
 1. Open your game in a browser
 2. Try signing up/signing in with email/password or Google
 3. Check the browser console for any errors
 4. Verify that user data is being saved to Firestore
+5. Test the "Forgot Password" functionality
+6. Test email verification during signup
 
 ## Troubleshooting
 
@@ -334,3 +395,14 @@ Firestore may require composite indexes for certain queries. If you see an error
    - Ensure the security rules for messages are published
    - Check that `senderId` and `receiverId` fields are set correctly in message documents
    - Create a composite index for `conversationId` + `createdAt` if needed
+
+5. **Email verification not working**:
+   - Check that SMTP credentials are configured correctly
+   - Verify the email is not in spam folder
+   - Check server console for email sending errors
+   - If email is not configured, verification codes will be logged to the server console
+
+6. **Password reset email not sending**:
+   - Ensure SMTP is configured (see section 8)
+   - Check Firebase Authentication settings - password reset emails are sent by Firebase
+   - Verify the email address exists in your Firebase Authentication users

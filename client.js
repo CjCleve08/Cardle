@@ -569,6 +569,13 @@ function continueToAuth() {
         return;
     }
     
+    // Clear any pending verification data if user is not signed in (on fresh page load)
+    // This ensures we start at login screen, not verification screen
+    if (!window.firebaseAuth?.currentUser) {
+        sessionStorage.removeItem('pendingVerificationEmail');
+        sessionStorage.removeItem('pendingVerificationUid');
+    }
+    
     if (window.firebaseAuth) {
         window.firebaseAuth.onAuthStateChanged(async (user) => {
             if (user) {
@@ -597,6 +604,40 @@ function continueToAuth() {
                     // Sign them out
                     await window.firebaseAuth.signOut();
                     return;
+                }
+                
+                // Check if email is verified
+                if (window.firebaseDb) {
+                    try {
+                        const userDoc = await window.firebaseDb.collection('users').doc(user.uid).get();
+                        if (userDoc.exists) {
+                            const userData = userDoc.data();
+                            // If emailVerified is explicitly false AND we have pending verification in sessionStorage
+                            // (meaning they just signed up), show verification screen
+                            // Otherwise, if they're just loading the page, let them access the app
+                            const hasPendingVerification = sessionStorage.getItem('pendingVerificationUid') === user.uid;
+                            if (userData.emailVerified === false && hasPendingVerification) {
+                                // Store user info for verification screen
+                                sessionStorage.setItem('pendingVerificationEmail', user.email);
+                                sessionStorage.setItem('pendingVerificationUid', user.uid);
+                                
+                                // Show verification screen instead of lobby
+                                ScreenManager.show('emailVerification');
+                                document.getElementById('verificationCode').value = '';
+                                document.getElementById('verificationCode').focus();
+                                return;
+                            }
+                            // If email is not verified but no pending verification, clear it and let them through
+                            // (they can verify later or we can add a prompt in the lobby)
+                            if (userData.emailVerified === false && !hasPendingVerification) {
+                                // Clear any stale verification data
+                                sessionStorage.removeItem('pendingVerificationEmail');
+                                sessionStorage.removeItem('pendingVerificationUid');
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error checking email verification:', error);
+                    }
                 }
                 
                 // Clear stats cache when user changes
@@ -629,6 +670,11 @@ function continueToAuth() {
                 // Clear stats cache on logout
                 clearStatsCache();
                 clearDecksCache();
+                
+                // Clear any pending verification data when signing out
+                sessionStorage.removeItem('pendingVerificationEmail');
+                sessionStorage.removeItem('pendingVerificationUid');
+                
                 // User is signed out - show login
                 ScreenManager.show('login');
             }
@@ -687,6 +733,33 @@ async function handleLogin() {
     
     try {
         const userCredential = await window.firebaseAuth.signInWithEmailAndPassword(email, password);
+        
+        // Check if email is verified in Firestore
+        if (window.firebaseDb) {
+            const userDoc = await window.firebaseDb.collection('users').doc(userCredential.user.uid).get();
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                if (userData.emailVerified === false) {
+                    // Email not verified - sign out and show verification screen
+                    await window.firebaseAuth.signOut();
+                    showAuthError('loginError', 'Please verify your email before signing in. Check your inbox for the verification code.');
+                    
+                    // Store user info for verification
+                    sessionStorage.setItem('pendingVerificationEmail', email);
+                    sessionStorage.setItem('pendingVerificationUid', userCredential.user.uid);
+                    
+                    // Show verification screen
+                    setTimeout(() => {
+                        hideAuthErrors();
+                        ScreenManager.show('emailVerification');
+                        document.getElementById('verificationCode').value = '';
+                        document.getElementById('verificationCode').focus();
+                    }, 1000);
+                    return;
+                }
+            }
+        }
+        
         console.log('Login successful:', userCredential.user.email);
         // Auth state change will automatically show lobby
     } catch (error) {
@@ -698,6 +771,8 @@ async function handleLogin() {
             errorMessage = 'Incorrect password.';
         } else if (error.code === 'auth/invalid-email') {
             errorMessage = 'Invalid email address.';
+        } else if (error.code === 'auth/user-disabled') {
+            errorMessage = 'This account has been disabled.';
         }
         showAuthError('loginError', errorMessage);
     }
@@ -753,11 +828,6 @@ async function handleGoogleSignIn() {
 }
 
 async function handleSignup() {
-    if (!window.firebaseAuth) {
-        showAuthError('signupError', 'Firebase is not configured. Please set up Firebase first.');
-        return;
-    }
-    
     const name = document.getElementById('signupName').value.trim();
     const email = document.getElementById('signupEmail').value.trim();
     const password = document.getElementById('signupPassword').value;
@@ -779,35 +849,88 @@ async function handleSignup() {
         return;
     }
     
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        showAuthError('signupError', 'Please enter a valid email address');
+        return;
+    }
+    
+    // Note: We'll check if email exists when creating the account after verification
+    // This avoids unnecessary API calls and handles the check at the right time
+    
     try {
-        const userCredential = await window.firebaseAuth.createUserWithEmailAndPassword(email, password);
-        // Update user profile with display name
-        await userCredential.user.updateProfile({
-            displayName: name
-        });
+        // Generate verification code BEFORE creating account
+        const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = Date.now() + (15 * 60 * 1000); // 15 minutes from now
         
-        // Save user data to Firestore
+        // Store pending signup data in sessionStorage (temporarily)
+        // We'll create the account after email is verified
+        sessionStorage.setItem('pendingSignupName', name);
+        sessionStorage.setItem('pendingSignupEmail', email);
+        sessionStorage.setItem('pendingSignupPassword', password); // Note: This is temporary, will be cleared after account creation
+        sessionStorage.setItem('pendingVerificationCode', verificationCode);
+        sessionStorage.setItem('pendingVerificationExpires', expiresAt.toString());
+        
+        // Store verification code in Firestore (using email as document ID since we don't have UID yet)
         if (window.firebaseDb) {
-            await window.firebaseDb.collection('users').doc(userCredential.user.uid).set({
-                displayName: name,
-                email: email,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
+            try {
+                // Use a temporary collection for pre-signup verification
+                // Note: Password is stored in sessionStorage only, not in Firestore for security
+                await window.firebaseDb.collection('pendingSignups').doc(email).set({
+                    code: verificationCode,
+                    name: name,
+                    email: email,
+                    expiresAt: firebase.firestore.Timestamp.fromDate(new Date(expiresAt)),
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            } catch (firestoreError) {
+                console.error('Firestore error storing pending signup:', firestoreError);
+                // Continue anyway - we have sessionStorage backup
+            }
         }
         
-        console.log('Signup successful:', userCredential.user.email);
-        // Auth state change will automatically show lobby
+        // Send verification email with code via server
+        try {
+            const response = await fetch('/api/send-verification-email', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    email: email,
+                    code: verificationCode,
+                    name: name
+                })
+            });
+            
+            if (!response.ok) {
+                console.error('Failed to send verification email');
+                showAuthError('signupError', 'Failed to send verification email. Please try again.');
+                return;
+            }
+        } catch (error) {
+            console.error('Error sending verification email:', error);
+            showAuthError('signupError', 'Failed to send verification email. Please try again.');
+            return;
+        }
+        
+        // Show verification screen (account not created yet)
+        hideAuthErrors();
+        ScreenManager.show('emailVerification');
+        document.getElementById('verificationCode').value = '';
+        document.getElementById('verificationCode').focus();
+        
+        // Show a brief message about checking spam folder
+        const verificationError = document.getElementById('verificationError');
+        if (verificationError) {
+            verificationError.style.display = 'none';
+        }
+        
+        console.log('Verification code sent. Please verify your email before account is created.');
     } catch (error) {
         console.error('Signup error:', error);
-        let errorMessage = 'Failed to create account. Please try again.';
-        if (error.code === 'auth/email-already-in-use') {
-            errorMessage = 'An account with this email already exists.';
-        } else if (error.code === 'auth/invalid-email') {
-            errorMessage = 'Invalid email address.';
-        } else if (error.code === 'auth/weak-password') {
-            errorMessage = 'Password is too weak.';
-        }
-        showAuthError('signupError', errorMessage);
+        showAuthError('signupError', 'Failed to start signup process. Please try again.');
     }
 }
 
@@ -840,6 +963,384 @@ function handleContinueAsGuest() {
     
     // Show splash/credits then lobby
     showSplashThenLobby();
+}
+
+// Forgot Password Functions
+async function handleForgotPassword() {
+    if (!window.firebaseAuth) {
+        showAuthError('forgotPasswordError', 'Firebase is not configured. Please set up Firebase first.');
+        return;
+    }
+    
+    const email = document.getElementById('forgotPasswordEmail').value.trim();
+    const errorDiv = document.getElementById('forgotPasswordError');
+    const successDiv = document.getElementById('forgotPasswordSuccess');
+    
+    if (!email) {
+        showAuthError('forgotPasswordError', 'Please enter your email address');
+        return;
+    }
+    
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        showAuthError('forgotPasswordError', 'Please enter a valid email address');
+        return;
+    }
+    
+    // Hide error, show success
+    errorDiv.style.display = 'none';
+    successDiv.style.display = 'none';
+    
+    try {
+        // Send password reset email
+        await window.firebaseAuth.sendPasswordResetEmail(email);
+        
+        successDiv.innerHTML = 'Password reset email sent! Please check your inbox (and spam folder) and follow the instructions to reset your password.';
+        successDiv.style.display = 'block';
+        errorDiv.style.display = 'none';
+        
+        console.log('Password reset email sent to:', email);
+    } catch (error) {
+        console.error('Password reset error:', error);
+        let errorMessage = 'Failed to send reset email. Please try again.';
+        if (error.code === 'auth/user-not-found') {
+            errorMessage = 'No account found with this email address.';
+        } else if (error.code === 'auth/invalid-email') {
+            errorMessage = 'Invalid email address.';
+        } else if (error.code === 'auth/too-many-requests') {
+            errorMessage = 'Too many requests. Please try again later.';
+        }
+        showAuthError('forgotPasswordError', errorMessage);
+        successDiv.style.display = 'none';
+    }
+}
+
+// Email Verification Functions
+async function handleEmailVerification() {
+    if (!window.firebaseAuth || !window.firebaseDb) {
+        showAuthError('verificationError', 'Firebase is not configured. Please set up Firebase first.');
+        return;
+    }
+    
+    const code = document.getElementById('verificationCode').value.trim();
+    const errorDiv = document.getElementById('verificationError');
+    
+    if (!code || code.length !== 6) {
+        showAuthError('verificationError', 'Please enter the 6-digit verification code');
+        return;
+    }
+    
+    // Check if this is a pre-signup verification (account not created yet)
+    const pendingEmail = sessionStorage.getItem('pendingSignupEmail');
+    const pendingName = sessionStorage.getItem('pendingSignupName');
+    const pendingPassword = sessionStorage.getItem('pendingSignupPassword');
+    const storedCode = sessionStorage.getItem('pendingVerificationCode');
+    const expiresAt = parseInt(sessionStorage.getItem('pendingVerificationExpires') || '0');
+    
+    if (pendingEmail && pendingName && pendingPassword) {
+        // This is a pre-signup verification - verify code first, then create account
+        try {
+            // Check if code matches
+            if (storedCode !== code) {
+                // Also check Firestore in case sessionStorage was cleared
+                const pendingDoc = await window.firebaseDb.collection('pendingSignups').doc(pendingEmail).get();
+                if (pendingDoc.exists) {
+                    const pendingData = pendingDoc.data();
+                    let codeExpiresAt;
+                    if (pendingData.expiresAt && pendingData.expiresAt.toDate) {
+                        codeExpiresAt = pendingData.expiresAt.toDate().getTime();
+                    } else {
+                        codeExpiresAt = expiresAt;
+                    }
+                    
+                    // Check expiration
+                    if (Date.now() > codeExpiresAt) {
+                        showAuthError('verificationError', 'Verification code has expired. Please sign up again.');
+                        // Clean up
+                        sessionStorage.removeItem('pendingSignupName');
+                        sessionStorage.removeItem('pendingSignupEmail');
+                        sessionStorage.removeItem('pendingSignupPassword');
+                        sessionStorage.removeItem('pendingVerificationCode');
+                        sessionStorage.removeItem('pendingVerificationExpires');
+                        await window.firebaseDb.collection('pendingSignups').doc(pendingEmail).delete();
+                        return;
+                    }
+                    
+                    if (pendingData.code !== code) {
+                        showAuthError('verificationError', 'Invalid verification code. Please try again.');
+                        return;
+                    }
+                } else {
+                    // Check sessionStorage expiration
+                    if (Date.now() > expiresAt) {
+                        showAuthError('verificationError', 'Verification code has expired. Please sign up again.');
+                        // Clean up
+                        sessionStorage.removeItem('pendingSignupName');
+                        sessionStorage.removeItem('pendingSignupEmail');
+                        sessionStorage.removeItem('pendingSignupPassword');
+                        sessionStorage.removeItem('pendingVerificationCode');
+                        sessionStorage.removeItem('pendingVerificationExpires');
+                        return;
+                    }
+                    
+                    if (storedCode !== code) {
+                        showAuthError('verificationError', 'Invalid verification code. Please try again.');
+                        return;
+                    }
+                }
+            } else {
+                // Check expiration from sessionStorage
+                if (Date.now() > expiresAt) {
+                    showAuthError('verificationError', 'Verification code has expired. Please sign up again.');
+                    // Clean up
+                    sessionStorage.removeItem('pendingSignupName');
+                    sessionStorage.removeItem('pendingSignupEmail');
+                    sessionStorage.removeItem('pendingSignupPassword');
+                    sessionStorage.removeItem('pendingVerificationCode');
+                    sessionStorage.removeItem('pendingVerificationExpires');
+                    return;
+                }
+            }
+            
+            // Code is valid - NOW create the Firebase account
+            showAuthError('verificationError', ''); // Clear error
+            errorDiv.style.display = 'none';
+            
+            const successDiv = document.createElement('div');
+            successDiv.className = 'auth-success';
+            successDiv.textContent = 'Email verified! Creating your account...';
+            successDiv.style.display = 'block';
+            const form = document.querySelector('#emailVerification .auth-form');
+            form.insertBefore(successDiv, errorDiv);
+            
+            try {
+                // Create the Firebase account
+                const userCredential = await window.firebaseAuth.createUserWithEmailAndPassword(pendingEmail, pendingPassword);
+                
+                // Update user profile with display name
+                await userCredential.user.updateProfile({
+                    displayName: pendingName
+                });
+                
+                // Wait a moment for auth token to propagate
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Save user data to Firestore with emailVerified: true (since we just verified)
+                if (window.firebaseDb) {
+                    await window.firebaseDb.collection('users').doc(userCredential.user.uid).set({
+                        displayName: pendingName,
+                        email: pendingEmail,
+                        emailVerified: true,
+                        emailVerifiedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true });
+                }
+                
+                // Delete pending signup from Firestore
+                await window.firebaseDb.collection('pendingSignups').doc(pendingEmail).delete();
+                
+                // Clear session storage
+                sessionStorage.removeItem('pendingSignupName');
+                sessionStorage.removeItem('pendingSignupEmail');
+                sessionStorage.removeItem('pendingSignupPassword');
+                sessionStorage.removeItem('pendingVerificationCode');
+                sessionStorage.removeItem('pendingVerificationExpires');
+                
+                // Also send Firebase's built-in verification email (for good measure)
+                await userCredential.user.sendEmailVerification();
+                
+                successDiv.textContent = 'Account created successfully! Redirecting...';
+                
+                // Auth state change will automatically show lobby
+                console.log('Account created and email verified successfully');
+            } catch (createError) {
+                console.error('Error creating account:', createError);
+                let errorMessage = 'Failed to create account. Please try again.';
+                if (createError.code === 'auth/email-already-in-use') {
+                    errorMessage = 'An account with this email already exists. Please sign in instead.';
+                } else if (createError.code === 'auth/invalid-email') {
+                    errorMessage = 'Invalid email address.';
+                } else if (createError.code === 'auth/weak-password') {
+                    errorMessage = 'Password is too weak.';
+                }
+                showAuthError('verificationError', errorMessage);
+                successDiv.remove();
+            }
+        } catch (error) {
+            console.error('Verification error:', error);
+            showAuthError('verificationError', 'Failed to verify email. Please try again.');
+        }
+        return;
+    }
+    
+    // Legacy flow: User already has account, just verifying email
+    const pendingUid = sessionStorage.getItem('pendingVerificationUid');
+    if (!pendingEmail && !pendingUid) {
+        showAuthError('verificationError', 'Verification session expired. Please sign up again.');
+        return;
+    }
+    
+    try {
+        // Get verification code from Firestore
+        const codeDoc = await window.firebaseDb.collection('emailVerificationCodes').doc(pendingUid).get();
+        
+        if (!codeDoc.exists) {
+            showAuthError('verificationError', 'Verification code not found. Please request a new code.');
+            return;
+        }
+        
+        const codeData = codeDoc.data();
+        // Handle both Timestamp and Date objects
+        let expiresAt;
+        if (codeData.expiresAt && codeData.expiresAt.toDate) {
+            expiresAt = codeData.expiresAt.toDate();
+        } else if (codeData.expiresAt) {
+            expiresAt = new Date(codeData.expiresAt);
+        } else {
+            showAuthError('verificationError', 'Invalid verification code. Please request a new code.');
+            return;
+        }
+        
+        // Check if code is expired
+        if (new Date() > expiresAt) {
+            showAuthError('verificationError', 'Verification code has expired. Please request a new code.');
+            return;
+        }
+        
+        // Check if code matches
+        if (codeData.code !== code) {
+            showAuthError('verificationError', 'Invalid verification code. Please try again.');
+            return;
+        }
+        
+        // Code is valid - update user's emailVerified status
+        await window.firebaseDb.collection('users').doc(pendingUid).update({
+            emailVerified: true,
+            emailVerifiedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Delete the verification code
+        await window.firebaseDb.collection('emailVerificationCodes').doc(pendingUid).delete();
+        
+        // Clear session storage
+        sessionStorage.removeItem('pendingVerificationEmail');
+        sessionStorage.removeItem('pendingVerificationUid');
+        
+        // Clear error and show success
+        showAuthError('verificationError', ''); // Clear error
+        errorDiv.style.display = 'none';
+        
+        // Show success message
+        const successMessage = 'Email verified successfully! Redirecting...';
+        const successDiv = document.createElement('div');
+        successDiv.className = 'auth-success';
+        successDiv.textContent = successMessage;
+        successDiv.style.display = 'block';
+        const form = document.querySelector('#emailVerification .auth-form');
+        form.insertBefore(successDiv, errorDiv);
+        
+        // Auth state change will automatically show lobby
+        console.log('Email verified successfully');
+    } catch (error) {
+        console.error('Verification error:', error);
+        showAuthError('verificationError', 'Failed to verify email. Please try again.');
+    }
+}
+
+async function handleResendVerificationCode() {
+    const pendingEmail = sessionStorage.getItem('pendingSignupEmail') || sessionStorage.getItem('pendingVerificationEmail');
+    const pendingName = sessionStorage.getItem('pendingSignupName');
+    const pendingUid = sessionStorage.getItem('pendingVerificationUid');
+    
+    if (!pendingEmail) {
+        showAuthError('verificationError', 'Verification session expired. Please sign up again.');
+        return;
+    }
+    
+    try {
+        let name = pendingName || 'User';
+        
+        // If this is a pre-signup verification, get name from sessionStorage
+        // Otherwise, get from Firestore
+        if (!pendingName && pendingUid && window.firebaseDb) {
+            const userDoc = await window.firebaseDb.collection('users').doc(pendingUid).get();
+            if (userDoc.exists) {
+                const userData = userDoc.data();
+                name = userData.displayName || 'User';
+            }
+        }
+        
+        // Generate new verification code
+        const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = Date.now() + (15 * 60 * 1000); // 15 minutes from now
+        
+        // Update sessionStorage
+        sessionStorage.setItem('pendingVerificationCode', verificationCode);
+        sessionStorage.setItem('pendingVerificationExpires', expiresAt.toString());
+        
+        // Update in Firestore
+        if (window.firebaseDb) {
+            if (pendingUid) {
+                // Existing user - update emailVerificationCodes
+                await window.firebaseDb.collection('emailVerificationCodes').doc(pendingUid).set({
+                    code: verificationCode,
+                    email: pendingEmail,
+                    expiresAt: firebase.firestore.Timestamp.fromDate(new Date(expiresAt)),
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            } else {
+                // Pre-signup - update pendingSignups
+                await window.firebaseDb.collection('pendingSignups').doc(pendingEmail).update({
+                    code: verificationCode,
+                    expiresAt: firebase.firestore.Timestamp.fromDate(new Date(expiresAt)),
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        }
+        
+        // Send verification email with code via server
+        try {
+            const response = await fetch('/api/send-verification-email', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    email: pendingEmail,
+                    code: verificationCode,
+                    name: name
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to send verification email');
+            }
+            
+            showAuthError('verificationError', ''); // Clear error
+            document.getElementById('verificationError').style.display = 'none';
+            
+            // Show success message temporarily
+            const successDiv = document.createElement('div');
+            successDiv.className = 'auth-success';
+            successDiv.innerHTML = 'Verification code sent! Please check your email (and spam folder).';
+            successDiv.style.display = 'block';
+            const form = document.querySelector('#emailVerification .auth-form');
+            const errorDiv = document.getElementById('verificationError');
+            form.insertBefore(successDiv, errorDiv);
+            
+            setTimeout(() => {
+                successDiv.remove();
+            }, 5000);
+            
+        } catch (error) {
+            console.error('Error sending verification email:', error);
+            showAuthError('verificationError', 'Failed to send verification email. Please try again.');
+        }
+    } catch (error) {
+        console.error('Resend verification error:', error);
+        showAuthError('verificationError', 'Failed to resend verification code. Please try again.');
+    }
 }
 
 async function handleLogout() {
@@ -893,9 +1394,13 @@ function hideAuthErrors() {
     const loginError = document.getElementById('loginError');
     const signupError = document.getElementById('signupError');
     const guestNameError = document.getElementById('guestNameError');
+    const forgotPasswordError = document.getElementById('forgotPasswordError');
+    const verificationError = document.getElementById('verificationError');
     if (loginError) loginError.style.display = 'none';
     if (signupError) signupError.style.display = 'none';
     if (guestNameError) guestNameError.style.display = 'none';
+    if (forgotPasswordError) forgotPasswordError.style.display = 'none';
+    if (verificationError) verificationError.style.display = 'none';
 }
 
 // Add global error handler for all IMG elements to catch 429 errors before they bubble
@@ -3102,7 +3607,7 @@ const ScreenManager = {
     
     // Initialize all screens
     init() {
-        const screenIds = ['splash', 'credits', 'newCardAnnouncement', 'login', 'signup', 'guestName', 'lobby', 'gameSettings', 'customWordInput', 'waiting', 'vs', 'game', 'gameOver', 'spectatorGameOver'];
+        const screenIds = ['splash', 'credits', 'newCardAnnouncement', 'login', 'signup', 'guestName', 'forgotPassword', 'emailVerification', 'lobby', 'gameSettings', 'customWordInput', 'waiting', 'vs', 'game', 'gameOver', 'spectatorGameOver'];
         screenIds.forEach(id => {
             const element = document.getElementById(id);
             if (!element) {
@@ -10190,6 +10695,100 @@ document.addEventListener('DOMContentLoaded', () => {
         backToLoginFromGuestBtn.addEventListener('click', () => {
             hideAuthErrors();
             ScreenManager.show('login');
+        });
+    }
+    
+    // Forgot Password
+    const forgotPasswordLink = document.getElementById('forgotPasswordLink');
+    const sendResetEmailBtn = document.getElementById('sendResetEmailBtn');
+    const backToLoginFromForgotBtn = document.getElementById('backToLoginFromForgotBtn');
+    
+    if (forgotPasswordLink) {
+        forgotPasswordLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            hideAuthErrors();
+            ScreenManager.show('forgotPassword');
+            document.getElementById('forgotPasswordEmail').value = document.getElementById('loginEmail').value || '';
+            document.getElementById('forgotPasswordEmail').focus();
+        });
+    }
+    
+    if (sendResetEmailBtn) {
+        sendResetEmailBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleForgotPassword();
+        });
+    }
+    
+    // Enter key on forgot password form
+    const forgotPasswordEmail = document.getElementById('forgotPasswordEmail');
+    if (forgotPasswordEmail) {
+        forgotPasswordEmail.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleForgotPassword();
+            }
+        });
+    }
+    
+    if (backToLoginFromForgotBtn) {
+        backToLoginFromForgotBtn.addEventListener('click', () => {
+            hideAuthErrors();
+            document.getElementById('forgotPasswordError').style.display = 'none';
+            document.getElementById('forgotPasswordSuccess').style.display = 'none';
+            ScreenManager.show('login');
+        });
+    }
+    
+    // Email Verification
+    const verifyEmailBtn = document.getElementById('verifyEmailBtn');
+    const resendVerificationBtn = document.getElementById('resendVerificationBtn');
+    const backToSignupFromVerificationBtn = document.getElementById('backToSignupFromVerificationBtn');
+    
+    if (verifyEmailBtn) {
+        verifyEmailBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleEmailVerification();
+        });
+    }
+    
+    // Enter key on verification code input and restrict to numbers only
+    const verificationCode = document.getElementById('verificationCode');
+    if (verificationCode) {
+        // Only allow numbers
+        verificationCode.addEventListener('input', (e) => {
+            e.target.value = e.target.value.replace(/[^0-9]/g, '');
+        });
+        
+        verificationCode.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleEmailVerification();
+            } else if (!/[0-9]/.test(e.key) && e.key !== 'Backspace' && e.key !== 'Delete' && e.key !== 'Tab') {
+                e.preventDefault();
+            }
+        });
+    }
+    
+    if (resendVerificationBtn) {
+        resendVerificationBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleResendVerificationCode();
+        });
+    }
+    
+    if (backToSignupFromVerificationBtn) {
+        backToSignupFromVerificationBtn.addEventListener('click', () => {
+            hideAuthErrors();
+            // Clear all pending verification data
+            sessionStorage.removeItem('pendingVerificationEmail');
+            sessionStorage.removeItem('pendingVerificationUid');
+            sessionStorage.removeItem('pendingSignupName');
+            sessionStorage.removeItem('pendingSignupEmail');
+            sessionStorage.removeItem('pendingSignupPassword');
+            sessionStorage.removeItem('pendingVerificationCode');
+            sessionStorage.removeItem('pendingVerificationExpires');
+            ScreenManager.show('signup');
         });
     }
 });

@@ -4,8 +4,18 @@ const socketIo = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+const nodemailer = require('nodemailer');
+
+// Load email configuration
+let emailConfig = null;
+try {
+    emailConfig = require('./email-config.js');
+} catch (error) {
+    console.log('email-config.js not found, using environment variables or defaults');
+}
 
 const app = express();
+app.use(express.json()); // Parse JSON bodies
 const server = http.createServer(app);
 const io = socketIo(server);
 
@@ -791,6 +801,195 @@ app.get('/', (req, res) => {
     html = html.replace('<script src="client.js"></script>', configScript + '\n    <script src="client.js"></script>');
     
     res.send(html);
+});
+
+// Email configuration
+// To enable email sending, configure these environment variables or update the values below:
+// SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+// For Gmail: Use an App Password (not your regular password)
+// For other services: Check their SMTP settings
+let emailTransporter = null;
+
+function initializeEmailTransporter() {
+    // Priority: email-config.js > environment variables > defaults
+    const smtpHost = emailConfig?.host || process.env.SMTP_HOST || '';
+    const smtpPort = emailConfig?.port || process.env.SMTP_PORT || 587;
+    const smtpUser = emailConfig?.user || process.env.SMTP_USER || '';
+    const smtpPass = emailConfig?.pass || process.env.SMTP_PASS || '';
+    const smtpFrom = emailConfig?.from || process.env.SMTP_FROM || smtpUser || 'noreply@cardle.com';
+    
+    console.log('\n=== Email Configuration Check ===');
+    console.log(`SMTP Host: ${smtpHost || '(not set)'}`);
+    console.log(`SMTP Port: ${smtpPort}`);
+    console.log(`SMTP User: ${smtpUser || '(not set)'}`);
+    console.log(`SMTP Pass: ${smtpPass ? '***' + smtpPass.slice(-4) : '(not set)'}`);
+    console.log(`From Address: ${smtpFrom}`);
+    console.log('================================\n');
+    
+    if (smtpHost && smtpUser && smtpPass) {
+        try {
+            emailTransporter = nodemailer.createTransport({
+                host: smtpHost,
+                port: parseInt(smtpPort),
+                secure: smtpPort == 465, // true for 465, false for other ports
+                auth: {
+                    user: smtpUser,
+                    pass: smtpPass
+                },
+                // Add connection timeout
+                connectionTimeout: 10000,
+                greetingTimeout: 10000,
+                socketTimeout: 10000
+            });
+            
+            // Verify connection
+            emailTransporter.verify(function(error, success) {
+                if (error) {
+                    console.error('❌ SMTP connection verification failed:', error);
+                    console.error('   Please check your email-config.js settings');
+                    emailTransporter = null; // Disable if verification fails
+                } else {
+                    console.log('✅ Email transporter initialized and verified successfully');
+                }
+            });
+        } catch (error) {
+            console.error('❌ Error creating email transporter:', error);
+            emailTransporter = null;
+        }
+    } else {
+        console.log('⚠️  Email transporter not configured. Emails will be logged to console.');
+        console.log('To enable email sending:');
+        console.log('  1. Edit email-config.js and fill in your SMTP settings, OR');
+        console.log('  2. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS environment variables');
+    }
+}
+
+initializeEmailTransporter();
+
+// Test endpoint to check email configuration
+app.get('/api/test-email-config', (req, res) => {
+    const smtpHost = emailConfig?.host || process.env.SMTP_HOST || '';
+    const smtpPort = emailConfig?.port || process.env.SMTP_PORT || 587;
+    const smtpUser = emailConfig?.user || process.env.SMTP_USER || '';
+    const smtpPass = emailConfig?.pass || process.env.SMTP_PASS || '';
+    const isConfigured = !!(smtpHost && smtpUser && smtpPass);
+    
+    res.json({
+        configured: isConfigured,
+        hasTransporter: !!emailTransporter,
+        host: smtpHost || '(not set)',
+        port: smtpPort,
+        user: smtpUser || '(not set)',
+        passSet: !!smtpPass
+    });
+});
+
+// API endpoint to send verification email
+app.post('/api/send-verification-email', async (req, res) => {
+    try {
+        const { email, code, name } = req.body;
+        
+        if (!email || !code) {
+            return res.status(400).json({ error: 'Email and code are required' });
+        }
+        
+        const emailSubject = 'Verify Your Cardle Account';
+        const emailHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <style>
+                    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                    .header { background: #6aaa64; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }
+                    .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 8px 8px; }
+                    .code-box { background: #ffffff; border: 2px solid #6aaa64; border-radius: 8px; padding: 20px; text-align: center; margin: 20px 0; }
+                    .code { font-size: 32px; font-weight: bold; color: #6aaa64; letter-spacing: 8px; }
+                    .footer { text-align: center; margin-top: 20px; color: #666; font-size: 12px; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>Welcome to Cardle!</h1>
+                    </div>
+                    <div class="content">
+                        <p>Hi ${name || 'there'},</p>
+                        <p>Thank you for signing up! Please verify your email address by entering the following code:</p>
+                        <div class="code-box">
+                            <div class="code">${code}</div>
+                        </div>
+                        <p>This code will expire in 15 minutes.</p>
+                        <p>If you didn't create an account, please ignore this email.</p>
+                    </div>
+                    <div class="footer">
+                        <p>© Cardle - Multiplayer Wordle Game</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+        
+        const emailText = `
+Welcome to Cardle!
+
+Hi ${name || 'there'},
+
+Thank you for signing up! Please verify your email address by entering the following code:
+
+${code}
+
+This code will expire in 15 minutes.
+
+If you didn't create an account, please ignore this email.
+
+© Cardle - Multiplayer Wordle Game
+        `;
+        
+        if (emailTransporter) {
+            // Send email via SMTP
+            const fromAddress = emailConfig?.from || process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@cardle.com';
+            try {
+                const info = await emailTransporter.sendMail({
+                    from: fromAddress,
+                    to: email,
+                    subject: emailSubject,
+                    text: emailText,
+                    html: emailHtml
+                });
+                console.log(`✅ Verification email sent successfully to ${email}`);
+                console.log(`   Message ID: ${info.messageId}`);
+                console.log(`   Verification Code: ${code}`);
+            } catch (emailError) {
+                console.error('❌ Error sending email:', emailError);
+                console.error('   Error details:', {
+                    code: emailError.code,
+                    command: emailError.command,
+                    response: emailError.response,
+                    responseCode: emailError.responseCode
+                });
+                // Still log the code so user can verify manually
+                console.log('\n=== VERIFICATION CODE (EMAIL FAILED) ===');
+                console.log(`To: ${email}`);
+                console.log(`Code: ${code}`);
+                console.log('==========================================\n');
+                throw emailError; // Re-throw to be caught by outer catch
+            }
+        } else {
+            // Log to console if email is not configured
+            console.log('\n=== VERIFICATION EMAIL (NOT SENT - EMAIL NOT CONFIGURED) ===');
+            console.log(`To: ${email}`);
+            console.log(`Subject: ${emailSubject}`);
+            console.log(`Code: ${code}`);
+            console.log('===========================================================\n');
+        }
+        
+        res.json({ success: true, message: 'Verification email sent' });
+    } catch (error) {
+        console.error('Error sending verification email:', error);
+        res.status(500).json({ error: 'Failed to send verification email' });
+    }
 });
 
 // Serve static files (after route handlers)

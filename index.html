@@ -94,6 +94,9 @@
                         <label for="loginPassword" class="input-label">Password</label>
                         <input type="password" id="loginPassword" placeholder="Enter your password" autocomplete="current-password">
                     </div>
+                    <div class="forgot-password-link">
+                        <a href="#" id="forgotPasswordLink" class="link-text">Forgot password?</a>
+                    </div>
                     <div id="loginError" class="auth-error" style="display: none;"></div>
                     <button id="loginBtn" class="btn btn-primary btn-full">
                         <span class="btn-icon">🔑</span>
@@ -157,6 +160,82 @@
                     <button id="backToLoginFromGuestBtn" class="btn btn-secondary btn-full">
                         <span class="btn-icon">🔙</span>
                         <span>Back to Sign In</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Forgot Password Screen -->
+        <div id="forgotPassword" class="screen">
+            <div class="auth-content">
+                <div class="auth-header">
+                    <div class="auth-logo-container">
+                        <img src="images/CardleLogo.png" alt="Cardle Logo" class="auth-logo">
+                    </div>
+                    <h2 class="auth-title">Reset Password</h2>
+                    <p class="auth-subtitle">Enter your email to receive a password reset link</p>
+                </div>
+                <div class="auth-form">
+                    <div class="input-group">
+                        <label for="forgotPasswordEmail" class="input-label">Email</label>
+                        <input type="email" id="forgotPasswordEmail" placeholder="Enter your email" autocomplete="email">
+                    </div>
+                    <div class="spam-folder-note" style="font-size: 0.75rem; color: #818384; text-align: center; margin: -8px 0 8px 0; padding: 0 10px;">
+                        💡 Don't see the email? Check your spam/junk folder
+                    </div>
+                    <div id="forgotPasswordError" class="auth-error" style="display: none;"></div>
+                    <div id="forgotPasswordSuccess" class="auth-success" style="display: none;"></div>
+                    <button id="sendResetEmailBtn" class="btn btn-primary btn-full">
+                        <span class="btn-icon">📧</span>
+                        <span>Send Reset Link</span>
+                    </button>
+                    <div class="auth-divider">
+                        <span>or</span>
+                    </div>
+                    <button id="backToLoginFromForgotBtn" class="btn btn-secondary btn-full">
+                        <span class="btn-icon">🔙</span>
+                        <span>Back to Sign In</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Email Verification Screen -->
+        <div id="emailVerification" class="screen">
+            <div class="auth-content">
+                <div class="auth-header">
+                    <div class="auth-logo-container">
+                        <img src="images/CardleLogo.png" alt="Cardle Logo" class="auth-logo">
+                    </div>
+                    <h2 class="auth-title">Verify Your Email</h2>
+                    <p class="auth-subtitle">We've sent a verification code to your email</p>
+                </div>
+                <div class="auth-form">
+                    <div class="spam-folder-note" style="font-size: 0.75rem; color: #818384; text-align: center; margin: 0 0 12px 0; padding: 0 10px;">
+                        💡 Don't see the email? Check your spam/junk folder
+                    </div>
+                    <div class="input-group">
+                        <label for="verificationCode" class="input-label">Verification Code</label>
+                        <input type="text" id="verificationCode" placeholder="Enter 6-digit code" maxlength="6" autocomplete="one-time-code">
+                    </div>
+                    <div id="verificationError" class="auth-error" style="display: none;"></div>
+                    <button id="verifyEmailBtn" class="btn btn-primary btn-full">
+                        <span class="btn-icon">✓</span>
+                        <span>Verify Email</span>
+                    </button>
+                    <div class="auth-divider">
+                        <span>or</span>
+                    </div>
+                    <button id="resendVerificationBtn" class="btn btn-secondary btn-full">
+                        <span class="btn-icon">🔄</span>
+                        <span>Resend Code</span>
+                    </button>
+                    <div class="auth-divider">
+                        <span>or</span>
+                    </div>
+                    <button id="backToSignupFromVerificationBtn" class="btn btn-secondary btn-full">
+                        <span class="btn-icon">🔙</span>
+                        <span>Back to Sign Up</span>
                     </button>
                 </div>
             </div>
