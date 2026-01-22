@@ -459,8 +459,29 @@ If emails work locally but not on your server:
 
 6. **Network/Firewall issues:**
    - Ensure your server can make outbound connections on port 587
-   - Some hosting providers block SMTP ports - you may need to use a different port or email service
-   - If port 587 doesn't work, try port 465 with `secure: true`
+   - Some hosting providers (like Render) may block SMTP ports
+   - **If you get "Connection timeout" errors:**
+     - Try port 465 (SSL) instead of 587 (TLS) - change `SMTP_PORT=465` in Render
+     - The code will automatically retry on timeout errors
+     - Consider using an email API service instead (see below)
+
+7. **Alternative: Use Email API Service (Recommended for Render)**
+   
+   If SMTP continues to fail on Render, consider using an email API service:
+   
+   **Option A: SendGrid (Free tier: 100 emails/day)**
+   ```bash
+   # Install: npm install @sendgrid/mail
+   # Set in Render: SENDGRID_API_KEY=your-api-key
+   ```
+   
+   **Option B: Mailgun (Free tier: 5,000 emails/month)**
+   ```bash
+   # Install: npm install mailgun.js
+   # Set in Render: MAILGUN_API_KEY=your-api-key, MAILGUN_DOMAIN=your-domain
+   ```
+   
+   These services are more reliable on hosting platforms that block SMTP.
 
 ## 9. Test Your Setup
 

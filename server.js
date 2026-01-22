@@ -855,16 +855,21 @@ function initializeEmailTransporter() {
                     user: smtpUser,
                     pass: cleanPassword
                 },
-                // Add connection timeout
-                connectionTimeout: 15000, // Increased timeout for Render
-                greetingTimeout: 10000,
-                socketTimeout: 15000,
-                // For Gmail, require TLS
+                // Increased timeouts for Render and other hosting providers
+                connectionTimeout: 30000, // 30 seconds
+                greetingTimeout: 15000,
+                socketTimeout: 30000,
+                // For Gmail, require TLS on port 587
                 requireTLS: smtpPort == 587,
                 // Disable certificate validation (some hosting providers have issues)
                 tls: {
-                    rejectUnauthorized: false
-                }
+                    rejectUnauthorized: false,
+                    ciphers: 'SSLv3'
+                },
+                // Pool connections for better reliability
+                pool: true,
+                maxConnections: 1,
+                maxMessages: 3
             });
             
             console.log('📧 Email transporter created. Attempting to verify SMTP connection...');
@@ -1122,38 +1127,79 @@ If you didn't create an account, please ignore this email.
             console.log(`   From: ${fromAddress}`);
             console.log(`   Code: ${code}`);
             
-            try {
-                const info = await emailTransporter.sendMail({
-                    from: `"Cardle" <${fromAddress}>`, // Use name and email format
-                    to: email,
-                    subject: emailSubject,
-                    text: emailText,
-                    html: emailHtml
-                });
-                console.log(`✅ Verification email sent successfully to ${email}`);
-                console.log(`   Message ID: ${info.messageId}`);
-                console.log(`   Response: ${info.response || 'N/A'}`);
-                console.log(`   Verification Code: ${code}`);
-            } catch (emailError) {
-                console.error('❌ Error sending email:', emailError);
-                console.error('   Error code:', emailError.code);
-                console.error('   Error command:', emailError.command);
-                console.error('   Error response:', emailError.response);
-                console.error('   Error responseCode:', emailError.responseCode);
-                console.error('   Full error:', JSON.stringify(emailError, null, 2));
-                
-                // Still log the code so user can verify manually
-                console.log('\n=== VERIFICATION CODE (EMAIL FAILED - CHECK CODE BELOW) ===');
-                console.log(`To: ${email}`);
-                console.log(`Code: ${code}`);
-                console.log('===========================================================\n');
-                
-                // Return error but don't throw - let the request complete
-                return res.status(500).json({ 
-                    error: 'Failed to send verification email',
-                    code: code, // Include code in response for debugging
-                    details: emailError.message 
-                });
+            // Retry logic for connection timeouts (common on Render)
+            let lastError = null;
+            const maxRetries = 2;
+            
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                try {
+                    if (attempt > 1) {
+                        console.log(`   Retry attempt ${attempt}/${maxRetries}...`);
+                        // Wait a bit before retry
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+                    
+                    const info = await Promise.race([
+                        emailTransporter.sendMail({
+                            from: `"Cardle" <${fromAddress}>`, // Use name and email format
+                            to: email,
+                            subject: emailSubject,
+                            text: emailText,
+                            html: emailHtml
+                        }),
+                        // Timeout after 25 seconds
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Email send timeout after 25 seconds')), 25000)
+                        )
+                    ]);
+                    
+                    console.log(`✅ Verification email sent successfully to ${email}`);
+                    console.log(`   Message ID: ${info.messageId}`);
+                    console.log(`   Response: ${info.response || 'N/A'}`);
+                    console.log(`   Verification Code: ${code}`);
+                    console.log(`   Attempt: ${attempt}/${maxRetries}`);
+                    break; // Success, exit retry loop
+                    
+                } catch (emailError) {
+                    lastError = emailError;
+                    console.error(`❌ Error sending email (attempt ${attempt}/${maxRetries}):`, emailError.message);
+                    console.error('   Error code:', emailError.code);
+                    console.error('   Error command:', emailError.command);
+                    console.error('   Error response:', emailError.response);
+                    console.error('   Error responseCode:', emailError.responseCode);
+                    
+                    // If it's a timeout or connection error and we have retries left, continue
+                    if (attempt < maxRetries && (
+                        emailError.code === 'ETIMEDOUT' || 
+                        emailError.code === 'ECONNRESET' ||
+                        emailError.code === 'ESOCKET' ||
+                        emailError.message.includes('timeout') ||
+                        emailError.message.includes('Connection timeout')
+                    )) {
+                        console.log(`   Will retry (${maxRetries - attempt} attempts remaining)...`);
+                        continue;
+                    }
+                    
+                    // Last attempt failed or non-retryable error
+                    if (attempt === maxRetries) {
+                        console.error('   Full error:', JSON.stringify(emailError, null, 2));
+                        
+                        // Still log the code so user can verify manually
+                        console.log('\n=== VERIFICATION CODE (EMAIL FAILED - CHECK CODE BELOW) ===');
+                        console.log(`To: ${email}`);
+                        console.log(`Code: ${code}`);
+                        console.log('===========================================================\n');
+                        
+                        // Return error but don't throw - let the request complete
+                        return res.status(500).json({ 
+                            error: 'Failed to send verification email',
+                            code: code, // Include code in response for debugging
+                            details: emailError.message,
+                            attempts: attempt,
+                            suggestion: 'If connection timeout persists, Render may be blocking SMTP. Consider using an email API service like SendGrid or Mailgun.'
+                        });
+                    }
+                }
             }
         } else {
             // Log to console if email is not configured
