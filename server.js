@@ -6135,12 +6135,27 @@ io.on('connection', (socket) => {
 // Endpoint to get client's IP address (for admin activity logging)
 app.get('/api/get-ip', (req, res) => {
     // Get IP from various possible sources (handles proxies, load balancers)
-    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || 
-               req.headers['x-real-ip'] || 
-               req.connection.remoteAddress || 
-               req.socket.remoteAddress ||
+    const forwardedFor = req.headers['x-forwarded-for'];
+    const realIp = req.headers['x-real-ip'];
+    const connectionIp = req.connection.remoteAddress;
+    const socketIp = req.socket.remoteAddress;
+    
+    const ip = forwardedFor?.split(',')[0].trim() || 
+               realIp || 
+               connectionIp || 
+               socketIp ||
                req.connection.socket?.remoteAddress ||
                'Unknown';
+    
+    // Log for debugging
+    console.log('IP Request:', {
+        ip,
+        forwardedFor,
+        realIp,
+        connectionIp,
+        socketIp,
+        userAgent: req.headers['user-agent']?.substring(0, 50)
+    });
     
     res.json({ ip });
 });

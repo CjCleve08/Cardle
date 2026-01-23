@@ -4946,6 +4946,60 @@ header h1 {
     font-weight: 600;
 }
 
+.admin-activity-log-filters {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.admin-log-filter-input,
+.admin-log-filter-select {
+    flex: 1;
+    min-width: 180px;
+    padding: 10px 14px;
+    background: rgba(18, 18, 19, 0.8);
+    border: 1px solid rgba(58, 58, 60, 0.5);
+    border-radius: 8px;
+    color: #d7dadc;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+}
+
+.admin-log-filter-input:focus,
+.admin-log-filter-select:focus {
+    outline: none;
+    border-color: #6aaa64;
+    box-shadow: 0 0 0 3px rgba(106, 170, 100, 0.1);
+}
+
+.admin-log-filter-input::placeholder {
+    color: #818384;
+}
+
+.admin-log-filter-select {
+    cursor: pointer;
+}
+
+.admin-log-filter-clear {
+    padding: 10px 18px;
+    background: rgba(231, 76, 60, 0.2);
+    border: 1px solid rgba(231, 76, 60, 0.5);
+    border-radius: 8px;
+    color: #e74c3c;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.admin-log-filter-clear:hover {
+    background: rgba(231, 76, 60, 0.3);
+    transform: translateY(-1px);
+}
+
 .admin-activity-log-container {
     margin-top: 16px;
 }

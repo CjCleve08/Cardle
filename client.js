@@ -14172,7 +14172,7 @@ async function logAdminActivity(action, targetUid, targetName, changes) {
             console.error('Could not fetch IP address:', ipError);
         }
         
-        await window.firebaseDb.collection('adminActivityLogs').add({
+        const logEntry = {
             action: action, // 'chips_changed', 'bits_changed', 'admin_granted', 'admin_revoked'
             adminUid: currentUser.uid,
             adminName: adminName,
@@ -14182,7 +14182,17 @@ async function logAdminActivity(action, targetUid, targetName, changes) {
             targetName: targetName || 'Unknown',
             changes: changes, // Object with old/new values
             timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        console.log('Logging admin activity:', {
+            action,
+            adminName,
+            adminEmail,
+            ipAddress,
+            targetName
         });
+        
+        await window.firebaseDb.collection('adminActivityLogs').add(logEntry);
     } catch (error) {
         console.error('Error logging admin activity:', error);
         // Don't throw - logging failure shouldn't break admin actions
@@ -14301,8 +14311,11 @@ async function isUserBanned(uid) {
     return false;
 }
 
+// Store all admin activity logs for filtering
+let allAdminActivityLogs = [];
+
 // Load and display admin activity log (only for creator)
-async function loadAdminActivityLog() {
+async function loadAdminActivityLog(filters = {}) {
     const logSection = document.getElementById('adminActivityLogSection');
     const logList = document.getElementById('adminActivityLogList');
     
@@ -14315,7 +14328,6 @@ async function loadAdminActivityLog() {
     }
     
     logSection.style.display = 'block';
-    logList.innerHTML = '<div class="admin-loading">Loading all activity logs...</div>';
     
     if (!window.firebaseDb) {
         logList.innerHTML = '<div class="admin-error">Firebase not available</div>';
@@ -14323,60 +14335,97 @@ async function loadAdminActivityLog() {
     }
     
     try {
-        // Load ALL activity logs (no limit)
-        // Firestore has a limit per query, so we need to paginate to get all
-        const logs = [];
-        let lastDoc = null;
-        let hasMore = true;
-        const batchSize = 100; // Firestore limit is 1000, but we'll use 100 per batch
-        
-        console.log('Loading all admin activity logs...');
-        
-        while (hasMore) {
-            let logsQuery = window.firebaseDb.collection('adminActivityLogs')
-                .orderBy('timestamp', 'desc')
-                .limit(batchSize);
+        // Load all logs only if not already loaded
+        if (allAdminActivityLogs.length === 0) {
+            logList.innerHTML = '<div class="admin-loading">Loading all activity logs...</div>';
             
-            // If we have a last document, start from there (pagination)
-            if (lastDoc) {
-                logsQuery = logsQuery.startAfter(lastDoc);
-            }
+            const logs = [];
+            let lastDoc = null;
+            let hasMore = true;
+            const batchSize = 100;
             
-            const logsSnapshot = await logsQuery.get();
+            console.log('Loading all admin activity logs...');
             
-            if (logsSnapshot.empty) {
-                hasMore = false;
-                break;
-            }
-            
-            logsSnapshot.forEach(doc => {
-                const data = doc.data();
-                logs.push({
-                    id: doc.id,
-                    ...data
+            while (hasMore) {
+                let logsQuery = window.firebaseDb.collection('adminActivityLogs')
+                    .orderBy('timestamp', 'desc')
+                    .limit(batchSize);
+                
+                if (lastDoc) {
+                    logsQuery = logsQuery.startAfter(lastDoc);
+                }
+                
+                const logsSnapshot = await logsQuery.get();
+                
+                if (logsSnapshot.empty) {
+                    hasMore = false;
+                    break;
+                }
+                
+                logsSnapshot.forEach(doc => {
+                    const data = doc.data();
+                    logs.push({
+                        id: doc.id,
+                        ...data
+                    });
+                    lastDoc = doc;
                 });
-                lastDoc = doc;
-            });
+                
+                if (logsSnapshot.size < batchSize) {
+                    hasMore = false;
+                }
+            }
             
-            // If we got fewer than batchSize, we've reached the end
-            if (logsSnapshot.size < batchSize) {
-                hasMore = false;
+            allAdminActivityLogs = logs;
+            console.log(`Loaded ${logs.length} activity log entries`);
+        }
+        
+        // Apply filters
+        let filteredLogs = allAdminActivityLogs;
+        
+        if (filters.adminName) {
+            const searchTerm = filters.adminName.toLowerCase();
+            filteredLogs = filteredLogs.filter(log => 
+                (log.adminName || '').toLowerCase().includes(searchTerm) ||
+                (log.adminEmail || '').toLowerCase().includes(searchTerm)
+            );
+        }
+        
+        if (filters.targetName) {
+            const searchTerm = filters.targetName.toLowerCase();
+            filteredLogs = filteredLogs.filter(log => 
+                (log.targetName || '').toLowerCase().includes(searchTerm)
+            );
+        }
+        
+        if (filters.actionType) {
+            if (filters.actionType === 'chips_changed') {
+                // Filter for logs where chips were changed
+                filteredLogs = filteredLogs.filter(log => 
+                    log.action === 'stats_changed' && log.changes && log.changes.chips
+                );
+            } else if (filters.actionType === 'bits_changed') {
+                // Filter for logs where bits were changed
+                filteredLogs = filteredLogs.filter(log => 
+                    log.action === 'stats_changed' && log.changes && log.changes.bits
+                );
+            } else {
+                // Filter by exact action type
+                filteredLogs = filteredLogs.filter(log => log.action === filters.actionType);
             }
         }
         
-        console.log(`Loaded ${logs.length} activity log entries`);
-        
-        if (logs.length === 0) {
-            logList.innerHTML = '<div class="admin-empty">No admin activity yet</div>';
+        if (filteredLogs.length === 0) {
+            logList.innerHTML = '<div class="admin-empty">No matching activity logs found</div>';
             return;
         }
         
-        // Render logs (show count at top)
+        // Render filtered logs
         const logCount = `<div class="admin-activity-log-count" style="padding: 12px; margin-bottom: 16px; background: rgba(106, 170, 100, 0.1); border-radius: 8px; border: 1px solid rgba(106, 170, 100, 0.3); color: #6aaa64; font-weight: 600;">
-            Total Activity Logs: ${logs.length}
+            Showing ${filteredLogs.length} of ${allAdminActivityLogs.length} Activity Logs
         </div>`;
         
-        logList.innerHTML = logCount + logs.map(log => {
+        logList.innerHTML = logCount + filteredLogs.map(log => {
             const timeAgo = formatTimeAgo(log.timestamp?.toDate?.() || new Date(log.timestamp || Date.now()));
             const actionText = getActionText(log.action);
             const changesText = formatChanges(log.changes);
@@ -14408,6 +14457,51 @@ async function loadAdminActivityLog() {
         logList.innerHTML = '<div class="admin-error">Error loading activity log</div>';
     }
 }
+
+// Apply activity log filters
+function applyActivityLogFilters() {
+    const adminNameFilter = document.getElementById('filterAdminName')?.value.trim() || '';
+    const targetNameFilter = document.getElementById('filterTargetName')?.value.trim() || '';
+    const actionTypeFilter = document.getElementById('filterActionType')?.value || '';
+    
+    loadAdminActivityLog({
+        adminName: adminNameFilter,
+        targetName: targetNameFilter,
+        actionType: actionTypeFilter
+    });
+}
+
+// Set up activity log filter listeners
+function setupActivityLogFilters() {
+    const filterAdminName = document.getElementById('filterAdminName');
+    const filterTargetName = document.getElementById('filterTargetName');
+    const filterActionType = document.getElementById('filterActionType');
+    const clearFiltersBtn = document.getElementById('clearActivityFilters');
+    
+    if (filterAdminName) {
+        filterAdminName.addEventListener('input', applyActivityLogFilters);
+    }
+    
+    if (filterTargetName) {
+        filterTargetName.addEventListener('input', applyActivityLogFilters);
+    }
+    
+    if (filterActionType) {
+        filterActionType.addEventListener('change', applyActivityLogFilters);
+    }
+    
+    if (clearFiltersBtn) {
+        clearFiltersBtn.addEventListener('click', () => {
+            if (filterAdminName) filterAdminName.value = '';
+            if (filterTargetName) filterTargetName.value = '';
+            if (filterActionType) filterActionType.value = '';
+            applyActivityLogFilters();
+        });
+    }
+}
+
+// Initialize filters when DOM is ready
+document.addEventListener('DOMContentLoaded', setupActivityLogFilters);
 
 // Get human-readable action text
 function getActionText(action) {
@@ -15191,33 +15285,37 @@ async function loadCommunityPosts() {
             try {
                 const allPostsQuery = window.firebaseDb.collection('communityPosts')
                     .orderBy('createdAt', 'desc')
-                    .limit(200);
+                    .limit(50);
                 allPostsSnapshot = await allPostsQuery.get();
             } catch (indexError) {
                 const allPostsQuery = window.firebaseDb.collection('communityPosts')
-                    .limit(500);
+                    .limit(50);
                 allPostsSnapshot = await allPostsQuery.get();
             }
             
             const bulletinPosts = [];
             const communityPosts = [];
             
-            for (const doc of allPostsSnapshot.docs) {
+            // Fetch all user info in parallel for better performance
+            const allPosts = await Promise.all(allPostsSnapshot.docs.map(async (doc) => {
                 const data = doc.data();
                 const authorInfo = await getUserInfo(data.authorId);
                 
-                const postData = {
+                return {
                     id: doc.id,
                     ...data,
                     authorName: authorInfo.name,
                     authorPhotoURL: authorInfo.photoURL,
                     authorIsAdmin: authorInfo.isAdmin === true
                 };
-                
-                if (data.isBulletin === true) {
+            }));
+            
+            // Separate into bulletin and community posts
+            for (const postData of allPosts) {
+                if (postData.isBulletin === true) {
                     bulletinPosts.push(postData);
                 } else {
-                    if (currentCommunityCategory === 'all' || data.category === currentCommunityCategory) {
+                    if (currentCommunityCategory === 'all' || postData.category === currentCommunityCategory) {
                         communityPosts.push(postData);
                     }
                 }
@@ -15262,13 +15360,13 @@ async function loadCommunityPosts() {
             // Try with orderBy first (more efficient if index exists)
             const allPostsQuery = window.firebaseDb.collection('communityPosts')
                 .orderBy('createdAt', 'desc')
-                .limit(200);
+                .limit(50);
             allPostsSnapshot = await allPostsQuery.get();
         } catch (indexError) {
             // If index doesn't exist, load all posts without orderBy and sort client-side
             console.log('Index not found, loading all posts and sorting client-side');
             const allPostsQuery = window.firebaseDb.collection('communityPosts')
-                .limit(500);
+                .limit(50);
             allPostsSnapshot = await allPostsQuery.get();
         }
         
@@ -15276,46 +15374,31 @@ async function loadCommunityPosts() {
         const bulletinPosts = [];
         const communityPosts = [];
         
-        for (const doc of allPostsSnapshot.docs) {
+        // Fetch all user info in parallel for better performance
+        const allPosts = await Promise.all(allPostsSnapshot.docs.map(async (doc) => {
             const data = doc.data();
             const authorInfo = await getUserInfo(data.authorId);
             
-            // Recalculate comment count to ensure it includes replies
-            // This fixes existing posts that were created before replies were counted
-            try {
-                const commentsSnapshot = await window.firebaseDb.collection('communityPosts')
-                    .doc(doc.id)
-                    .collection('comments')
-                    .get();
-                
-                const actualCount = commentsSnapshot.size;
-                // If the count doesn't match, recalculate it
-                if (data.commentCount !== actualCount) {
-                    console.log(`Fixing comment count for post ${doc.id}: ${data.commentCount || 0} -> ${actualCount}`);
-                    await window.firebaseDb.collection('communityPosts').doc(doc.id).update({
-                        commentCount: actualCount
-                    });
-                    data.commentCount = actualCount;
-                }
-            } catch (recalcError) {
-                // If recalculation fails, just use the existing count
-                console.warn(`Could not recalculate comment count for post ${doc.id}:`, recalcError);
-            }
+            // Skip comment count recalculation for performance
+            // Comment counts are updated when comments are added/removed
             
-            const postData = {
+            return {
                 id: doc.id,
                 ...data,
                 authorName: authorInfo.name,
                 authorPhotoURL: authorInfo.photoURL,
                 authorIsAdmin: authorInfo.isAdmin === true
             };
-            
+        }));
+        
+        // Separate into bulletin and community posts
+        for (const postData of allPosts) {
             // Separate bulletin posts from community posts
-            if (data.isBulletin === true) {
+            if (postData.isBulletin === true) {
                 bulletinPosts.push(postData);
             } else {
                 // Filter by category client-side if not 'all'
-                if (currentCommunityCategory === 'all' || data.category === currentCommunityCategory) {
+                if (currentCommunityCategory === 'all' || postData.category === currentCommunityCategory) {
                     communityPosts.push(postData);
                 }
             }
@@ -15354,21 +15437,40 @@ async function loadCommunityPosts() {
 }
 
 // Get user info helper
+// Cache for user info to avoid repeated database calls
+const userInfoCache = new Map();
+const USER_INFO_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 async function getUserInfo(userId) {
     try {
         if (!userId || !window.firebaseDb) {
             return { name: 'Unknown', photoURL: null, isAdmin: false };
         }
+        
+        // Check cache first
+        const cached = userInfoCache.get(userId);
+        if (cached && (Date.now() - cached.timestamp < USER_INFO_CACHE_TTL)) {
+            return cached.data;
+        }
+        
         const userDoc = await window.firebaseDb.collection('users').doc(userId).get();
         if (userDoc.exists) {
             const data = userDoc.data();
             const email = data.email || '';
             const isAdminUser = await isUserAdminByUid(userId, email);
-            return {
+            const userInfo = {
                 name: data.displayName || 'Unknown',
                 photoURL: data.photoURL || null,
                 isAdmin: isAdminUser === true
             };
+            
+            // Cache the result
+            userInfoCache.set(userId, {
+                data: userInfo,
+                timestamp: Date.now()
+            });
+            
+            return userInfo;
         }
     } catch (error) {
         console.error('Error fetching user info:', error);
@@ -15777,19 +15879,18 @@ async function loadComments(postId) {
                 .collection('comments');
             commentsSnapshot = await commentsQuery.get();
         }
-        const comments = [];
-        
-        for (const doc of commentsSnapshot.docs) {
+        // Fetch all user info in parallel for better performance
+        const comments = await Promise.all(commentsSnapshot.docs.map(async (doc) => {
             const data = doc.data();
             const authorInfo = await getUserInfo(data.authorId);
-            comments.push({
+            return {
                 id: doc.id,
                 ...data,
                 authorName: authorInfo.name,
                 authorPhotoURL: authorInfo.photoURL,
                 createdAt: data.createdAt // Preserve timestamp for sorting
-            });
-        }
+            };
+        }));
         
         // Sort by createdAt (oldest first) if we loaded without orderBy
         comments.sort((a, b) => {

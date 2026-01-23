@@ -892,6 +892,19 @@
                                 <!-- Admin Activity Log (only visible to creator) -->
                                 <div id="adminActivityLogSection" class="admin-section" style="display: none;">
                                     <h3 class="admin-section-title">Admin Activity Log</h3>
+                                    <div class="admin-activity-log-filters">
+                                        <input type="text" id="filterAdminName" class="admin-log-filter-input" placeholder="Filter by Admin...">
+                                        <input type="text" id="filterTargetName" class="admin-log-filter-input" placeholder="Filter by Target...">
+                                        <select id="filterActionType" class="admin-log-filter-select">
+                                            <option value="">All Actions</option>
+                                            <option value="chips_changed">Chips Changed</option>
+                                            <option value="bits_changed">Bits Changed</option>
+                                            <option value="admin_granted">Admin Granted</option>
+                                            <option value="admin_revoked">Admin Revoked</option>
+                                            <option value="ban_status_changed">Ban Status Changed</option>
+                                        </select>
+                                        <button id="clearActivityFilters" class="admin-log-filter-clear">Clear Filters</button>
+                                    </div>
                                     <div class="admin-activity-log-container">
                                         <div id="adminActivityLogList" class="admin-activity-log-list">
                                             <div class="admin-loading">Loading activity log...</div>
