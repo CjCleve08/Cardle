@@ -3629,6 +3629,18 @@ socket.on('gameStarted', (data) => {
     console.log('Is tutorial?', data.isTutorial);
     console.log('Game mode:', data.settings?.gameMode);
     
+    // CRITICAL: Clean up any spectator state/UI when starting a new game
+    if (window.isSpectator) {
+        console.log('Cleaning up spectator state before starting new game');
+        window.isSpectator = false;
+        window.spectatorGameId = null;
+        window.spectatorGameWord = null;
+        window.spectatedPlayerId = null;
+        window.spectatedPlayerHand = null;
+    }
+    // Always clean up spectator UI elements to ensure fresh state
+    cleanupSpectatorUI();
+    
     // For duel deck mode, ensure both players have submitted words before starting
     // This should already be handled server-side, but add a safety check
     if (data.settings && data.settings.gameMode === 'duelDeck') {
@@ -12906,6 +12918,49 @@ function showSpectatorGameOver(data, wasSpectating, spectatedGameId) {
     console.log('Spectator game over - stats NOT updated (spectators cannot lose chips)');
 }
 
+function cleanupSpectatorUI() {
+    console.log('Cleaning up spectator UI state');
+    
+    // Re-enable all interactive elements
+    const wordInput = document.getElementById('wordInput');
+    const submitBtn = document.getElementById('submitBtn');
+    const cardsContainer = document.getElementById('cardsContainer');
+    const keyboard = document.getElementById('keyboard');
+    
+    if (wordInput) {
+        wordInput.disabled = false;
+        wordInput.style.pointerEvents = '';
+        wordInput.style.opacity = '';
+        wordInput.placeholder = 'Guess';
+    }
+    if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.style.pointerEvents = '';
+        submitBtn.style.opacity = '';
+        submitBtn.textContent = 'Guess';
+    }
+    if (cardsContainer) {
+        cardsContainer.style.pointerEvents = '';
+        cardsContainer.style.opacity = '';
+    }
+    if (keyboard) {
+        // Re-enable keyboard buttons
+        const keyboardButtons = keyboard.querySelectorAll('button');
+        keyboardButtons.forEach(btn => {
+            btn.disabled = false;
+            btn.style.pointerEvents = '';
+            btn.style.opacity = '';
+        });
+    }
+    
+    // Hide spectator indicator and leave button
+    const spectatorIndicator = document.getElementById('spectatorIndicator');
+    if (spectatorIndicator) spectatorIndicator.style.display = 'none';
+    
+    const leaveBtn = document.getElementById('leaveSpectateBtn');
+    if (leaveBtn) leaveBtn.style.display = 'none';
+}
+
 function leaveSpectatorMode() {
     if (!window.isSpectator) {
         console.log('leaveSpectatorMode called but not in spectator mode');
@@ -12936,13 +12991,10 @@ function leaveSpectatorMode() {
     window.spectatorGameId = null;
     window.spectatorGameWord = null;
     window.spectatedPlayerId = null;
+    window.spectatedPlayerHand = null;
     
-    // Hide spectator indicator and leave button
-    const spectatorIndicator = document.getElementById('spectatorIndicator');
-    if (spectatorIndicator) spectatorIndicator.style.display = 'none';
-    
-    const leaveBtn = document.getElementById('leaveSpectateBtn');
-    if (leaveBtn) leaveBtn.style.display = 'none';
+    // Clean up spectator UI elements
+    cleanupSpectatorUI();
     
     // Return to lobby
     ScreenManager.show('lobby');
