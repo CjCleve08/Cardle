@@ -6132,6 +6132,19 @@ io.on('connection', (socket) => {
     });
 });
 
+// Endpoint to get client's IP address (for admin activity logging)
+app.get('/api/get-ip', (req, res) => {
+    // Get IP from various possible sources (handles proxies, load balancers)
+    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || 
+               req.headers['x-real-ip'] || 
+               req.connection.remoteAddress || 
+               req.socket.remoteAddress ||
+               req.connection.socket?.remoteAddress ||
+               'Unknown';
+    
+    res.json({ ip });
+});
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);

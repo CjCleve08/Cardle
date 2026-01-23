@@ -1374,10 +1374,10 @@ const AVAILABLE_CAMOS = [
     { id: 'USABase', name: 'USA', filename: 'USABase.png', rarity: 'common' },
     { id: 'LeafyBase', name: 'Leafy', filename: 'LeafyBase.png', rarity: 'common' },
     { id: 'ChillBase', name: 'Chill', filename: 'ChillBase.png', rarity: 'common' },
-    { id: 'OilSpillBase', name: 'Oil Spill', filename: 'OilSpillBase.png', rarity: 'rare' },
+    { id: 'OilSpillBase', name: 'Oil Spill', filename: 'OilSpillBase.png', rarity: 'common' },
     { id: 'AruaBase', name: 'Aura', filename: 'AruaBase.png', rarity: 'epic' },
     { id: 'JohnPorkBase', name: 'John Pork', filename: 'JohnPorkBase.png', rarity: 'rare' },
-    { id: 'CarbonCoatBase', name: 'Carbon Coat', filename: 'CarbonCoatBase.png', rarity: 'rare' },
+    { id: 'CarbonCoatBase', name: 'Carbon Coat', filename: 'CarbonCoatBase.png', rarity: 'common' },
     { id: 'MatrixBase', name: 'Matrix', filename: 'MatrixBase.png', rarity: 'rare' },
     { id: 'PlamsaBase', name: 'Plasma', filename: 'PlamsaBase.png', rarity: 'rare' },
     { id: 'InfernoBase', name: 'Inferno', filename: 'InfernoBase.png', rarity: 'rare' },
@@ -1397,7 +1397,7 @@ const AVAILABLE_CAMOS = [
     { id: 'HellRaiserBase', name: 'Hell Raiser', filename: 'HellRaiserBase.png', rarity: 'epic' },
     // New Rare Camos (Next Best 7)
     { id: 'EnergyBase', name: 'Energy', filename: 'EnergyBase.png', rarity: 'rare' },
-    { id: 'ExtinctionBase', name: 'Extinction', filename: 'ExtinctionBase.png', rarity: 'rare' },
+    { id: 'ExtinctionBase', name: 'Extinction', filename: 'ExtinctionBase.png', rarity: 'epic' },
     { id: 'RoyalBase', name: 'Royal', filename: 'RoyalBase.png', rarity: 'rare' },
     { id: 'SupremeBase', name: 'Supreme', filename: 'SupremeBase.png', rarity: 'rare' },
     { id: 'TheBeyondBase', name: 'The Beyond', filename: 'TheBeyondBase.png', rarity: 'rare' },
@@ -1409,15 +1409,15 @@ const AVAILABLE_CAMOS = [
     { id: 'CanIHaveAWaterBase', name: 'Can I Have A Water', filename: 'CanIHaveAWaterBase.png', rarity: 'common' },
     { id: 'CapturedBase', name: 'Captured', filename: 'CapturedBase.png', rarity: 'common' },
     { id: 'ChillGuyBase', name: 'Chill Guy', filename: 'ChillGuyBase.png', rarity: 'common' },
-    { id: 'CivilizedWeaponBase', name: 'Civilized Weapon', filename: 'CivilizedWeaponBase.png', rarity: 'common' },
+    { id: 'CivilizedWeaponBase', name: 'Civilized Weapon', filename: 'CivilizedWeaponBase.png', rarity: 'rare' },
     { id: 'CowPrintBase', name: 'Cow Print', filename: 'CowPrintBase.png', rarity: 'common' },
     { id: 'DeadManWalkinngBase', name: 'Dead Man Walking', filename: 'DeadManWalkinngBase.png', rarity: 'common' },
     { id: 'FiringRangeBase', name: 'Firing Range', filename: 'FiringRangeBase.png', rarity: 'common' },
     { id: 'FullHandBase', name: 'Full Hand', filename: 'FullHandBase.png', rarity: 'common' },
     { id: 'HackedBase', name: 'Hacked', filename: 'HackedBase.png', rarity: 'common' },
-    { id: 'HopeBase', name: 'Hope', filename: 'HopeBase.png', rarity: 'common' },
-    { id: 'JammingBase', name: 'Jamming', filename: 'JammingBase.png', rarity: 'common' },
-    { id: 'JeffAndDonald', name: 'Jeff And Donald', filename: 'JeffAndDonald.png', rarity: 'common' },
+    { id: 'HopeBase', name: 'Hope', filename: 'HopeBase.png', rarity: 'rare' },
+    { id: 'JammingBase', name: 'Jamming', filename: 'JammingBase.png', rarity: 'rare' },
+    { id: 'JeffAndDonald', name: 'Jeff And Donald', filename: 'JeffAndDonald.png', rarity: 'epic' },
     { id: 'LeopardPrintBase', name: 'Leopard Print', filename: 'LeopardPrintBase.png', rarity: 'common' },
     { id: 'LonesomeWallBase', name: 'Lonesome Wall', filename: 'LonesomeWallBase.png', rarity: 'common' },
     { id: 'McLovinBase', name: 'McLovin', filename: 'McLovinBase.png', rarity: 'common' },
@@ -1427,34 +1427,34 @@ const AVAILABLE_CAMOS = [
     { id: 'PortalHoppersBase', name: 'Portal Hoppers', filename: 'PortalHoppersBase.png', rarity: 'common' },
     { id: 'PunishmentBase', name: 'Punishment', filename: 'PunishmentBase.png', rarity: 'common' },
     { id: 'SnakeSkinBase', name: 'Snake Skin', filename: 'SnakeSkinBase.png', rarity: 'common' },
-    { id: 'SolidStealthBase', name: 'Solid Stealth', filename: 'SolidStealthBase.png', rarity: 'common' },
-    { id: 'VirusBase', name: 'Virus', filename: 'VirusBase.png', rarity: 'common' },
+    { id: 'SolidStealthBase', name: 'Solid Stealth', filename: 'SolidStealthBase.png', rarity: 'rare' },
+    { id: 'VirusBase', name: 'Virus', filename: 'VirusBase.png', rarity: 'rare' },
     { id: 'YesKingBase', name: 'Yes King', filename: 'YesKingBase.png', rarity: 'common' },
-    { id: 'ZenBase', name: 'Zen', filename: 'ZenBase.png', rarity: 'common' },
+    { id: 'ZenBase', name: 'Zen', filename: 'ZenBase.png', rarity: 'rare' },
     // New Epic Camo
     { id: 'PurpleHaze', name: 'Purple Haze', filename: 'PurpleHaze.png', rarity: 'epic' },
-    { id: 'ArchibaldSmithBase', name: 'Archibald Smith', filename: 'ArchibaldSmithBase.png', rarity: 'epic' },
-    { id: 'BanishedKnightBase', name: 'Banished Knight', filename: 'BanishedKnightBase.png', rarity: 'epic' },
+    { id: 'ArchibaldSmithBase', name: 'Archibald Smith', filename: 'ArchibaldSmithBase.png', rarity: 'rare' },
+    { id: 'BanishedKnightBase', name: 'Banished Knight', filename: 'BanishedKnightBase.png', rarity: 'rare' },
     { id: 'CursedLordBase', name: 'Cursed Lord', filename: 'CursedLordBase.png', rarity: 'epic' },
     { id: 'FallenAngelBase', name: 'Fallen Angel', filename: 'FallenAngelBase.png', rarity: 'epic' },
-    { id: 'HeroOfTimeBase', name: 'Hero of Time', filename: 'HeroOfTimeBase.png', rarity: 'epic' },
-    { id: 'HolyLightBase', name: 'Holy Light', filename: 'HolyLightBase.png', rarity: 'epic' },
-    { id: 'MetalManBase', name: 'Metal Man', filename: 'MetalManBase.png', rarity: 'epic' },
-    { id: 'RipVanWinkleBase', name: 'Rip Van Winkle', filename: 'RipVanWinkleBase.png', rarity: 'epic' },
+    { id: 'HeroOfTimeBase', name: 'Hero of Time', filename: 'HeroOfTimeBase.png', rarity: 'rare' },
+    { id: 'HolyLightBase', name: 'Holy Light', filename: 'HolyLightBase.png', rarity: 'common' },
+    { id: 'MetalManBase', name: 'Metal Man', filename: 'MetalManBase.png', rarity: 'rare' },
+    { id: 'RipVanWinkleBase', name: 'Rip Van Winkle', filename: 'RipVanWinkleBase.png', rarity: 'rare' },
     { id: 'StuntManBase', name: 'Stunt Man', filename: 'StuntManBase.png', rarity: 'epic' },
     { id: 'SynthWaveBase', name: 'Synth Wave', filename: 'SynthWaveBase.png', rarity: 'epic' },
-    { id: 'TacitusKilgoreBase', name: 'Tacitus Kilgore', filename: 'TacitusKilgoreBase.png', rarity: 'epic' },
-    { id: 'TheGifterBase', name: 'The Gifter', filename: 'TheGifterBase.png', rarity: 'epic' },
+    { id: 'TacitusKilgoreBase', name: 'Tacitus Kilgore', filename: 'TacitusKilgoreBase.png', rarity: 'rare' },
+    { id: 'TheGifterBase', name: 'The Gifter', filename: 'TheGifterBase.png', rarity: 'legendary' },
     { id: 'TheSpireBase', name: 'The Spire', filename: 'TheSpireBase.png', rarity: 'epic' },
-    { id: 'TurtleHopperBase', name: 'Turtle Hopper', filename: 'TurtleHopperBase.png', rarity: 'epic' },
-    { id: 'WildBase', name: 'Wild', filename: 'WildBase.png', rarity: 'epic' },
+    { id: 'TurtleHopperBase', name: 'Turtle Hopper', filename: 'TurtleHopperBase.png', rarity: 'common' },
+    { id: 'WildBase', name: 'Wild', filename: 'WildBase.png', rarity: 'rare' },
     // New Rare Camo
-    { id: 'ChessBase', name: 'Chess', filename: 'ChessBase.png', rarity: 'rare' },
+    { id: 'ChessBase', name: 'Chess', filename: 'ChessBase.png', rarity: 'common' },
     { id: 'CopperBase', name: 'Copper', filename: 'CopperBase.png', rarity: 'rare' },
     { id: 'CrafterBase', name: 'Crafter', filename: 'CrafterBase.png', rarity: 'rare' },
-    { id: 'DetectiveBase', name: 'Detective', filename: 'DetectiveBase.png', rarity: 'rare' },
-    { id: 'GangViolenceBase', name: 'Gang Violence', filename: 'GangViolenceBase.png', rarity: 'rare' },
-    { id: 'GreatJeansBase', name: 'Great Jeans', filename: 'GreatJeansBase.png', rarity: 'rare' },
+    { id: 'DetectiveBase', name: 'Detective', filename: 'DetectiveBase.png', rarity: 'epic' },
+    { id: 'GangViolenceBase', name: 'Gang Violence', filename: 'GangViolenceBase.png', rarity: 'epic' },
+    { id: 'GreatJeansBase', name: 'Great Jeans', filename: 'GreatJeansBase.png', rarity: 'legendary' },
     { id: 'KysBase', name: 'KYS', filename: 'KysBase.png', rarity: 'rare' },
     { id: 'LifeLineBase', name: 'Life Line', filename: 'LifeLineBase.png', rarity: 'rare' },
     { id: 'TheDBase', name: 'The D', filename: 'TheDBase.png', rarity: 'rare' },
@@ -2251,7 +2251,7 @@ async function claimAchievement(achievementId) {
 }
 
 // Daily Bit Claim System
-const DAILY_BIT_REWARD = 30;
+const DAILY_BIT_REWARD = 50;
 const DAILY_CLAIM_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
 // Check if daily claim is available
@@ -9407,15 +9407,25 @@ function openAlphaPack(packId = null) {
     void wheel.offsetWidth;
     
     // Determine rarity using your current drop rates
-    // Common: 75%, Rare: 23%, Epic: 2%
+    // Common: 73%, Rare: 23%, Epic: 3%, Legendary: 1%
     const rarityRoll = Math.random();
-    const selectedRarity = rarityRoll < 0.75 ? 'common' : (rarityRoll < 0.97 ? 'rare' : 'epic');
+    let selectedRarity;
+    if (rarityRoll < 0.73) {
+        selectedRarity = 'common';
+    } else if (rarityRoll < 0.96) {
+        selectedRarity = 'rare';
+    } else if (rarityRoll < 0.99) {
+        selectedRarity = 'epic';
+    } else {
+        selectedRarity = 'legendary';
+    }
     
     // Spin wheel to land on the chosen rarity slice (match the visual slice sizes)
     const segments = {
-        common: { start: 0, end: 270 },       // 75%
-        rare: { start: 270, end: 352.8 },     // 23%
-        epic: { start: 352.8, end: 360 }      // 2%
+        common: { start: 0, end: 262.8 },       // 73%
+        rare: { start: 262.8, end: 345.6 },     // 23%
+        epic: { start: 345.6, end: 356.4 },     // 3%
+        legendary: { start: 356.4, end: 360 }   // 1%
     };
     const seg = segments[selectedRarity];
     // Keep away from edges; for tiny epic slice use a smaller margin
@@ -9439,14 +9449,17 @@ function openAlphaPack(packId = null) {
         // Pick a camo from the selected rarity (with fallbacks if a rarity is empty)
         let pool = availableCamos.filter(c => c.rarity === selectedRarity);
         if (pool.length === 0) {
-            // Fallback order: rare -> common -> epic -> any
+            // Fallback order: epic -> rare -> common -> legendary -> any
+            pool = availableCamos.filter(c => c.rarity === 'epic');
+        }
+        if (pool.length === 0) {
             pool = availableCamos.filter(c => c.rarity === 'rare');
         }
         if (pool.length === 0) {
             pool = availableCamos.filter(c => c.rarity === 'common');
         }
         if (pool.length === 0) {
-            pool = availableCamos.filter(c => c.rarity === 'epic');
+            pool = availableCamos.filter(c => c.rarity === 'legendary');
         }
         if (pool.length === 0) {
             pool = availableCamos;
@@ -9479,7 +9492,13 @@ function openAlphaPack(packId = null) {
         }
         if (rarity) {
             if (isDuplicate) {
-                rarity.textContent = 'DUPLICATE - +50 BITS';
+                // Calculate bits based on rarity
+                let bitsReward = 50; // default for common
+                if (selectedCamo.rarity === 'rare') bitsReward = 60;
+                else if (selectedCamo.rarity === 'epic') bitsReward = 75;
+                else if (selectedCamo.rarity === 'legendary') bitsReward = 100;
+                
+                rarity.textContent = `DUPLICATE - +${bitsReward} BITS`;
                 rarity.className = 'alpha-pack-result-rarity rarity-duplicate';
             } else {
                 rarity.textContent = selectedCamo.rarity ? selectedCamo.rarity.toUpperCase() : 'COMMON';
@@ -9489,9 +9508,14 @@ function openAlphaPack(packId = null) {
         
         // Handle duplicate or new camo
         if (isDuplicate) {
-            // Give 50 bits back for duplicate
+            // Calculate bits reward based on rarity
+            let bitsReward = 50; // default for common
+            if (selectedCamo.rarity === 'rare') bitsReward = 60;
+            else if (selectedCamo.rarity === 'epic') bitsReward = 75;
+            else if (selectedCamo.rarity === 'legendary') bitsReward = 100;
+            
             const stats = await getPlayerStats();
-            stats.bits = (stats.bits || 0) + 50;
+            stats.bits = (stats.bits || 0) + bitsReward;
             await savePlayerStats(stats);
             await updateShopChipsDisplay();
             await updateStatsDisplay();
@@ -9504,8 +9528,8 @@ function openAlphaPack(packId = null) {
         
         // Play sound if available
         if (typeof soundManager !== 'undefined') {
-            if (selectedCamo.rarity === 'epic') {
-                soundManager.playCardSelect(); // Use special sound for epic
+            if (selectedCamo.rarity === 'legendary' || selectedCamo.rarity === 'epic') {
+                soundManager.playCardSelect(); // Use special sound for legendary and epic
             } else {
                 soundManager.playCardSelect();
             }
@@ -14081,11 +14105,27 @@ async function logAdminActivity(action, targetUid, targetName, changes) {
         const adminName = currentUser.displayName || currentUser.email?.split('@')[0] || 'Unknown';
         const adminEmail = currentUser.email || '';
         
+        // Fetch the IP address from the server
+        let ipAddress = 'Unknown';
+        try {
+            const ipResponse = await fetch('/api/get-ip');
+            if (ipResponse.ok) {
+                const ipData = await ipResponse.json();
+                ipAddress = ipData.ip || 'Unknown';
+                console.log('Fetched IP address:', ipAddress);
+            } else {
+                console.warn('IP fetch failed with status:', ipResponse.status);
+            }
+        } catch (ipError) {
+            console.error('Could not fetch IP address:', ipError);
+        }
+        
         await window.firebaseDb.collection('adminActivityLogs').add({
             action: action, // 'chips_changed', 'bits_changed', 'admin_granted', 'admin_revoked'
             adminUid: currentUser.uid,
             adminName: adminName,
             adminEmail: adminEmail,
+            ipAddress: ipAddress,
             targetUid: targetUid,
             targetName: targetName || 'Unknown',
             changes: changes, // Object with old/new values
@@ -14301,6 +14341,9 @@ async function loadAdminActivityLog() {
                         </div>
                         <div class="admin-activity-log-target">
                             <strong>Target:</strong> ${escapeHtml(log.targetName || 'Unknown')}
+                        </div>
+                        <div class="admin-activity-log-ip">
+                            <strong>IP Address:</strong> ${escapeHtml(log.ipAddress || 'N/A')}
                         </div>
                         ${changesText ? `<div class="admin-activity-log-changes">${changesText}</div>` : ''}
                     </div>

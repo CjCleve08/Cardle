@@ -3072,6 +3072,13 @@ header h1 {
     box-shadow: 0 2px 8px rgba(155, 89, 182, 0.4);
 }
 
+.camo-rarity-badge.rarity-legendary {
+    background: linear-gradient(135deg, #FFD700, #FFA500);
+    color: #000000;
+    box-shadow: 0 2px 8px rgba(255, 215, 0, 0.6);
+    font-weight: 700;
+}
+
 /* Shop Styles */
 .shop-content {
     padding: 20px;
@@ -3227,6 +3234,13 @@ header h1 {
     border: 1px solid #9b59b6;
 }
 
+.rarity-indicator.rarity-legendary {
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 165, 0, 0.2));
+    color: #FFD700;
+    border: 1px solid #FFD700;
+    font-weight: 700;
+}
+
 .alpha-pack-actions {
     display: flex;
     flex-direction: column;
@@ -3317,6 +3331,12 @@ header h1 {
     color: #9b59b6;
 }
 
+.collection-rarity.rarity-legendary {
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.3), rgba(255, 165, 0, 0.3));
+    color: #FFD700;
+    font-weight: 700;
+}
+
 .collection-lock {
     position: absolute;
     top: 50%;
@@ -3402,11 +3422,12 @@ header h1 {
     height: 300px;
     border-radius: 50%;
     position: relative;
-    /* True drop-rate slices (75% / 23% / 2%). Probabilities still handled in JS too. */
+    /* True drop-rate slices (73% / 23% / 3% / 1%). Probabilities still handled in JS too. */
     background: conic-gradient(
-        #818384 0deg 270deg,
-        #4a90e2 270deg 352.8deg,
-        #9b59b6 352.8deg 360deg
+        #818384 0deg 262.8deg,
+        #4a90e2 262.8deg 345.6deg,
+        #9b59b6 345.6deg 356.4deg,
+        #FFD700 356.4deg 360deg
     );
     border: 6px solid #3a3a3c;
     box-shadow: 0 14px 46px rgba(0, 0, 0, 0.78);
@@ -3472,6 +3493,7 @@ header h1 {
 .alpha-pack-wheel-legend .legend-common { color: #818384; }
 .alpha-pack-wheel-legend .legend-rare { color: #4a90e2; }
 .alpha-pack-wheel-legend .legend-epic { color: #9b59b6; }
+.alpha-pack-wheel-legend .legend-legendary { color: #FFD700; }
 .alpha-pack-wheel-legend .legend-sep { color: rgba(215, 218, 220, 0.35); }
 
 .alpha-pack-result {
@@ -3551,6 +3573,15 @@ header h1 {
     animation: epicGlow 2s ease-in-out infinite;
 }
 
+.alpha-pack-result-rarity.rarity-legendary {
+    background: linear-gradient(135deg, rgba(255, 215, 0, 0.5), rgba(255, 165, 0, 0.5));
+    color: #FFD700;
+    border: 2px solid #FFD700;
+    box-shadow: 0 0 40px rgba(255, 215, 0, 0.8);
+    animation: legendaryGlow 2s ease-in-out infinite;
+    font-weight: 800;
+}
+
 .alpha-pack-result-rarity.rarity-duplicate {
     background: linear-gradient(135deg, rgba(255, 193, 7, 0.4), rgba(255, 152, 0, 0.4));
     color: #ffc107;
@@ -3562,6 +3593,11 @@ header h1 {
 @keyframes epicGlow {
     0%, 100% { box-shadow: 0 0 30px rgba(155, 89, 182, 0.6); }
     50% { box-shadow: 0 0 50px rgba(155, 89, 182, 0.9); }
+}
+
+@keyframes legendaryGlow {
+    0%, 100% { box-shadow: 0 0 40px rgba(255, 215, 0, 0.8); }
+    50% { box-shadow: 0 0 60px rgba(255, 215, 0, 1); }
 }
 
 /* Your Packs Section */
@@ -4965,12 +5001,14 @@ header h1 {
 }
 
 .admin-activity-log-admin,
-.admin-activity-log-target {
+.admin-activity-log-target,
+.admin-activity-log-ip {
     color: #d1d5db;
 }
 
 .admin-activity-log-admin strong,
-.admin-activity-log-target strong {
+.admin-activity-log-target strong,
+.admin-activity-log-ip strong {
     color: #ffffff;
     font-weight: 600;
 }
