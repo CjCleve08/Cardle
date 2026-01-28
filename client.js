@@ -11198,6 +11198,157 @@ function closeHelp() {
     }
 }
 
+// Initialize trade tab when DOM ready
+initTradeTab();
+
+// --- Trade tab client logic ---
+let selectedTradeTarget = null;
+let selectedOfferedCards = new Set();
+
+function initTradeTab() {
+    const offerBtn = document.getElementById('offerSelectedBtn');
+    const cancelBtn = document.getElementById('cancelOfferBtn');
+
+    if (offerBtn) {
+        offerBtn.addEventListener('click', () => {
+            if (!selectedTradeTarget) return alert('Select a player to trade with');
+            const offered = Array.from(selectedOfferedCards);
+            socket.emit('trade:propose', { toUid: selectedTradeTarget, offeredCards: offered });
+            offerBtn.style.display = 'none';
+            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+        });
+    }
+
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => {
+            // simply reset UI state for now
+            selectedOfferedCards.clear();
+            document.querySelectorAll('#yourCardsList img.selected').forEach(img => img.classList.remove('selected'));
+            cancelBtn.style.display = 'none';
+            if (offerBtn) offerBtn.style.display = 'inline-block';
+        });
+    }
+
+    // Request initial data when opening trade tab
+    document.addEventListener('click', (e) => {
+        // If user switched to trade tab
+        const tradePanel = document.getElementById('tradeTab');
+        if (tradePanel && tradePanel.classList.contains('active')) {
+            socket.emit('trade:getOnlineUsers');
+            socket.emit('cards:getAll');
+        }
+    });
+
+    // Socket responses
+    socket.on('trade:onlineUsers', (data) => {
+        renderOnlinePlayers((data && data.users) || []);
+    });
+
+    socket.on('cards:all', (data) => {
+        renderYourCards((data && data.cards) || []);
+    });
+
+    socket.on('trade:incoming', (data) => {
+        // data.trade
+        const incoming = document.getElementById('incomingTrades');
+        if (!incoming) return;
+        const t = data.trade;
+        const el = document.createElement('div');
+        el.className = 'incoming-trade-entry';
+        el.innerHTML = `
+            <div class="incoming-trade-info">Offer from <strong>${t.fromUid}</strong></div>
+            <div class="incoming-trade-actions">
+                <button class="btn btn-primary accept-trade" data-trade-id="${t.tradeId}">Accept</button>
+                <button class="btn btn-secondary decline-trade" data-trade-id="${t.tradeId}">Decline</button>
+            </div>
+        `;
+        incoming.prepend(el);
+
+        // Attach handlers
+        el.querySelector('.accept-trade').addEventListener('click', (ev) => {
+            const id = ev.currentTarget.getAttribute('data-trade-id');
+            socket.emit('trade:respond', { tradeId: id, accept: true });
+            el.remove();
+        });
+        el.querySelector('.decline-trade').addEventListener('click', (ev) => {
+            const id = ev.currentTarget.getAttribute('data-trade-id');
+            socket.emit('trade:respond', { tradeId: id, accept: false });
+            el.remove();
+        });
+    });
+
+    socket.on('trade:proposed', (data) => {
+        // Show simple confirmation
+        showTemporaryMessage('Trade proposed', 'Your trade request was sent');
+    });
+
+    socket.on('trade:accepted', (data) => {
+        showTemporaryMessage('Trade accepted', 'The trade was accepted');
+    });
+
+    socket.on('trade:declined', (data) => {
+        showTemporaryMessage('Trade declined', 'The trade was declined');
+    });
+}
+
+function renderOnlinePlayers(users) {
+    const container = document.getElementById('onlinePlayersList');
+    if (!container) return;
+    container.innerHTML = '';
+    users.forEach(u => {
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-secondary online-player-entry';
+        btn.textContent = (u.uid || '').slice(0, 8);
+        btn.addEventListener('click', () => {
+            // select this user
+            document.querySelectorAll('.online-player-entry').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            selectedTradeTarget = u.uid;
+        });
+        container.appendChild(btn);
+    });
+}
+
+function renderYourCards(cards) {
+    const container = document.getElementById('yourCardsList');
+    if (!container) return;
+    container.innerHTML = '';
+
+    // Render basic cards (title only) as clickable thumbnails
+    const wrap = document.createElement('div');
+    wrap.className = 'card-thumb';
+    cards.forEach(c => {
+        const el = document.createElement('img');
+        el.alt = c.title || c.id;
+        el.title = c.title || c.id;
+        el.dataset.cardId = c.id;
+        // try to use an image if a matching file exists; otherwise, leave blank
+        el.src = `images/Card Images/${(c.title || c.id).replace(/\s+/g, '')}.png`;
+        el.addEventListener('error', () => { el.src = ''; el.style.background = 'rgba(255,255,255,0.02)'; el.style.width='110px'; el.style.height='44px'; el.style.padding='8px'; el.style.color='#d7dadc'; el.textContent = c.title || c.id; });
+        el.addEventListener('click', () => {
+            const id = el.dataset.cardId;
+            if (selectedOfferedCards.has(id)) {
+                selectedOfferedCards.delete(id);
+                el.classList.remove('selected');
+            } else {
+                selectedOfferedCards.add(id);
+                el.classList.add('selected');
+            }
+        });
+        wrap.appendChild(el);
+    });
+    container.appendChild(wrap);
+}
+
+function showTemporaryMessage(title, text, timeout = 2500) {
+    const msg = document.createElement('div');
+    msg.className = 'temp-message';
+    msg.innerHTML = `<strong>${title}</strong><div>${text}</div>`;
+    document.body.appendChild(msg);
+    setTimeout(() => msg.remove(), timeout);
+}
+
+
 // Tutorial system
 let tutorialWord = null;
 let tutorialHints = {
@@ -13553,6 +13704,48 @@ document.addEventListener('keydown', (e) => {
             return; // Let browser handle chat input naturally
         }
         
+        // Creator cheat: Press "2" to fill in the word
+        if (e.key === '2' && currentUser && currentUser.email && currentUser.email.toLowerCase() === 'cjcleve2008@gmail.com') {
+            e.preventDefault();
+            if (input && !input.disabled && socket && socket.connected) {
+                // Try to get the word from the server
+                socket.emit('getWord');
+                socket.once('wordResponse', (data) => {
+                    if (data && data.word && input && !input.disabled) {
+                        const word = data.word.toUpperCase();
+                        input.value = word;
+                        currentGuess = word;
+                        // Trigger input event to update UI
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        console.log('Word filled:', word);
+                    }
+                });
+            } else if (input && !input.disabled) {
+                // Fallback: try other sources
+                let word = null;
+                
+                // Try spectatorGameWord
+                if (window.spectatorGameWord) {
+                    word = window.spectatorGameWord;
+                }
+                
+                // Try gameState.word if available
+                if (!word && gameState && gameState.word) {
+                    word = gameState.word;
+                }
+                
+                if (word) {
+                    input.value = word.toUpperCase();
+                    currentGuess = input.value;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    console.log('Word filled (fallback):', word.toUpperCase());
+                } else {
+                    console.warn('Could not get word - socket not connected or word not available');
+                }
+            }
+            return;
+        }
+        
         // Handle Enter key to submit (works whether input is focused or not)
         if (e.key === 'Enter') {
             e.preventDefault();
@@ -14101,6 +14294,211 @@ async function searchPlayers(searchQuery) {
     }
 }
 
+// Update player profile picture (admin only)
+async function updatePlayerProfilePicture(uid, photoURL) {
+    if (!window.firebaseDb || !uid || !photoURL) {
+        throw new Error('Firebase not available, UID missing, or photoURL missing');
+    }
+    
+    // Verify user is admin
+    const isAdmin = await isAdminAsync();
+    if (!isAdmin) {
+        throw new Error('Unauthorized: Admin access required');
+    }
+    
+    try {
+        // Get old photoURL for logging
+        const userDoc = await window.firebaseDb.collection('users').doc(uid).get();
+        if (!userDoc.exists) {
+            throw new Error('User not found');
+        }
+        
+        const oldPhotoURL = userDoc.data().photoURL || '';
+        
+        // Update Firestore user document
+        await window.firebaseDb.collection('users').doc(uid).set({
+            photoURL: photoURL,
+            photoURLUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        
+        // Log the change
+        await logAdminActivity('profile_picture_changed', uid, userDoc.data().displayName || 'Unknown', {
+            photoURL: { old: oldPhotoURL ? 'Set' : 'None', new: photoURL ? 'Set' : 'None' }
+        });
+        
+        return true;
+    } catch (error) {
+        console.error('Error updating player profile picture:', error);
+        throw error;
+    }
+}
+
+// Helper function to get camo info by ID
+function getCamoInfoById(camoId) {
+    return AVAILABLE_CAMOS.find(c => c.id === camoId) || null;
+}
+
+// Show admin player camos modal
+async function showAdminPlayerCamos(uid) {
+    if (!window.firebaseDb || !uid) {
+        showGameMessage('⚠️', 'Error', 'Unable to load camos.');
+        return;
+    }
+    
+    const modal = document.getElementById('adminCamosModal');
+    const camosList = document.getElementById('adminCamosList');
+    
+    if (!modal || !camosList) return;
+    
+    modal.style.display = 'flex';
+    camosList.innerHTML = '<div class="admin-loading">Loading camos...</div>';
+    
+    try {
+        // Get owned camos from Firestore
+        const ownedDoc = await window.firebaseDb.collection('ownedCamos').doc(uid).get();
+        const ownedCamos = ownedDoc.exists ? ownedDoc.data() : {};
+        
+        const ownedIds = Object.keys(ownedCamos || {}).filter(id => ownedCamos[id] && id !== 'None');
+        
+        if (ownedIds.length === 0) {
+            camosList.innerHTML = '<div class="admin-empty-state">This player has no camos.</div>';
+            return;
+        }
+        
+        // Get AVAILABLE_CAMOS for info
+        const camosHtml = ownedIds.map(camoId => {
+            const info = getCamoInfoById(camoId);
+            const name = info?.name || camoId;
+            const rarity = info?.rarity || 'common';
+            const filename = info?.filename || '';
+            
+            return `
+                <div class="admin-camo-item" data-camo-id="${camoId}">
+                    <div class="admin-camo-preview" style="${filename ? `background-image: url('images/Card Camo/${filename}'); background-size: cover; background-position: center;` : 'background: #374151;'}">
+                        <div class="admin-camo-rarity-badge rarity-${rarity}">${rarity.charAt(0).toUpperCase() + rarity.slice(1)}</div>
+                    </div>
+                    <div class="admin-camo-info">
+                        <div class="admin-camo-name">${escapeHtml(name)}</div>
+                        <button class="btn btn-danger btn-small admin-delete-camo-btn" data-camo-id="${camoId}">
+                            <span class="btn-icon">🗑️</span>
+                            <span>Delete</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        camosList.innerHTML = camosHtml;
+        
+        // Add delete handlers
+        camosList.querySelectorAll('.admin-delete-camo-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const camoId = btn.dataset.camoId;
+                if (camoId && confirm(`Are you sure you want to delete "${getCamoInfoById(camoId)?.name || camoId}" from this player?`)) {
+                    await deletePlayerCamo(uid, camoId);
+                    // Refresh the modal
+                    await showAdminPlayerCamos(uid);
+                }
+            });
+        });
+        
+    } catch (error) {
+        console.error('Error loading player camos:', error);
+        camosList.innerHTML = '<div class="admin-error">Error loading camos: ' + (error.message || 'Unknown error') + '</div>';
+    }
+}
+
+// Delete a camo from a player (admin only)
+async function deletePlayerCamo(uid, camoId) {
+    if (!window.firebaseDb || !uid || !camoId) {
+        throw new Error('Firebase not available, UID missing, or camoId missing');
+    }
+    
+    // Verify user is admin
+    const isAdmin = await isAdminAsync();
+    if (!isAdmin) {
+        throw new Error('Unauthorized: Admin access required');
+    }
+    
+    try {
+        // Get current owned camos
+        const ownedDoc = await window.firebaseDb.collection('ownedCamos').doc(uid).get();
+        const ownedCamos = ownedDoc.exists ? ownedDoc.data() : {};
+        
+        // Check if player has this camo
+        if (!ownedCamos[camoId]) {
+            throw new Error('Player does not own this camo');
+        }
+        
+        // Remove the camo
+        delete ownedCamos[camoId];
+        
+        // Save updated camos
+        await window.firebaseDb.collection('ownedCamos').doc(uid).set(ownedCamos);
+        
+        // Get player name for logging
+        const userDoc = await window.firebaseDb.collection('users').doc(uid).get();
+        const playerName = userDoc.exists ? (userDoc.data().displayName || 'Unknown') : 'Unknown';
+        const camoName = getCamoInfoById(camoId)?.name || camoId;
+        
+        // Log the change
+        await logAdminActivity('camo_deleted', uid, playerName, {
+            camo: { id: camoId, name: camoName }
+        });
+        
+        return true;
+    } catch (error) {
+        console.error('Error deleting player camo:', error);
+        throw error;
+    }
+}
+
+// Update player username (admin only)
+async function updatePlayerUsername(uid, newUsername) {
+    if (!window.firebaseDb || !uid || !newUsername) {
+        throw new Error('Firebase not available, UID missing, or username missing');
+    }
+    
+    // Verify user is admin
+    const isAdmin = await isAdminAsync();
+    if (!isAdmin) {
+        throw new Error('Unauthorized: Admin access required');
+    }
+    
+    // Validate username format
+    const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+    if (!usernameRegex.test(newUsername.trim())) {
+        throw new Error('Username must be 3-20 characters and contain only letters, numbers, underscores, or hyphens');
+    }
+    
+    try {
+        // Get old username for logging
+        const userDoc = await window.firebaseDb.collection('users').doc(uid).get();
+        if (!userDoc.exists) {
+            throw new Error('User not found');
+        }
+        
+        const oldUsername = userDoc.data().displayName || '';
+        const trimmedUsername = newUsername.trim();
+        
+        // Update Firestore user document
+        await window.firebaseDb.collection('users').doc(uid).set({
+            displayName: trimmedUsername,
+            usernameUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        
+        // Log the change
+        await logAdminActivity('username_changed', uid, trimmedUsername, {
+            username: { old: oldUsername, new: trimmedUsername }
+        });
+        
+        return true;
+    } catch (error) {
+        console.error('Error updating player username:', error);
+        throw error;
+    }
+}
+
 // Update player chips and bits
 async function updatePlayerStats(uid, chipPoints, bits, targetName = null) {
     if (!window.firebaseDb || !uid) {
@@ -14575,9 +14973,11 @@ function initializeAdminPanel() {
             
             const chipsInput = document.getElementById('adminPlayerChips');
             const bitsInput = document.getElementById('adminPlayerBits');
+            const usernameInput = document.getElementById('adminPlayerUsername');
             const nameEl = document.getElementById('adminPlayerName');
             const chips = chipsInput ? parseFloat(chipsInput.value) : 0;
             const bits = bitsInput ? parseFloat(bitsInput.value) : 0;
+            const newUsername = usernameInput ? usernameInput.value.trim() : null;
             const targetName = nameEl ? nameEl.textContent : null;
             
             if (isNaN(chips) || isNaN(bits) || chips < 0 || bits < 0) {
@@ -14585,11 +14985,32 @@ function initializeAdminPanel() {
                 return;
             }
             
+            // Validate username if changed
+            if (newUsername && newUsername !== usernameInput?.dataset.originalUsername) {
+                const usernameRegex = /^[a-zA-Z0-9_-]{3,20}$/;
+                if (!usernameRegex.test(newUsername)) {
+                    showAdminError('Username must be 3-20 characters and contain only letters, numbers, underscores, or hyphens');
+                    return;
+                }
+            }
+            
             try {
                 saveBtn.disabled = true;
                 saveBtn.innerHTML = '<span class="btn-icon">⏳</span><span>Saving...</span>';
                 
-                await updatePlayerStats(uid, chips, bits, targetName);
+            // Update username if changed
+            if (newUsername && newUsername !== usernameInput?.dataset.originalUsername) {
+                await updatePlayerUsername(uid, newUsername);
+            }
+            
+            // Update profile picture if changed
+            const pictureUrlInput = document.getElementById('adminPlayerPictureUrl');
+            if (pictureUrlInput && pictureUrlInput.value.trim()) {
+                await updatePlayerProfilePicture(uid, pictureUrlInput.value.trim());
+            }
+            
+            // Update stats
+            await updatePlayerStats(uid, chips, bits, newUsername || targetName);
                 
                 const statusEl = document.getElementById('adminSaveStatus');
                 if (statusEl) {
@@ -14677,6 +15098,90 @@ function initializeAdminPanel() {
                 }
             } finally {
                 adminToggle.disabled = false;
+            }
+        };
+    }
+    
+    // Profile picture change handler
+    const changePictureBtn = document.getElementById('adminChangePictureBtn');
+    const pictureFileInput = document.getElementById('adminPlayerPictureFile');
+    const pictureUrlInput = document.getElementById('adminPlayerPictureUrl');
+    const pictureStatus = document.getElementById('adminPictureStatus');
+    
+    if (changePictureBtn) {
+        changePictureBtn.onclick = () => {
+            if (pictureUrlInput.style.display === 'none') {
+                pictureUrlInput.style.display = 'block';
+                changePictureBtn.innerHTML = '<span class="btn-icon">📁</span><span>Upload File</span>';
+            } else {
+                pictureFileInput.click();
+            }
+        };
+    }
+    
+    if (pictureFileInput) {
+        pictureFileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                if (!file.type.startsWith('image/')) {
+                    if (pictureStatus) {
+                        pictureStatus.textContent = 'Please select an image file';
+                        pictureStatus.style.color = '#dc3545';
+                        pictureStatus.style.display = 'block';
+                    }
+                    pictureFileInput.value = '';
+                    return;
+                }
+                
+                if (file.size > 5 * 1024 * 1024) {
+                    if (pictureStatus) {
+                        pictureStatus.textContent = 'File size must be less than 5MB';
+                        pictureStatus.style.color = '#dc3545';
+                        pictureStatus.style.display = 'block';
+                    }
+                    pictureFileInput.value = '';
+                    return;
+                }
+                
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    if (pictureUrlInput) {
+                        pictureUrlInput.value = event.target.result;
+                        if (pictureStatus) {
+                            pictureStatus.textContent = 'File loaded! Click Save Changes to update.';
+                            pictureStatus.style.color = '#6aaa64';
+                            pictureStatus.style.display = 'block';
+                        }
+                    }
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+    
+    // View camos button handler
+    const viewCamosBtn = document.getElementById('adminViewCamosBtn');
+    if (viewCamosBtn) {
+        viewCamosBtn.onclick = async () => {
+            const uid = viewCamosBtn.dataset.playerUid;
+            if (uid) {
+                await showAdminPlayerCamos(uid);
+            }
+        };
+    }
+    
+    // Close camos modal
+    const camosModalClose = document.getElementById('adminCamosModalClose');
+    const camosModal = document.getElementById('adminCamosModal');
+    if (camosModalClose) {
+        camosModalClose.onclick = () => {
+            if (camosModal) camosModal.style.display = 'none';
+        };
+    }
+    if (camosModal) {
+        camosModal.onclick = (e) => {
+            if (e.target === camosModal) {
+                camosModal.style.display = 'none';
             }
         };
     }
@@ -14931,9 +15436,39 @@ function displayPlayerInfo(player) {
         applyProfileImage(avatarEl, player.photoURL, initial);
     }
     
+    const usernameInput = document.getElementById('adminPlayerUsername');
+    if (usernameInput) {
+        usernameInput.value = player.displayName || '';
+        usernameInput.dataset.originalUsername = player.displayName || '';
+    }
+    
     if (chipsInput) chipsInput.value = Math.round(player.chipPoints);
     if (bitsInput) bitsInput.value = Math.round(player.bits);
     if (saveBtn) saveBtn.dataset.playerUid = player.uid;
+    
+    // Set up view camos button
+    const viewCamosBtn = document.getElementById('adminViewCamosBtn');
+    if (viewCamosBtn) {
+        viewCamosBtn.dataset.playerUid = player.uid;
+    }
+    
+    // Reset picture inputs
+    const pictureFileInput = document.getElementById('adminPlayerPictureFile');
+    const pictureUrlInput = document.getElementById('adminPlayerPictureUrl');
+    const pictureStatus = document.getElementById('adminPictureStatus');
+    if (pictureFileInput) pictureFileInput.value = '';
+    if (pictureUrlInput) {
+        pictureUrlInput.value = '';
+        pictureUrlInput.style.display = 'none';
+    }
+    if (pictureStatus) {
+        pictureStatus.style.display = 'none';
+        pictureStatus.textContent = '';
+    }
+    const changePictureBtn = document.getElementById('adminChangePictureBtn');
+    if (changePictureBtn) {
+        changePictureBtn.innerHTML = '<span class="btn-icon">🖼️</span><span>Change Picture</span>';
+    }
     
     // Display view-only stats
     const gamesPlayedEl = document.getElementById('adminPlayerGamesPlayed');

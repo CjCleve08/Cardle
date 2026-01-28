@@ -262,9 +262,14 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
     
-    // Owned Camos collection - users can only read/write their own owned camos
+    // Owned Camos collection - users can read/write their own owned camos, admins can read any user's camos
     match /ownedCamos/{userId} {
+      // Users can read/write their own camos
       allow read, write: if request.auth != null && request.auth.uid == userId;
+      // Admins can read any user's camos (for admin panel)
+      allow read: if isAdmin();
+      // Admins can write to any user's camos (for admin panel - deleting camos)
+      allow write: if isAdmin();
     }
     
     // Email Verification Codes collection - users can only read/write their own verification codes

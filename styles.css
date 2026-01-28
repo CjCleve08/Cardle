@@ -4727,25 +4727,35 @@ header h1 {
 
 .admin-player-header {
     display: flex;
-    align-items: center;
-    gap: 16px;
+    align-items: flex-start;
+    gap: 20px;
     margin-bottom: 20px;
-    padding-bottom: 16px;
+    padding-bottom: 20px;
     border-bottom: 1px solid rgba(58, 58, 60, 0.3);
 }
 
+.admin-player-avatar-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
 .admin-player-avatar {
-    width: 60px;
-    height: 60px;
+    width: 80px;
+    height: 80px;
     border-radius: 50%;
     background: linear-gradient(135deg, rgba(106, 170, 100, 0.3), rgba(106, 170, 100, 0.1));
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1.5rem;
+    font-size: 2rem;
     color: #ffffff;
     flex-shrink: 0;
     border: 2px solid rgba(106, 170, 100, 0.3);
+    background-size: cover;
+    background-position: center;
 }
 
 .admin-player-details {
@@ -4771,11 +4781,36 @@ header h1 {
     font-family: monospace;
 }
 
-.admin-player-stats {
+.admin-quick-actions {
     display: flex;
-    gap: 20px;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid rgba(58, 58, 60, 0.3);
+}
+
+.admin-player-stats {
+    margin-bottom: 24px;
+}
+
+.admin-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
     margin-bottom: 20px;
-    flex-wrap: wrap;
+}
+
+.admin-permissions-section {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(58, 58, 60, 0.3);
+}
+
+.admin-permissions-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #d7dadc;
+    margin-bottom: 16px;
 }
 
 .admin-stat-item {
@@ -5098,6 +5133,159 @@ header h1 {
     color: #dc3545;
     font-size: 0.875rem;
     margin-top: 12px;
+}
+
+/* Admin Modal Styles */
+.admin-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    padding: 20px;
+}
+
+.admin-modal {
+    background: rgba(18, 18, 19, 0.95);
+    border-radius: 12px;
+    border: 1px solid rgba(58, 58, 60, 0.5);
+    max-width: 800px;
+    width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.admin-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid rgba(58, 58, 60, 0.3);
+}
+
+.admin-modal-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0;
+}
+
+.admin-modal-close {
+    background: none;
+    border: none;
+    color: #818384;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.admin-modal-close:hover {
+    background: rgba(58, 58, 60, 0.5);
+    color: #ffffff;
+}
+
+.admin-modal-body {
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.admin-camos-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 16px;
+}
+
+.admin-camo-item {
+    display: flex;
+    flex-direction: column;
+    background: rgba(18, 18, 19, 0.6);
+    border: 1px solid rgba(58, 58, 60, 0.3);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: all 0.2s ease;
+}
+
+.admin-camo-item:hover {
+    border-color: rgba(106, 170, 100, 0.5);
+    transform: translateY(-2px);
+}
+
+.admin-camo-preview {
+    width: 100%;
+    height: 120px;
+    position: relative;
+    background: #374151;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.admin-camo-rarity-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.admin-camo-rarity-badge.rarity-common {
+    background: rgba(129, 131, 132, 0.3);
+    color: #d1d5db;
+}
+
+.admin-camo-rarity-badge.rarity-rare {
+    background: rgba(59, 130, 246, 0.3);
+    color: #93c5fd;
+}
+
+.admin-camo-rarity-badge.rarity-epic {
+    background: rgba(168, 85, 247, 0.3);
+    color: #c4b5fd;
+}
+
+.admin-camo-rarity-badge.rarity-legendary {
+    background: rgba(251, 191, 36, 0.3);
+    color: #fde047;
+}
+
+.admin-camo-info {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.admin-camo-name {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #d7dadc;
+    text-align: center;
+}
+
+.admin-empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #818384;
+    font-size: 0.9rem;
 }
 
 .settings-content {
